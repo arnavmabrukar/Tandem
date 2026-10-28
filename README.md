@@ -2,6 +2,20 @@
 
 A hosted mediator that helps their independent coding agents coordinate work. Person 1 prompts Codex on his machine; Person 2 prompts Claude Code on his. The mediator records assignments, messages, file claims, and human approvals. It never launches or controls either agent. Git is the ground truth for code; PostgreSQL is the ground truth for coordination.
 
+## Frontend demo
+
+The functional human dashboard is available in [`apps/web`](apps/web). It runs independently with browser-local sample data, so the team can test project setup, agents, activity, tasks, threads, claims and approvals while building the backend.
+
+```sh
+cd apps/web
+npm ci
+npm run dev
+```
+
+Use Node.js 22.12+ (Node 24 LTS recommended). See the [frontend README](apps/web/README.md) for tests, demo controls, and detailed instructions for connecting the future API, Auth0 and coordination services. All other implementation areas remain empty placeholders. The demo does not connect to or modify real agents, services or GitHub.
+
+## Planned architecture
+
 ```mermaid
 flowchart LR
   A[Arnav] --> C[Independent Codex session]
@@ -18,11 +32,11 @@ flowchart LR
   E -->|Review and merge| G
 ```
 
-The planned full architecture will include Auth0, trust boundaries, worker policies, and the optional GitHub enforcement extension. The arrows above describe future interactions, not existing connections.
+The planned full architecture will include Auth0, trust boundaries, worker policies, and the optional GitHub enforcement extension. The arrows above describe future service interactions, not existing connections.
 
 ## Planned documentation
 
-The paths below identify documents to be written; these files are not included in this initial skeleton.
+The paths below identify documents still to be written. Frontend setup and integration guidance is already included in `apps/web/README.md`.
 
 1. Both developers: project overview (`docs/project-overview.md`), architecture (`docs/architecture.md`), and open decisions (`docs/open-decisions.md`).
 2. Agree on the protocol (`docs/protocol.md`), state machine (`docs/state-machine.md`), and data model (`docs/data-model.md`) before implementing independently.
@@ -33,7 +47,7 @@ The paths below identify documents to be written; these files are not included i
 
 | Area | Intended responsibility |
 | --- | --- |
-| `apps/web/` | React, TypeScript, Vite, Tailwind, shadcn/ui, TanStack Query human dashboard |
+| `apps/web/` | Runnable React/TypeScript/Vite dashboard with Tailwind, shadcn-style primitives, TanStack Query and local demo data |
 | `services/mediator/` | One FastAPI/Python MCP backend and a normal Python worker sharing domain policies |
 | `agent-integrations/` | Future connection plans, instruction templates, optional durable local receipt helper |
 | `infrastructure/` | Future Render, Docker, and local PostgreSQL configuration |
