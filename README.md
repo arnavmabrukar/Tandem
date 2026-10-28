@@ -1,10 +1,6 @@
 # Tandem
 
-**Project skeleton only.** This repository starts with the folder structure from Draft and this README. Empty `.gitkeep` placeholders preserve the folders in Git. Application code, configuration, detailed documentation, and tests will be added by the team. There are no working setup or run commands, active workflows, or deployed services.
-
-Arnav and Eashan Patel are designing a hosted mediator that helps their independent coding agents coordinate work. Arnav prompts Codex on his machine; Eashan prompts Claude Code on his. The mediator records assignments, messages, file claims, and human approvals. It never launches or controls either agent. Git is the ground truth for code; PostgreSQL is the ground truth for coordination.
-
-The project is planned for the Meta Global AI Developer Hackathon, Indie track. The team-provided deadline is **4 November 2026 at 9:00 PM America/New_York (Eastern Time)**. Tandem is the product and repository name; the team name remains undecided.
+A hosted mediator that helps their independent coding agents coordinate work. Person 1 prompts Codex on his machine; Person 2 prompts Claude Code on his. The mediator records assignments, messages, file claims, and human approvals. It never launches or controls either agent. Git is the ground truth for code; PostgreSQL is the ground truth for coordination.
 
 ```mermaid
 flowchart LR
