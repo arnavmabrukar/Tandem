@@ -13,7 +13,11 @@ dependencies = [
     "fastapi", # defines the api routes and http reqs
     "uvicorn", # run the server that serves fastapi app
     "pydantic-settings", # reads and validates the application
+    "psycopg[binary]>=3.3,<4", # PostgreSQL driver with bundled client libraries
 ]
+
+[project.optional-dependencies]
+test = ["httpx>=0.28,<1"] # HTTP client used by FastAPI's test client
 
 # tells setup tools where to look for our python packages
 [tool.setuptools.packages.find]
