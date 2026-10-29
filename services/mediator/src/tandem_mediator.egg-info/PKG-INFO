@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: tandem-mediator
+Version: 0.1.10
+Summary: Tandem coordination backend
+Requires-Python: >=3.11
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: pydantic-settings

@@ -1,0 +1,22 @@
+# Choose the tool that builds and installs our python package
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+# Basic project info
+[project]
+name = "tandem-mediator"
+version = "0.1.10"
+description = "Tandem coordination backend"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi", # defines the api routes and http reqs
+    "uvicorn", # run the server that serves fastapi app
+    "pydantic-settings", # reads and validates the application
+]
+
+# tells setup tools where to look for our python packages
+[tool.setuptools.packages.find]
+
+# our code lives in src/mediator, rather than the project root
+where = ["src"]
