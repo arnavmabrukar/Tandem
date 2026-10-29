@@ -4,7 +4,7 @@ A hosted mediator that helps their independent coding agents coordinate work. Pe
 
 ## Frontend
 
-Hosted frontend: **[tandem-red-two.vercel.app](https://tandem-red-two.vercel.app)**. It currently shows connection setup until Auth0 and the backend are configured. See the [deployment instructions](apps/web/README.md#vercel-deployment).
+Hosted frontend: **[agentictandem.vercel.app](https://agentictandem.vercel.app)**. It currently shows connection setup until Auth0 and the backend are configured. See the [deployment instructions](apps/web/README.md#vercel-deployment).
 
 The human dashboard is implemented in [`apps/web`](apps/web). It connects only to Auth0 and the real mediator HTTP API. There is no demo mode, sample workspace, browser-local database, or simulated agent activity. Until you configure authentication and implement the backend endpoints, it shows setup or connection errors.
 
