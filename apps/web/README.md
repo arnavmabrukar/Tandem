@@ -66,4 +66,19 @@ These checks do not prove a live Auth0 tenant, server permissions, database tran
 
 ## Build
 
-`npm run build` creates static files in `dist/`. Supply the four settings at build time, then host those files using your chosen static host. Hash routes and Vite's relative base support subdirectories. Configure Auth0 URLs and API CORS for the deployed origin. No hosting service or deployment workflow is created here.
+`npm run build` creates static files in `dist/`. Supply the four settings at build time. Hash routes and Vite's relative base support subdirectories. Configure Auth0 URLs and API CORS for the deployed origin.
+
+## Vercel deployment
+
+The frontend is deployed at **[tandem-red-two.vercel.app](https://tandem-red-two.vercel.app)**, in the Vercel project `tandem` under `arnavs-projects-00142f0c`. The initial deployment shows the setup screen until the four connection settings are supplied. No backend was deployed.
+
+`vercel.json` specifies Vite, `npm ci`, `npm run build`, and the `dist` output. To redeploy from this application directory:
+
+```sh
+npx vercel link --yes --project tandem --scope arnavs-projects-00142f0c
+npx vercel deploy --prod --scope arnavs-projects-00142f0c
+```
+
+The first command requires access to the Vercel account. Local `.vercel/` metadata and `.env.local` files are ignored by Git. This deployment was created through the CLI; automatic deployments on GitHub pushes have not been configured. If connecting the GitHub repository later, set the project's Root Directory to `apps/web`.
+
+Add the four `VITE_*` settings in the Vercel project's Production environment, using your shared HTTPS backend origin, then redeploy. For Auth0, register `https://tandem-red-two.vercel.app/` as the allowed callback and logout URL, and `https://tandem-red-two.vercel.app` as an allowed web origin. Allow that same origin in the backend's CORS configuration. Keep the local development URLs registered as well if you still use them.
