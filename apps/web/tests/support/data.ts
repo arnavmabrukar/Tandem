@@ -1,0 +1,60 @@
+import type { Project, Task } from '../../src/types/domain';
+
+// Deliberately isolated test responses. No application source imports these.
+export const testTask = (): Task => ({
+  id: 'task-1',
+  title: 'Task returned by test API',
+  description: 'A persisted task response',
+  status: 'in_review',
+  agentId: null,
+  version: 2,
+  threadId: 'thread-1',
+  receipt: 'received',
+  acceptance: 'accepted',
+  progress: 'Awaiting review',
+  dependencies: [],
+  contract: {
+    version: 1,
+    summary: 'Review this change',
+    paths: ['src/index.ts'],
+    criteria: ['Check behavior'],
+    history: [],
+  },
+  result: {
+    head: 'a'.repeat(40),
+    branch: 'feature/test',
+    prNumber: 7,
+    evidence: ['Checks passed'],
+    mergeCommit: null,
+  },
+});
+export const testProject = (): Project => ({
+  id: 'project-1',
+  name: 'API project',
+  repository: 'team/tandem',
+  description: 'Server description',
+  version: 4,
+  members: [{ id: 'user-1', name: 'Test owner', role: 'owner' }],
+  invitations: [],
+  agents: [],
+  tasks: [testTask()],
+  approvals: [
+    {
+      id: 'approval-1',
+      taskId: 'task-1',
+      action: 'Review result',
+      repository: 'team/tandem',
+      status: 'pending',
+      taskVersion: 2,
+      contractVersion: 1,
+      head: 'a'.repeat(40),
+      requestedAt: '2026-10-28T12:00:00Z',
+      decidedBy: null,
+      decidedAt: null,
+      note: '',
+    },
+  ],
+  messages: [],
+  claims: [],
+  activity: [],
+});

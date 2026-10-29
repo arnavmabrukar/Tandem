@@ -35,13 +35,13 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
     <>
       <PageHeader
         title={project ? 'Project setup' : 'Create a project'}
-        description="Project details, human membership and local invitation records."
+        description="Project details, human membership and invitations."
       />
       <section className="panel narrow-panel">
-        <h2>{project ? 'Project details' : 'Start a local test project'}</h2>
+        <h2>{project ? 'Project details' : 'Create a shared project'}</h2>
         <p className="muted">
-          Repository references are labels only. Tandem does not clone, inspect or change the
-          repository.
+          Link the project to its GitHub repository. The mediator manages access and coordination;
+          source changes stay in your own worktrees.
         </p>
         {changed && (
           <div className="notice">
@@ -69,7 +69,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
               });
               if (!project) navigate(`/projects/${result.projectId}/activity`);
               else {
-                setFormVersion((v) => (v ?? 0) + 1);
+                setFormVersion(result.projectVersion);
                 setSaved(true);
               }
             } catch {
@@ -122,7 +122,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
           <ErrorNotice error={save.error} />
           {saved && (
             <p role="status" className="success-text">
-              Project saved locally.
+              Project saved by the backend.
             </p>
           )}
         </form>
@@ -136,23 +136,21 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
                 <li key={member.id}>
                   <div>
                     <strong>{member.name}</strong>
-                    <small>
-                      {member.id === user!.id ? 'Current demo persona' : 'Demo persona'}
-                    </small>
+                    <small>{member.id === user!.id ? 'You' : 'Project member'}</small>
                   </div>
                   <Badge value={member.role} />
                 </li>
               ))}
             </ul>
             <p className="small muted">
-              Role changes and real invitations require the backend. Demo personas are fixed
-              fixtures.
+              Membership and permission checks are managed by the backend.
             </p>
           </section>
           <section className="panel">
             <h2>Invitation records</h2>
             <p className="muted">
-              Test the invitation UI. No email, invitation link or account is created.
+              The backend manages invitation delivery and acceptance. A pending record is not proof
+              of delivery.
             </p>
             {owner && (
               <form

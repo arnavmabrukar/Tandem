@@ -23,10 +23,10 @@ export function ApprovalsPage({ project }: { project: Project }) {
       />
       <div className="notice">
         <div>
-          <strong>Demo decisions stay in this browser.</strong>
+          <strong>Decisions apply to one exact target.</strong>
           <p>
-            There is no Auth0 verification, GitHub approval check or merge integration. Review
-            authority must ultimately be enforced by the mediator.
+            The mediator validates your authority and the current task, contract and PR head.
+            Recording an approval does not merge the pull request.
           </p>
         </div>
       </div>
@@ -73,7 +73,7 @@ export function ApprovalsPage({ project }: { project: Project }) {
                       Task v{approval.taskVersion} · contract v{approval.contractVersion}
                     </dd>
                     <dt>Repository</dt>
-                    <dd>{project.repository}</dd>
+                    <dd>{approval.repository}</dd>
                     <dt>PR head</dt>
                     <dd>
                       <code className="break-all">{approval.head ?? 'No code target'}</code>

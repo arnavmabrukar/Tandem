@@ -41,9 +41,9 @@ export function ConnectAgentPage({ project }: { project: Project }) {
       />
       <div className="notice">
         <div>
-          <strong>These are simulated connection records.</strong>
+          <strong>Agent connections are managed by the mediator.</strong>
           <p>
-            No client has authenticated or registered with Tandem. See the{' '}
+            Adding a record does not start an agent. See the{' '}
             <Link to={`/projects/${project.id}/connections`}>connection guide</Link> for the
             integration steps.
           </p>
@@ -52,7 +52,7 @@ export function ConnectAgentPage({ project }: { project: Project }) {
       {project.agents.length === 0 ? (
         <section className="panel">
           <Empty title="No agents registered">
-            Add a demo record to test setup, then connect real agents when the backend is ready.
+            Add an agent record, then authenticate the client through the mediator’s OAuth flow.
           </Empty>
         </section>
       ) : (
@@ -113,7 +113,7 @@ export function ConnectAgentPage({ project }: { project: Project }) {
                     setRevoking(agent);
                   }}
                 >
-                  Revoke demo grant
+                  Revoke grant
                 </Button>
               )}
             </article>
@@ -126,8 +126,8 @@ export function ConnectAgentPage({ project }: { project: Project }) {
         onOpenChange={(v) => {
           if (!add.isPending) setOpen(v);
         }}
-        title="Add a demo agent record"
-        description="A pending record is saved locally. This does not launch an agent or configure OAuth."
+        title="Add an agent record"
+        description="Submit the agent’s details to the mediator. The client must authenticate before it can work."
       >
         <form
           onSubmit={async (e) => {
@@ -210,8 +210,8 @@ export function ConnectAgentPage({ project }: { project: Project }) {
         onOpenChange={(v) => {
           if (!v && !revoke.isPending) setRevoking(null);
         }}
-        title="Revoke this demo grant?"
-        description="Existing assignments and file claims remain visible for reconciliation. No real credentials or sessions are changed."
+        title="Revoke this agent grant?"
+        description="Ask the mediator to revoke this agent’s project access. Existing tasks and file claims need reconciliation; the local process is not stopped."
       >
         <p>{revoking?.name}</p>
         <ErrorNotice error={revoke.error} />

@@ -44,7 +44,7 @@ export function ActivityPage({ project }: { project: Project }) {
       count: project.agents.length,
       icon: Bot,
       to: 'agents',
-      hint: 'Demo connection signals',
+      hint: 'Server-reported connections',
     },
   ];
   return (
@@ -97,9 +97,7 @@ export function ActivityPage({ project }: { project: Project }) {
         <div className="section-heading">
           <div>
             <h2>Project timeline</h2>
-            <p className="muted">
-              Recorded demo events, newest first. No background agent activity is running.
-            </p>
+            <p className="muted">Events recorded by the mediator, newest first.</p>
           </div>
           <span className="muted">{events.length} events</span>
         </div>

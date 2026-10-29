@@ -10,12 +10,10 @@ import {
   CircleHelp,
 } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { useSession } from '../auth/session';
-import { demoApi } from '../api/client';
+import { configuration } from '../config';
 import { roleFor, type Project } from '../types/domain';
-import { DemoControls } from './DemoControls';
 import { Button } from './ui/button';
 import { Badge, Timestamp } from './common';
 
@@ -26,6 +24,7 @@ export function AppLayout({
   refresh,
   refreshing,
   updatedAt,
+  connectionState,
 }: {
   projects: Project[];
   project: Project | null;
@@ -33,10 +32,10 @@ export function AppLayout({
   refresh: () => void;
   refreshing: boolean;
   updatedAt: number;
+  connectionState: 'loading' | 'connected' | 'unavailable';
 }) {
   const { user, signOut } = useSession();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const id = project?.id ?? projects[0]?.id;
   const pending = project?.approvals.filter((a) => a.status === 'pending').length ?? 0;
   const nav = [
@@ -112,19 +111,9 @@ export function AppLayout({
             <span className="avatar">{user!.name[0]}</span>
             <div>
               <strong>{user!.name}</strong>
-              <small>{project ? roleFor(project, user!.id) : 'Demo persona'}</small>
+              <small>{project ? roleFor(project, user!.id) : 'Signed in'}</small>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label="Sign out"
-              onClick={() => {
-                queryClient.clear();
-                demoApi.clearSimulation();
-                signOut();
-                navigate('/signin');
-              }}
-            >
+            <Button variant="ghost" size="sm" aria-label="Sign out" onClick={() => void signOut()}>
               <LogOut size={17} />
             </Button>
           </div>
@@ -133,8 +122,8 @@ export function AppLayout({
       <div className="workspace">
         <div className="topbar">
           <div className="row">
-            <Badge value="demo" />
-            <span>Browser-local data · no services connected</span>
+            <Badge value={connectionState} />
+            <span>{configuration.config?.apiBaseUrl}</span>
           </div>
           <Button variant="ghost" size="sm" onClick={refresh} disabled={refreshing}>
             <RefreshCw size={15} className={refreshing ? 'spin' : undefined} />
@@ -145,13 +134,12 @@ export function AppLayout({
           {children}
           <footer className="workspace-footer">
             <span>
-              Demo snapshot{' '}
+              Last successful API refresh{' '}
               {updatedAt ? <Timestamp value={new Date(updatedAt).toISOString()} /> : 'not loaded'}.
               Refreshes every 15 seconds.
             </span>
-            <span>Git holds code. The future mediator holds coordination.</span>
+            <span>Git holds code. The mediator holds coordination.</span>
           </footer>
-          <DemoControls projectId={project?.id} />
         </main>
       </div>
     </div>

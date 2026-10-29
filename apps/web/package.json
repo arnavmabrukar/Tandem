@@ -2,7 +2,7 @@
   "name": "@tandem/web",
   "version": "0.1.0",
   "private": true,
-  "description": "Browser-only demo of the Tandem human coordination dashboard",
+  "description": "Tandem human dashboard connected to the authenticated mediator API",
   "engines": {
     "node": ">=22.12.0"
   },
@@ -21,6 +21,7 @@
   "keywords": [],
   "type": "module",
   "dependencies": {
+    "@auth0/auth0-react": "^2.29.0",
     "@radix-ui/react-dialog": "^1.3.1",
     "@radix-ui/react-slot": "^1.5.0",
     "@tanstack/react-query": "^5.105.0",

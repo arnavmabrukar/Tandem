@@ -141,8 +141,8 @@ export function TasksPage({ project }: { project: Project }) {
         onOpenChange={(v) => {
           if (!action.isPending) setOpen(v);
         }}
-        title="Create a demo task"
-        description="This adds a local task and draft scope. It does not route work or send an agent a message."
+        title="Create a task"
+        description="Submit a task and proposed scope to the mediator. Assignment and file ownership are confirmed by the backend."
       >
         <form
           onSubmit={async (e) => {

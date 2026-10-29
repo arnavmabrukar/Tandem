@@ -12,11 +12,11 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <SessionProvider>
-        <HashRouter>
+      <HashRouter>
+        <SessionProvider>
           <App />
-        </HashRouter>
-      </SessionProvider>
+        </SessionProvider>
+      </HashRouter>
     </QueryClientProvider>
   </StrictMode>,
 );

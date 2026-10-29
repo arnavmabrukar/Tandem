@@ -19,7 +19,12 @@ export function ApprovalDialog({
   const action = useAction(project);
   const task = project.tasks.find((t) => t.id === approval.taskId);
   const live = project.approvals.find((a) => a.id === approval.id);
-  const stale = !task || !live || live.status !== 'pending' || !currentApproval(approval, task);
+  const stale =
+    !task ||
+    !live ||
+    live.status !== 'pending' ||
+    approval.repository !== project.repository ||
+    !currentApproval(approval, task);
   const [decision, setDecision] = useState<'approved' | 'rejected'>('approved');
   const [note, setNote] = useState('');
   const [reviewed, setReviewed] = useState(false);
@@ -30,7 +35,7 @@ export function ApprovalDialog({
         if (!open && !action.isPending) close();
       }}
       title="Review exact target"
-      description="This records a local demo decision. It does not merge code or publish a GitHub check."
+      description="Submit a decision for this exact target to the mediator. This action does not merge code."
     >
       <dl className="details-grid">
         <dt>Action</dt>
@@ -42,7 +47,7 @@ export function ApprovalDialog({
         <dt>Contract</dt>
         <dd>v{approval.contractVersion}</dd>
         <dt>Repository</dt>
-        <dd>{project.repository}</dd>
+        <dd>{approval.repository}</dd>
         <dt>PR head</dt>
         <dd>
           <code className="break-all">{approval.head ?? 'No code target'}</code>
@@ -67,6 +72,8 @@ export function ApprovalDialog({
                 taskVersion: approval.taskVersion,
                 contractVersion: approval.contractVersion,
                 head: approval.head,
+                action: approval.action,
+                repository: approval.repository,
               },
             });
             close();

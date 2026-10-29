@@ -6,6 +6,8 @@ import { AppLayout } from './components/AppLayout';
 import { Empty, ErrorNotice } from './components/common';
 import { Button } from './components/ui/button';
 import { SignInPage } from './pages/SignInPage';
+import { ApiError } from './api/client';
+import { safeReturnTo } from './config';
 const ActivityPage = lazy(() =>
   import('./pages/ActivityPage').then((m) => ({ default: m.ActivityPage })),
 );
@@ -38,7 +40,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean
     return this.state.failed ? (
       <main className="fatal-error">
         <h1>The dashboard couldn’t render.</h1>
-        <p>Reload to recover. Your saved demo data stays in this browser.</p>
+        <p>Reload to recover and fetch the latest data from the backend.</p>
         <Button onClick={() => window.location.reload()}>Reload dashboard</Button>
       </main>
     ) : (
@@ -51,10 +53,14 @@ function Dashboard() {
   const location = useLocation();
   const match = useMatch('/projects/:projectId/*');
   const query = useWorkspace();
-  const projects = query.data?.projects ?? [];
+  const accessDenied = query.error instanceof ApiError && [401, 403].includes(query.error.status);
+  const projects = accessDenied ? [] : (query.data?.projects ?? []);
   const project = projects.find((p) => p.id === match?.params.projectId) ?? null;
   useEffect(() => {
     document.title = project ? `${project.name} · Tandem` : 'Tandem — Coordination dashboard';
+    return () => {
+      document.title = 'Tandem — Coordination dashboard';
+    };
   }, [project?.name]);
   useEffect(() => {
     document.getElementById('main')?.focus();
@@ -76,9 +82,10 @@ function Dashboard() {
       refresh={() => void query.refetch()}
       refreshing={query.isFetching}
       updatedAt={query.dataUpdatedAt}
+      connectionState={query.isError ? 'unavailable' : query.data ? 'connected' : 'loading'}
     >
       <ErrorNotice error={query.error} retry={() => void query.refetch()} />
-      {query.isError && query.data && (
+      {query.isError && query.data && !accessDenied && (
         <p role="status" className="notice">
           Showing the last successful snapshot. It may be stale. Saves still need a confirmed
           response.
@@ -89,7 +96,7 @@ function Dashboard() {
           <span className="spinner" />
           Loading project snapshot…
         </div>
-      ) : query.data ? (
+      ) : query.data && !accessDenied ? (
         <Suspense
           fallback={
             <div role="status" className="loading">
@@ -157,12 +164,17 @@ function Dashboard() {
   );
 }
 export default function App() {
-  const { user } = useSession();
+  const { user, loading, authenticated, error } = useSession();
   const location = useLocation();
-  const returnTo =
-    typeof location.state?.returnTo === 'string' && location.state.returnTo.startsWith('/projects/')
-      ? location.state.returnTo
-      : '/';
+  const returnTo = safeReturnTo(location.state?.returnTo);
+  if (loading)
+    return (
+      <main className="loading" role="status">
+        <span className="spinner" />
+        Checking your session…
+      </main>
+    );
+  if (!user && (authenticated || error)) return <SignInPage />;
   return (
     <ErrorBoundary>
       <Routes>

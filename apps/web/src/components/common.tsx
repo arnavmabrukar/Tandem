@@ -2,6 +2,7 @@ import { AlertCircle, Inbox } from 'lucide-react';
 import { cloneElement, useId, type ReactElement, type ReactNode } from 'react';
 import { label } from '../types/domain';
 import { Button } from './ui/button';
+import { ApiError } from '../api/client';
 
 export function Badge({ value }: { value: string }) {
   return <span className={`badge badge-${value}`}>{label(value)}</span>;
@@ -25,6 +26,12 @@ export function ErrorNotice({ error, retry }: { error: unknown; retry?: () => vo
         <p>
           {error instanceof Error ? error.message : 'An unexpected error occurred. Please refresh.'}
         </p>
+        {error instanceof ApiError && error.outcomeUnknown && (
+          <p>
+            The save may have reached the server. Retry to confirm it with the same operation ID
+            before starting a different change.
+          </p>
+        )}
         {retry && (
           <Button variant="outline" size="sm" onClick={retry}>
             Try again

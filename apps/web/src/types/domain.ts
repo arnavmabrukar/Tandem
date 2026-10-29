@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-// Frontend demo projections, NOT an agreed mediator wire protocol.
+// Human HTTP API v1 projections. Backend implementation contract: apps/web/API.md.
+// These are dashboard projections, not agent MCP envelopes or database models.
 export const taskStatuses = [
   'open',
   'claimed',
@@ -58,6 +59,7 @@ export const approvalSchema = z.object({
   id: z.string(),
   taskId: z.string(),
   action: z.enum(['Review result', 'Approve contract']),
+  repository: z.string(),
   status: z.enum(['pending', 'approved', 'rejected', 'stale']),
   taskVersion: z.number().int(),
   contractVersion: z.number().int(),
@@ -131,11 +133,8 @@ export type Agent = z.infer<typeof agentSchema>;
 export type Approval = z.infer<typeof approvalSchema>;
 export type Message = z.infer<typeof messageSchema>;
 export type Role = (typeof roles)[number];
-export interface DemoUser {
-  id: string;
-  name: string;
-  description: string;
-}
+export const userSchema = z.object({ id: z.string().min(1), name: z.string().min(1) });
+export type User = z.infer<typeof userSchema>;
 
 export type Command =
   | { type: 'create-project'; name: string; repository: string; description: string }
@@ -166,11 +165,16 @@ export type Command =
       approvalId: string;
       decision: 'approved' | 'rejected';
       note: string;
-      target: { taskVersion: number; contractVersion: number; head: string | null };
+      target: {
+        taskVersion: number;
+        contractVersion: number;
+        head: string | null;
+        repository: string;
+        action: Approval['action'];
+      };
     };
 
 export interface MutationRequest {
-  actorId: string;
   projectId: string | null;
   expectedVersion: number | null;
   operationId: string;
@@ -178,10 +182,17 @@ export interface MutationRequest {
 }
 export interface MutationResult {
   projectId: string;
+  projectVersion: number;
   entityId?: string;
 }
+export const mutationResultSchema = z.object({
+  projectId: z.string().min(1),
+  projectVersion: z.number().int().positive(),
+  entityId: z.string().optional(),
+});
 export interface DashboardApi {
-  load(actorId: string): Promise<Workspace>;
+  getCurrentUser(signal?: AbortSignal): Promise<User>;
+  load(signal?: AbortSignal): Promise<Workspace>;
   execute(request: MutationRequest): Promise<MutationResult>;
 }
 export const label = (value: string) =>

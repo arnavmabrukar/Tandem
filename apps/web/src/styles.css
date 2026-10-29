@@ -385,7 +385,7 @@ main#main {
   font-weight: 600;
   line-height: 1.5;
 }
-.badge-demo,
+.badge-connected,
 .badge-active,
 .badge-online,
 .badge-received,
@@ -412,7 +412,8 @@ main#main {
 }
 .badge-conflict,
 .badge-rejected,
-.badge-revoked {
+.badge-revoked,
+.badge-unavailable {
   color: #a43a36;
   background: #fcebea;
 }
@@ -845,32 +846,6 @@ td:first-child {
   color: #64748b;
   flex-wrap: wrap;
 }
-.demo-controls {
-  border-top: 1px dashed #cbd5e1;
-  padding-top: 10px;
-}
-.demo-controls summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #64748b;
-  width: fit-content;
-}
-.demo-controls p {
-  margin: 10px 0;
-  font-size: 12px;
-}
-.demo-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 10px;
-  margin: 15px 0;
-}
-.demo-actions .field {
-  min-width: 170px;
-  margin: 0;
-}
 .code-block {
   background: #f1f5f9;
   padding: 18px;
@@ -940,6 +915,15 @@ td:first-child {
 }
 .sign-in-card .notice {
   margin: 0;
+}
+.sign-in-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 24px 0;
+}
+.sign-in-card > .notice {
+  margin-top: 20px;
 }
 .fatal-error {
   max-width: 600px;
@@ -1155,12 +1139,6 @@ td:first-child {
   .message-form > .row {
     align-items: flex-start;
     flex-direction: column;
-  }
-  .demo-actions {
-    align-items: stretch;
-  }
-  .demo-actions .field {
-    width: 100%;
   }
   .dialog-content {
     padding: 20px;

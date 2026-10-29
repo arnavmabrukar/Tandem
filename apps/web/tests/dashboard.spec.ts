@@ -1,188 +1,224 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Request } from '@playwright/test';
+import { testProject, testTask } from './support/data';
 
-async function signIn(page: Page, persona = 'arnav', path = '/') {
-  await page.goto(`/#${path}`);
-  await page.getByLabel('Demo persona').selectOption(persona);
-  await page.getByRole('button', { name: 'Enter demo' }).click();
-  await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
-  await expect(
-    page.getByRole('status').filter({ hasText: 'Loading project snapshot' }),
-  ).toHaveCount(0);
-}
-async function nav(page: Page, name: string) {
-  await page.getByRole('navigation').getByRole('link', { name, exact: true }).click();
-}
-
-test('all screens render without page errors, external calls or horizontal page overflow', async ({
-  page,
-}, testInfo) => {
-  const errors: string[] = [];
-  const external: string[] = [];
-  page.on('pageerror', (error) => errors.push(error.message));
-  page.on('request', (request) => {
-    if (!new URL(request.url()).hostname.match(/^(127\.0\.0\.1|localhost)$/))
-      external.push(request.url());
+async function connect(page: Page) {
+  const state = { project: testProject(), readStatus: 200, writes: [] as Request[], reads: 0 };
+  await page.route('https://api.tandem.test/api/**', async (route) => {
+    const request = route.request();
+    expect(request.headers().authorization).toBe('Bearer test-only-access-token');
+    const path = new URL(request.url()).pathname;
+    if (request.method() !== 'GET') {
+      state.writes.push(request);
+      await route.fulfill({ status: 501 });
+      return;
+    }
+    if (path === '/api/me') {
+      await route.fulfill({ json: { id: 'user-1', name: 'Test owner' } });
+      return;
+    }
+    state.reads++;
+    await route.fulfill({
+      status: state.readStatus,
+      json: { schemaVersion: 1, projects: [state.project] },
+    });
   });
-  await signIn(page);
-  for (const [link, title] of [
-    ['Activity', 'Activity'],
-    ['Tasks', 'Tasks'],
-    ['Agents', 'Agent connections'],
-    ['Approvals', 'Human approvals'],
-    ['Project setup', 'Project setup'],
-    ['Connection guide', 'Connection guide'],
-  ]) {
-    await nav(page, link);
-    await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
-    expect(
-      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
-    ).toBe(true);
-    if (link === 'Activity')
-      await page.screenshot({ path: testInfo.outputPath('activity.png'), fullPage: true });
-  }
-  await nav(page, 'Tasks');
-  await page.getByRole('link', { name: /Build project overview/ }).click();
-  await expect(page.getByRole('heading', { name: 'Thread discussion' })).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath('thread.png'), fullPage: true });
-  expect(errors).toEqual([]);
-  expect(external).toEqual([]);
-});
+  return state;
+}
+const thread = '/#/projects/project-1/tasks/task-1';
 
-test('creates a task, safely renders a note, persists and isolates project data', async ({
+test('missing configuration shows setup, with no network or fabricated workspace', async ({
   page,
 }) => {
-  await signIn(page);
-  await nav(page, 'Tasks');
-  await page.getByRole('button', { name: 'New task' }).click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('Task title', { exact: true }).fill('Frontend acceptance test');
-  await dialog
-    .getByLabel('Description', { exact: true })
-    .fill('Exercise local creation and persistence.');
-  await dialog.getByLabel('Proposed agent').selectOption('codex');
-  await dialog.getByLabel('File scope').fill('apps/web/src/example.ts');
-  await dialog.getByLabel('Acceptance criteria').fill('The task is persisted.');
-  await dialog.getByRole('button', { name: 'Create task', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Frontend acceptance test' })).toBeVisible();
-  const note = '<script>window.stolen=true</script> Plain text only.';
-  await page.getByLabel('Human note').fill(note);
-  await page.getByRole('button', { name: 'Post note' }).click();
-  await expect(page.locator('.messages').getByText(note, { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Human note')).toHaveValue('');
-  await page.reload();
-  await expect(page.locator('.messages').getByText(note, { exact: true })).toBeVisible();
-  await page.getByLabel('Select project').selectOption('sandbox');
-  await nav(page, 'Tasks');
-  await expect(page.getByText('No matching tasks', { exact: true })).toBeVisible();
-  await expect(page.getByText('Frontend acceptance test', { exact: true })).toHaveCount(0);
-  await page.getByLabel('Select project').selectOption('tandem');
-  await nav(page, 'Tasks');
-  await page.getByLabel('Search tasks').fill('Frontend acceptance');
-  await expect(page.getByText('1 of 7 tasks')).toBeVisible();
+  const requests: string[] = [];
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname.startsWith('/api/')) requests.push(request.url());
+  });
+  await page.goto('http://127.0.0.1:4174');
+  await expect(page.getByRole('heading', { name: 'Connect your backend' })).toBeVisible();
+  await expect(page.getByText('VITE_API_BASE_URL is missing.', { exact: true })).toBeVisible();
+  expect(requests).toEqual([]);
+  await expect(page.getByRole('button', { name: 'New task' })).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('configuration.png'), fullPage: true });
 });
 
-test('failed save retains the draft and retry adds exactly one message', async ({ page }) => {
-  await signIn(page, 'arnav', '/projects/tandem/tasks/task-dashboard');
-  await page.getByText('Demo controls', { exact: true }).click();
-  await page.getByRole('button', { name: 'Fail next save' }).click();
-  await page.getByRole('button', { name: 'Reply to #1' }).click();
-  await page.getByLabel('Human note').fill('A retryable note');
-  await page.getByRole('button', { name: 'Post note' }).click();
-  await expect(page.getByRole('alert')).toContainText('Simulated save failure');
-  await expect(page.getByLabel('Human note')).toHaveValue('A retryable note');
-  await page.getByRole('button', { name: 'Post note' }).click();
+test('sign-in gates API requests and restores the requested task', async ({ page }) => {
+  const state = await connect(page);
+  await page.goto('/?test-auth=off#/projects/project-1/tasks/task-1');
+  await expect(page.getByRole('button', { name: 'Sign in with Auth0' })).toBeVisible();
+  expect(state.reads).toBe(0);
+  await page.getByRole('button', { name: 'Sign in with Auth0' }).click();
   await expect(
-    page.locator('.messages').getByText('A retryable note', { exact: true }),
-  ).toHaveCount(1);
-  await expect(page.getByLabel('Human note')).toHaveValue('');
-  await expect(page.getByText('Reply to #1 — Arnav’s Codex')).toHaveCount(2);
+    page.getByRole('heading', { name: 'Task returned by test API', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('Connected', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);
+  await page.screenshot({ path: test.info().outputPath('connected.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Sign in with Auth0' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Task returned by test API', exact: true }),
+  ).toHaveCount(0);
 });
 
-test('review requires explicit target acknowledgment and never marks code merged', async ({
+test('a missing or offline API shows failure without sample records', async ({ page }) => {
+  const state = await connect(page);
+  state.readStatus = 404;
+  await page.goto('/');
+  await expect(page.getByRole('alert')).toContainText('API endpoint was not found');
+  await expect(page.getByRole('heading', { name: 'Create a shared project' })).toHaveCount(0);
+  await expect(page.getByRole('option', { name: 'API project' })).toHaveCount(0);
+  expect(state.writes).toHaveLength(0);
+});
+
+test('failed refresh shows stale real snapshot; permission loss hides all project data', async ({
   page,
 }) => {
-  await signIn(page);
-  await nav(page, 'Approvals');
-  await page.getByRole('button', { name: 'Review target' }).click();
-  const dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('button', { name: 'Record approval' })).toBeDisabled();
-  await dialog.getByLabel('Review note').fill('Reviewed the exact demo head and evidence.');
-  await dialog.getByLabel('I reviewed this action, version and exact head.').check();
-  await dialog.getByRole('button', { name: 'Record approval' }).click();
-  await expect(dialog).toHaveCount(0);
-  await expect(page.getByText('Reviewed the exact demo head and evidence.')).toBeVisible();
-  await page.getByRole('link', { name: 'Review human session flow', exact: true }).click();
-  await expect(page.getByText('Not merged', { exact: true })).toBeVisible();
-  await expect(page.getByText('In review', { exact: true })).toBeVisible();
-  await page.reload();
-  await expect(page.getByText('Approved', { exact: true })).toBeVisible();
+  const state = await connect(page);
+  await page.goto(thread);
+  await expect(
+    page.getByRole('heading', { name: 'Task returned by test API', exact: true }),
+  ).toBeVisible();
+  state.readStatus = 503;
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByText(/Showing the last successful snapshot/)).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Task returned by test API', exact: true }),
+  ).toBeVisible();
+  state.readStatus = 403;
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('do not have permission');
+  await expect(
+    page.getByRole('heading', { name: 'Task returned by test API', exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole('option', { name: 'API project' })).toHaveCount(0);
+  expect(await page.title()).not.toContain('API project');
 });
 
-test('an open review is disabled when another tab changes its head', async ({ page, context }) => {
-  await signIn(page);
-  await nav(page, 'Approvals');
+test('401 clears the workspace and asks for real sign-in', async ({ page }) => {
+  const state = await connect(page);
+  await page.goto(thread);
+  await expect(
+    page.getByRole('heading', { name: 'Task returned by test API', exact: true }),
+  ).toBeVisible();
+  state.readStatus = 401;
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Sign in with Auth0' })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'API project' })).toHaveCount(0);
+});
+
+test('task creation waits for a confirmed API response and refetches server data', async ({
+  page,
+}) => {
+  const state = await connect(page);
+  await page.route('**/api/projects/project-1/tasks', async (route) => {
+    const body = route.request().postDataJSON();
+    state.writes.push(route.request());
+    expect(body).toMatchObject({
+      title: 'New backend task',
+      description: 'Implement the endpoint',
+      expectedVersion: 4,
+      agentId: null,
+    });
+    expect(body.actorId).toBeUndefined();
+    expect(route.request().headers()['idempotency-key']).toBe(body.operationId);
+    state.project.tasks.push({
+      ...testTask(),
+      id: 'task-2',
+      title: body.title,
+      description: body.description,
+    });
+    state.project.version = 5;
+    await route.fulfill({
+      json: { projectId: 'project-1', projectVersion: 5, entityId: 'task-2' },
+    });
+  });
+  await page.goto('/#/projects/project-1/tasks');
+  await page.getByRole('button', { name: 'New task' }).click();
+  await page.getByLabel('Task title', { exact: true }).fill('New backend task');
+  await page.getByLabel('Description', { exact: true }).fill('Implement the endpoint');
+  await page.getByRole('button', { name: 'Create task', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'New backend task', exact: true })).toBeVisible();
+  expect(state.reads).toBeGreaterThanOrEqual(2);
+  expect(state.writes).toHaveLength(1);
+});
+
+test('lost write response retains the draft and retry reuses its operation ID', async ({
+  page,
+}) => {
+  const state = await connect(page);
+  const writes: Request[] = [];
+  await page.route('**/api/projects/project-1/tasks/task-1/messages', async (route) => {
+    writes.push(route.request());
+    if (writes.length === 1) {
+      await route.abort('failed');
+      return;
+    }
+    const body = route.request().postDataJSON();
+    state.project.messages.push({
+      id: 'message-1',
+      taskId: 'task-1',
+      sequence: 1,
+      sender: 'Test owner',
+      type: 'human_note',
+      body: body.body,
+      createdAt: '2026-10-28T12:00:00Z',
+      replyTo: null,
+      receipt: 'pending',
+    });
+    state.project.version = 5;
+    await route.fulfill({
+      json: { projectId: 'project-1', projectVersion: 5, entityId: 'message-1' },
+    });
+  });
+  await page.goto(thread);
+  await page.getByLabel('Human note', { exact: true }).fill('Persist this note');
+  await page.getByRole('button', { name: 'Post note' }).click();
+  await expect(page.getByRole('alert')).toContainText('Could not reach the API');
+  await expect(page.getByLabel('Human note', { exact: true })).toHaveValue('Persist this note');
+  await expect(page.locator('.messages')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Post note' }).click();
+  await expect(page.locator('.messages')).toContainText('Persist this note');
+  await expect(page.getByLabel('Human note', { exact: true })).toHaveValue('');
+  expect(writes[0].postDataJSON()).toEqual(writes[1].postDataJSON());
+});
+
+test('a conflicting approval never becomes approved locally', async ({ page }) => {
+  const state = await connect(page);
+  let captured: Record<string, unknown> | undefined;
+  await page.route('**/api/projects/project-1/approvals/approval-1/decisions', async (route) => {
+    captured = route.request().postDataJSON();
+    state.project.tasks[0].version = 3;
+    state.project.version = 5;
+    await route.fulfill({ status: 409 });
+  });
+  await page.goto(thread);
   await page.getByRole('button', { name: 'Review target' }).click();
-  const second = await context.newPage();
-  await signIn(second);
-  await second.getByText('Demo controls', { exact: true }).click();
-  await second.getByRole('button', { name: 'Change review head' }).click();
-  await expect(page.getByRole('dialog').getByRole('alert')).toContainText('no longer current');
+  await page.getByLabel('Review note', { exact: true }).fill('Reviewed this exact head');
+  await page.getByRole('checkbox').check();
+  await page.getByRole('button', { name: 'Record approval' }).click();
+  await expect(page.getByText('This target is no longer current.', { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Record approval' })).toBeDisabled();
-  await page.getByRole('button', { name: 'Close dialog' }).click();
-  await expect(page.getByText('Stale', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Review target' })).toHaveCount(1);
+  expect(captured).toMatchObject({
+    expectedVersion: 4,
+    decision: 'approved',
+    target: {
+      repository: 'team/tandem',
+      action: 'Review result',
+      taskVersion: 2,
+      contractVersion: 1,
+      head: 'a'.repeat(40),
+    },
+  });
+  expect(state.project.approvals[0].status).toBe('pending');
 });
 
-test('viewer cannot mutate and deep links survive demo sign-in', async ({ page }) => {
-  await signIn(page, 'guest', '/projects/tandem/approvals');
-  await expect(page.getByRole('heading', { name: 'Human approvals' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Review target' })).toBeDisabled();
-  await nav(page, 'Tasks');
+test('viewer permissions come from the server membership', async ({ page }) => {
+  const state = await connect(page);
+  state.project.members[0].role = 'viewer';
+  await page.goto('/#/projects/project-1/tasks');
   await expect(page.getByRole('button', { name: 'New task' })).toBeDisabled();
-  await page.getByRole('link', { name: /Build project overview/ }).click();
-  await expect(page.getByLabel('Human note')).toHaveCount(0);
-  await nav(page, 'Agents');
-  await expect(page.getByRole('button', { name: 'Add agent record' })).toBeDisabled();
-  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Enter demo' })).toBeVisible();
-});
-
-test('sets up a project, invitations and pending agent records', async ({ page }) => {
-  await signIn(page);
-  await page.getByRole('button', { name: '+ Create project', exact: true }).click();
-  await page.getByLabel('Project name', { exact: true }).fill('UI sandbox');
-  await page.getByLabel('GitHub repository', { exact: true }).fill('example/testing');
-  await page.getByRole('button', { name: 'Create project', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible();
-  await nav(page, 'Project setup');
-  await page.getByLabel('Invitation email').fill('teammate@example.test');
-  await page.getByRole('button', { name: 'Create invitation record' }).click();
-  await expect(page.getByText('teammate@example.test', { exact: true })).toBeVisible();
-  await nav(page, 'Agents');
-  await page.getByRole('button', { name: 'Add agent record' }).click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('Agent name', { exact: true }).fill('Test agent');
-  await dialog.getByLabel('Machine label').fill('Independent laptop');
-  await dialog.getByRole('button', { name: 'Add record', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Test agent' })).toBeVisible();
-  await expect(page.getByRole('article').getByText('Pending', { exact: true })).toBeVisible();
-  await expect(page.getByRole('article').getByText('Offline', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Revoke demo grant' }).click();
-  await page.getByRole('button', { name: 'Confirm revocation' }).click();
-  await expect(page.getByText('Revoked', { exact: true })).toBeVisible();
-});
-
-test('offline states are visible and empty fixtures recover without a reload', async ({ page }) => {
-  await signIn(page);
-  await page.getByText('Demo controls', { exact: true }).click();
-  await page.getByLabel('Connection simulation').selectOption('offline');
-  await expect(page.getByRole('alert')).toContainText('offline');
-  await page.getByLabel('Connection simulation').selectOption('normal');
-  await expect(page.getByRole('alert')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Load empty data', exact: true }).click();
-  await page.getByRole('button', { name: 'Replace demo data' }).click();
-  await expect(page.getByText('No activity to show', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Reset sample data', exact: true }).click();
-  await page.getByRole('button', { name: 'Replace demo data' }).click();
-  await expect(page.getByText('Needs a closer look', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: /Task returned by test API/ }).click();
+  await expect(page.getByRole('button', { name: 'Review target' })).toBeDisabled();
+  await expect(page.getByLabel('Human note', { exact: true })).toHaveCount(0);
+  expect(state.writes).toHaveLength(0);
 });

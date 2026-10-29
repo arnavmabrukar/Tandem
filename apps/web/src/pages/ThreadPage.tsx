@@ -16,7 +16,7 @@ export function ThreadPage({ project }: { project: Project }) {
   if (!task)
     return (
       <Empty title="Task not found">
-        This task may have been removed by a demo reset.{' '}
+        This task is not present in the current project snapshot.{' '}
         <Link to={`/projects/${project.id}/tasks`}>Return to tasks</Link>.
       </Empty>
     );
@@ -139,12 +139,8 @@ function ThreadDetail({ project, task }: { project: Project; task: Task }) {
           <h2>Result & review</h2>
           {task.result ? (
             <>
-              <p className="notice">
-                Fixture evidence for UI testing; these commits, PRs and checks are not real
-                repository evidence.
-              </p>
               <dl className="details-grid">
-                <dt>Demo PR</dt>
+                <dt>Pull request</dt>
                 <dd>
                   #{task.result.prNumber} · {task.result.branch}
                 </dd>
@@ -273,7 +269,9 @@ function ThreadDetail({ project, task }: { project: Project; task: Task }) {
             </Field>
             <ErrorNotice error={message.error} />
             <div className="row between">
-              <small className="muted">Saved only in this browser. No agent is notified.</small>
+              <small className="muted">
+                Sent through the mediator. Delivery receipt is shown separately.
+              </small>
               <Button type="submit" disabled={message.isPending || !body.trim()}>
                 <Send size={16} />
                 {message.isPending ? 'Saving…' : 'Post note'}
@@ -281,7 +279,7 @@ function ThreadDetail({ project, task }: { project: Project; task: Task }) {
             </div>
           </form>
         ) : (
-          <p className="muted">Your demo role is read-only.</p>
+          <p className="muted">Your project role is read-only.</p>
         )}
       </section>
       <Modal
@@ -289,7 +287,7 @@ function ThreadDetail({ project, task }: { project: Project; task: Task }) {
         onOpenChange={(open) => {
           if (!cancel.isPending) setCancelOpen(open);
         }}
-        title="Cancel this demo task?"
+        title="Cancel this task?"
         description="The task will be marked cancelled. File claims are retained for explicit reconciliation; no local agent is stopped."
       >
         <ErrorNotice error={cancel.error} />

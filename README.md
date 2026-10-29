@@ -2,17 +2,18 @@
 
 A hosted mediator that helps their independent coding agents coordinate work. Person 1 prompts Codex on his machine; Person 2 prompts Claude Code on his. The mediator records assignments, messages, file claims, and human approvals. It never launches or controls either agent. Git is the ground truth for code; PostgreSQL is the ground truth for coordination.
 
-## Frontend demo
+## Frontend
 
-The functional human dashboard is available in [`apps/web`](apps/web). It runs independently with browser-local sample data, so the team can test project setup, agents, activity, tasks, threads, claims and approvals while building the backend.
+The human dashboard is implemented in [`apps/web`](apps/web). It connects only to Auth0 and the real mediator HTTP API. There is no demo mode, sample workspace, browser-local database, or simulated agent activity. Until you configure authentication and implement the backend endpoints, it shows setup or connection errors.
 
 ```sh
 cd apps/web
 npm ci
+# Copy .env.example to .env.local and supply the four connection settings.
 npm run dev
 ```
 
-Use Node.js 22.12+ (Node 24 LTS recommended). See the [frontend README](apps/web/README.md) for tests, demo controls, and detailed instructions for connecting the future API, Auth0 and coordination services. All other implementation areas remain empty placeholders. The demo does not connect to or modify real agents, services or GitHub.
+Use Node.js 22.12+. See the [frontend README](apps/web/README.md) for setup and tests, and the [API contract](apps/web/API.md) for the exact endpoints and response shapes to implement in `services/mediator`. The Auth0 browser flow and authenticated HTTP client are implemented; the backend, agent integrations, database, worker, and provider services remain for the team to build.
 
 ## Planned architecture
 
@@ -47,7 +48,7 @@ The paths below identify documents still to be written. Frontend setup and integ
 
 | Area | Intended responsibility |
 | --- | --- |
-| `apps/web/` | Runnable React/TypeScript/Vite dashboard with Tailwind, shadcn-style primitives, TanStack Query and local demo data |
+| `apps/web/` | React/TypeScript/Vite dashboard with Tailwind, shadcn-style primitives, TanStack Query, Auth0 and one real HTTP data client |
 | `services/mediator/` | One FastAPI/Python MCP backend and a normal Python worker sharing domain policies |
 | `agent-integrations/` | Future connection plans, instruction templates, optional durable local receipt helper |
 | `infrastructure/` | Future Render, Docker, and local PostgreSQL configuration |
