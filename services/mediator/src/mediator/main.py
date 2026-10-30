@@ -27,14 +27,26 @@ def ready() -> dict[str, str]:
         raise HTTPException(status_code=503, detail="Database unavailable")
     return {"status": "ok", "database": "connected"}
 
+# These routes are placeholders until we implement authentication and storage.
+# HTTP 501 explicitly tells the caller that the feature isn't implemented yet.
+
 @app.get("/api/me")
 def get_current_user():
-    raise HTTPException(status_code=501, details="User lookup not implemented")
+    raise HTTPException(
+        status_code=501,
+        detail="User lookup not implemented",
+    )
 
 @app.get("/api/workspace")
 def get_workspace():
-    rise HTTPException(status_code=501, details="Workspace lookup not implemented")
+    raise HTTPException(
+        status_code=501,
+        detail="Workspace lookup not implemented",
+    )
 
 @app.post("/api/projects")
 def create_project():
-    raise HTTPException(status_code=501, details="Project creation not implemented")
+    raise HTTPException(
+        status_code=501,
+        detail="Project creation not implemented",
+    )
