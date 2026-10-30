@@ -26,3 +26,15 @@ def ready() -> dict[str, str]:
     if not available:
         raise HTTPException(status_code=503, detail="Database unavailable")
     return {"status": "ok", "database": "connected"}
+
+@app.get("/api/me")
+def get_current_user():
+    raise HTTPException(status_code=501, details="User lookup not implemented")
+
+@app.get("/api/workspace")
+def get_workspace():
+    rise HTTPException(status_code=501, details="Workspace lookup not implemented")
+
+@app.post("/api/projects")
+def create_project():
+    raise HTTPException(status_code=501, details="Project creation not implemented")
