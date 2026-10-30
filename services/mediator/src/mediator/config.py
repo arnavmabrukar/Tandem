@@ -22,4 +22,21 @@ class Settings(BaseSettings):
         extra="ignore", # Neon may include settings this backend does not use yet.
     )
 
+    # using regex to map possible hostnames, without https:// or a slash
+    # our existing TANDEM_ prefix maps this to TANDEM_AUTH0_DOMAIN
+    auth0_domain: str = Field(
+        min_length=1,
+        pattern=r"^[A-Za-z0-9.-]+$",
+    )
+
+    # must match the Auth0 api indentifier
+    auth0_audience: str = Field(min_length=1)
+
+    # cross browser origins allowed to call the backend
+    cors_origins: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://agentictandem.vercel.app",
+    ]
+
 settings = Settings()

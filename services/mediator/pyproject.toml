@@ -14,6 +14,7 @@ dependencies = [
     "uvicorn", # run the server that serves fastapi app
     "pydantic-settings", # reads and validates the application
     "psycopg[binary]>=3.3,<4", # PostgreSQL driver with bundled client libraries
+    "PyJWT[crypto]>=2.10,<3", # verifies auth0 jwt signatures using public rsa
 ]
 
 [project.optional-dependencies]
@@ -21,6 +22,8 @@ test = ["httpx>=0.28,<1"] # HTTP client used by FastAPI's test client
 
 # tells setup tools where to look for our python packages
 [tool.setuptools.packages.find]
+
+
 
 # our code lives in src/mediator, rather than the project root
 where = ["src"]
