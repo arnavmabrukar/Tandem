@@ -10,8 +10,13 @@ from mediator.db.projects import (
     ProjectAccessDenied,
     ProjectVersionConflict,
 )
-from mediator.schemas.tasks import CreateTaskRequest, CreateTaskResponse
-
+# Request validation and response models live in the schemas module.
+from mediator.schemas.tasks import (
+    CreateTaskRequest,
+    CreateTaskResponse,
+    CancelTaskRequest,
+    CancelTaskResponse,
+)
 
 def create_task(
     actor_id: UUID,
