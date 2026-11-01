@@ -3,6 +3,8 @@ uvicorn
 pydantic-settings
 psycopg[binary]<4,>=3.3
 PyJWT[crypto]<3,>=2.10
+httpx<1,>=0.28
+email-validator<3,>=2
 
 [test]
 httpx<1,>=0.28

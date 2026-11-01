@@ -16,6 +16,7 @@ dependencies = [
     "psycopg[binary]>=3.3,<4", # PostgreSQL driver with bundled client libraries
     "PyJWT[crypto]>=2.10,<3", # verifies auth0 jwt signatures using public rsa
     "httpx>=0.28,<1", # calls Auth0's user profile endpoint from Python
+    "email-validator>=2,<3", # Required by Pydantic's EmailStr
 ]
 
 [project.optional-dependencies]
