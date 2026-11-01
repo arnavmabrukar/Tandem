@@ -1,6 +1,9 @@
 from typing import Literal
 from uuid import UUID
 
+# Represent invitation expiration timestamps.
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
@@ -54,3 +57,28 @@ class InvitationMutationResponse(BaseModel):
 
     # Identify the invitation that was created or revoked.
     entityId: UUID
+
+class PendingInvitation(BaseModel):
+    """Information a recipient needs before accepting."""
+
+    id: UUID
+    projectId: UUID
+    projectName: str
+
+    # Show which address and role the invitation targets.
+    email: EmailStr
+    role: Literal["owner", "reviewer", "viewer"]
+    expiresAt: datetime
+
+
+class PendingInvitationsResponse(BaseModel):
+    # An empty list means no unexpired pending invitations were found.
+    invitations: list[PendingInvitation]
+
+class AcceptInvitationRequest(BaseModel):
+    """Identify an acceptance operation for safe retries."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # The frontend generates this ID and reuses it for retries.
+    operationId: UUID

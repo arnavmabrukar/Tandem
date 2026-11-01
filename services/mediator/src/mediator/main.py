@@ -3,6 +3,15 @@
 from uuid import UUID
 from fastapi import Depends, FastAPI, Header, HTTPException
 
+# Add to the existing mediator.auth import.
+from mediator.auth import require_verified_email
+
+# Add to the existing mediator.db.invitations import.
+from mediator.db.invitations import list_pending_invitations
+
+# Add to the existing mediator.schemas.invitations import.
+from mediator.schemas.invitations import PendingInvitationsResponse
+
 from mediator.db.projects import (
     create_project as save_project,
     update_project as save_project_update,
@@ -380,3 +389,28 @@ def revoke_invitation(
             status_code=503,
             detail="Invitation database unavailable",
         ) from None
+
+@app.get(
+    "/api/invitations",
+    response_model=PendingInvitationsResponse,
+)
+def get_pending_invitations(
+    # Verify the token, fetch its matching Auth0 profile,
+    # and require an explicitly verified email.
+    profile: dict[str, str] = Depends(require_verified_email),
+) -> PendingInvitationsResponse:
+    try:
+        result = list_pending_invitations(
+            verified_email=profile["verified_email"],
+        )
+
+        # Validate the result and serialize UUIDs/timestamps for the browser.
+        return PendingInvitationsResponse.model_validate(result)
+
+    except DatabaseError:
+        # A database failure must not look like an empty invitation list.
+        raise HTTPException(
+            status_code=503,
+            detail="Invitation database unavailable",
+        ) from None
+
