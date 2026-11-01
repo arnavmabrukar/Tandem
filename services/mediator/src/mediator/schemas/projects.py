@@ -52,3 +52,36 @@ class CreateProjectResponse(BaseModel):
 
     # The entity created by this operation is the project itself.
     entityId: UUID
+
+class UpdateProjectRequest(BaseModel):
+    """Validate edits to an existing project."""
+
+    # Reject unexpected fields, including caller-supplied ownership.
+    model_config = ConfigDict(extra="forbid")
+
+    # Identify this edit so an identical retry can reuse its result.
+    operationId: UUID
+
+    # The version the user saw before editing.
+    # Unlike creation, this must be a positive integer—not null.
+    # strict=True rejects strings and booleans masquerading as integers.
+    expectedVersion: int = Field(ge=1, strict=True)
+
+    # The frontend sends all three editable fields when saving.
+    name: str = Field(min_length=1, max_length=80)
+
+    # Require owner/repository format.
+    repository: str = Field(
+        pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.\-]*/[a-zA-Z0-9][a-zA-Z0-9_.\-]*$",
+    )
+
+    # Empty descriptions are allowed.
+    description: str = Field(max_length=1000)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        # Reject names made entirely of whitespace.
+        if not value.strip():
+            raise ValueError("Project name must not be blank")
+        return value
