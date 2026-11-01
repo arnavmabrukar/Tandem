@@ -3,18 +3,21 @@
 from uuid import UUID
 from fastapi import Depends, FastAPI, Header, HTTPException
 
-# Rename the imported function to distinguish it from the API handler.
 from mediator.db.projects import (
     create_project as save_project,
+    update_project as save_project_update,
     OperationConflict,
     ProjectAccessDenied,
+    ProjectVersionConflict,
 )
 
-# Validate incoming requests and outgoing responses.
 from mediator.schemas.projects import (
     CreateProjectRequest,
     CreateProjectResponse,
+    UpdateProjectRequest,
+    UpdateProjectResponse,
 )
+
 from fastapi.middleware.cors import CORSMiddleware
 from mediator.auth import require_access_token
 from psycopg import Error as DatabaseError
@@ -157,6 +160,68 @@ def create_project(
 
     except DatabaseError:
         # Avoid exposing SQL errors or database connection details.
+        raise HTTPException(
+            status_code=503,
+            detail="Project database unavailable",
+        ) from None
+
+@app.patch(
+    "/api/projects/{project_id}",
+    response_model=UpdateProjectResponse,
+    status_code=200,
+)
+def update_project(
+    # Parse the project ID from the URL and validate its UUID format.
+    project_id: UUID,
+
+    # Validate the JSON body, including expectedVersion.
+    request: UpdateProjectRequest,
+
+    # Require a valid operation ID in the request header.
+    idempotency_key: UUID = Header(alias="Idempotency-Key"),
+
+    # Authenticate the caller and resolve their internal Tandem identity.
+    user: dict[str, str] = Depends(get_current_user),
+) -> UpdateProjectResponse:
+    # The header and body must describe the same operation.
+    if idempotency_key != request.operationId:
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key must match operationId",
+        )
+
+    try:
+        # The database function checks ownership and version,
+        # then commits the edit and saved response together.
+        return save_project_update(
+            actor_id=UUID(user["id"]),
+            project_id=project_id,
+            request=request,
+        )
+
+    except OperationConflict:
+        # This operation ID was previously used with different data.
+        raise HTTPException(
+            status_code=409,
+            detail="Operation ID was already used for another request",
+        ) from None
+
+    except ProjectVersionConflict:
+        # Another edit has changed the project since it was loaded.
+        raise HTTPException(
+            status_code=409,
+            detail="Project changed; reload before saving",
+        ) from None
+
+    except ProjectAccessDenied:
+        # Only a current project owner can edit its settings.
+        raise HTTPException(
+            status_code=403,
+            detail="Project owner access is required",
+        ) from None
+
+    except DatabaseError:
+        # Keep database connection details and SQL errors private.
         raise HTTPException(
             status_code=503,
             detail="Project database unavailable",
