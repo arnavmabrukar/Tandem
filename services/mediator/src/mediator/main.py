@@ -12,6 +12,12 @@ from mediator.db.invitations import list_pending_invitations
 # Add to the existing mediator.schemas.invitations import.
 from mediator.schemas.invitations import PendingInvitationsResponse
 
+# Add to the mediator.db.invitations imports.
+from mediator.db.invitations import accept_invitation as accept_saved_invitation
+
+# Add to the mediator.schemas.invitations imports.
+from mediator.schemas.invitations import AcceptInvitationRequest
+
 from mediator.db.projects import (
     create_project as save_project,
     update_project as save_project_update,
@@ -414,3 +420,79 @@ def get_pending_invitations(
             detail="Invitation database unavailable",
         ) from None
 
+
+@app.post(
+    "/api/invitations/{invitation_id}/accept",
+    response_model=InvitationMutationResponse,
+    status_code=200,
+)
+def accept_invitation(
+    # Identify the invitation from the URL.
+    invitation_id: UUID,
+
+    # The body contains only the operation ID.
+    # The caller cannot choose an email, user ID, or role.
+    request: AcceptInvitationRequest,
+
+    # Require the same operation ID in the header.
+    idempotency_key: UUID = Header(alias="Idempotency-Key"),
+
+    # Verify the token, retrieve the matching Auth0 profile,
+    # and require a verified email address.
+    profile: dict[str, str] = Depends(require_verified_email),
+) -> InvitationMutationResponse:
+    if idempotency_key != request.operationId:
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key must match operationId",
+        )
+
+    try:
+        # Resolve the internal user from this same verified profile.
+        # This also supports someone accepting before visiting /api/me.
+        user = get_or_create_user(
+            issuer=profile["issuer"],
+            subject=profile["subject"],
+            name=profile["name"],
+        )
+
+        # Identity and recipient email both come from Auth0.
+        return accept_saved_invitation(
+            actor_id=UUID(user["id"]),
+            verified_email=profile["verified_email"],
+            invitation_id=invitation_id,
+            request=request,
+        )
+
+    except OperationConflict:
+        raise HTTPException(
+            status_code=409,
+            detail="Operation ID was already used for another request",
+        ) from None
+
+    except InvitationNotFound:
+        # Also covers invitations addressed to a different email.
+        raise HTTPException(
+            status_code=404,
+            detail="Invitation not found",
+        ) from None
+
+    except InvitationConflict:
+        # Covers expired, non-pending invitations and existing membership.
+        raise HTTPException(
+            status_code=409,
+            detail="Invitation cannot be accepted; refresh your invitations",
+        ) from None
+
+    except ProjectAccessDenied:
+        # A replay cannot restore membership that has been removed.
+        raise HTTPException(
+            status_code=403,
+            detail="Project membership is no longer available",
+        ) from None
+
+    except DatabaseError:
+        raise HTTPException(
+            status_code=503,
+            detail="Invitation database unavailable",
+        ) from None
