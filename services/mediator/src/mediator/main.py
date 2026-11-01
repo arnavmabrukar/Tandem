@@ -1,5 +1,20 @@
 # class used to create web app
-from fastapi import Depends, FastAPI, HTTPException
+# Parse UUIDs and read the Idempotency-Key request header.
+from uuid import UUID
+from fastapi import Depends, FastAPI, Header, HTTPException
+
+# Rename the imported function to distinguish it from the API handler.
+from mediator.db.projects import (
+    create_project as save_project,
+    OperationConflict,
+    ProjectAccessDenied,
+)
+
+# Validate incoming requests and outgoing responses.
+from mediator.schemas.projects import (
+    CreateProjectRequest,
+    CreateProjectResponse,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from mediator.auth import require_access_token
 from psycopg import Error as DatabaseError
@@ -94,9 +109,55 @@ def get_workspace(
             detail="Workspace database unavailable",
         ) from None
 
-@app.post("/api/projects", dependencies=[Depends(require_access_token)])
-def create_project():
-    raise HTTPException(
-        status_code=501,
-        detail="Project creation not implemented",
-    )
+@app.post(
+    "/api/projects",
+    response_model=CreateProjectResponse,
+    status_code=201,
+)
+def create_project(
+    # FastAPI validates the incoming JSON against this model.
+    request: CreateProjectRequest,
+
+    # Require a UUID in the Idempotency-Key header.
+    # Missing or malformed values produce HTTP 422.
+    idempotency_key: UUID = Header(alias="Idempotency-Key"),
+
+    # Reuse the existing function to authenticate the caller
+    # and resolve their internal Tandem user ID.
+    user: dict[str, str] = Depends(get_current_user),
+) -> CreateProjectResponse:
+    # The header and JSON body must identify the same operation.
+    if idempotency_key != request.operationId:
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key must match operationId",
+        )
+
+    try:
+        # Ownership comes from authentication, never caller-supplied JSON.
+        # The database function commits before returning its result.
+        return save_project(
+            actor_id=UUID(user["id"]),
+            request=request,
+        )
+
+    except OperationConflict:
+        # The operation ID already belongs to different request data.
+        raise HTTPException(
+            status_code=409,
+            detail="Operation ID was already used for another request",
+        ) from None
+
+    except ProjectAccessDenied:
+        # A saved operation does not bypass current permissions.
+        raise HTTPException(
+            status_code=403,
+            detail="Project owner access is required",
+        ) from None
+
+    except DatabaseError:
+        # Avoid exposing SQL errors or database connection details.
+        raise HTTPException(
+            status_code=503,
+            detail="Project database unavailable",
+        ) from None
