@@ -103,3 +103,35 @@ class CreateTaskResponse(BaseModel):
 
     # The dashboard uses this task ID to open its details.
     entityId: UUID
+
+
+
+
+# CANCEL TASK
+# CANCEL TASK
+class CancelTaskRequest(BaseModel):
+    """Validate a request to cancel an open task."""
+
+    # Reject unexpected fields.
+    # The task ID comes from the URL, not the JSON body.
+    model_config = ConfigDict(extra="forbid")
+
+    # Identify this cancellation so retries can return its saved result.
+    operationId: UUID
+
+    # The project version last seen by the dashboard.
+    # The database function will reject stale requests.
+    expectedVersion: int = Field(ge=1, strict=True)
+
+
+class CancelTaskResponse(BaseModel):
+    """Describe the committed cancellation."""
+
+    # Identify the project containing the task.
+    projectId: UUID
+
+    # Cancellation changes the project, so its version increases.
+    projectVersion: int = Field(ge=1)
+
+    # Identify the task that was cancelled.
+    entityId: UUID
