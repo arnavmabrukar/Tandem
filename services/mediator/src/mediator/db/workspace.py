@@ -68,7 +68,60 @@ def load_workspace(issuer: str, subject: str) -> dict:
                       -- Accepted invitations become memberships and are
                       -- omitted from this invitation-management list.
                       AND invitation.status IN ('pending', 'revoked')
-                ) AS invitations
+                ) AS invitations,
+
+                -- Read tasks belonging to this authorized project.
+                (
+                    SELECT COALESCE(
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'id', task.id::text,
+                                'title', task.title,
+                                'description', task.description,
+                                'status', task.status,
+                                'version', task.version,
+                                'progress', task.progress,
+
+                                -- Tasks are currently unassigned.
+                                'agentId', NULL,
+
+                                -- Use the task ID as its stable thread key.
+                                -- Message storage will be implemented separately.
+                                'threadId', task.id::text,
+
+                                -- No agent has received or accepted this task yet.
+                                'receipt', 'pending',
+                                'acceptance', 'pending',
+
+                                -- Dependency storage is not implemented yet.
+                                'dependencies', '[]'::jsonb,
+
+                                -- Translate database columns into the nested
+                                -- contract object expected by the frontend.
+                                'contract', jsonb_build_object(
+                                    'version', task.contract_version,
+                                    'summary', task.contract_summary,
+                                    'paths', task.contract_paths,
+                                    'criteria', task.acceptance_criteria,
+
+                                    -- No contract revisions are recorded yet.
+                                    'history', '[]'::jsonb
+                                ),
+
+                                -- No agent result has been submitted.
+                                'result', NULL
+                            )
+                            ORDER BY task.created_at, task.id
+                        ),
+
+                        -- Projects without tasks should return [] rather than null.
+                        '[]'::jsonb
+                    )
+                    FROM public.tasks AS task
+
+                    -- Keep each project's tasks scoped to that project.
+                    WHERE task.project_id = p.id
+                ) AS tasks
 
             FROM public.projects AS p
 
@@ -97,7 +150,6 @@ def load_workspace(issuer: str, subject: str) -> dict:
     for project in projects:
         project.update({
             "agents": [],
-            "tasks": [],
             "approvals": [],
             "messages": [],
             "claims": [],
