@@ -59,7 +59,16 @@ export const configuration = readConfig({
 
 export const appBaseUrl = () => `${window.location.origin}${window.location.pathname}`;
 export function safeReturnTo(value: unknown) {
-  return typeof value === 'string' && /^\/projects(?:\/|$)/.test(value) && !/[\\\r\n]/.test(value)
-    ? value
-    : '/';
+  // Accept only known internal destinations.
+  if (typeof value !== 'string' || /[\\\r\n]/.test(value)) {
+    return '/';
+  }
+
+  // Allow returning to invitations after authentication.
+  if (value === '/invitations') {
+    return value;
+  }
+
+  // Preserve the existing project-route behavior.
+  return /^\/projects(?:\/|$)/.test(value) ? value : '/';
 }

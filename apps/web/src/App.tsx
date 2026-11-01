@@ -27,6 +27,12 @@ const ProjectSetupPage = lazy(() =>
 const ConnectionsPage = lazy(() =>
   import('./pages/ConnectionsPage').then((m) => ({ default: m.ConnectionsPage })),
 );
+// Load the invitation screen when the user opens it.
+const InvitationsPage = lazy(() =>
+  import('./pages/InvitationsPage').then((m) => ({
+    default: m.InvitationsPage,
+  })),
+);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -156,6 +162,11 @@ function Dashboard() {
                   <Link to="/">Return to your project</Link>.
                 </Empty>
               }
+            />
+            {/* Available even when the signed-in user has no projects. */}
+            <Route
+              path="/invitations"
+              element={<InvitationsPage key={user.id} />}
             />
           </Routes>
         </Suspense>

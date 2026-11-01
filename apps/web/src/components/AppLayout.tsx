@@ -88,6 +88,10 @@ export function AppLayout({
           + Create project
         </Button>
         <nav aria-label="Main navigation">
+          {/* Keep this outside the project-specific navigation condition. */}
+          <NavLink to="/invitations">
+            <span>Invitations</span>
+          </NavLink>
           {id &&
             nav.map(({ to, text, icon: Icon }) => (
               <NavLink key={to} aria-label={text} to={`/projects/${id}/${to}`}>
