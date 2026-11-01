@@ -18,11 +18,22 @@ from mediator.db.invitations import accept_invitation as accept_saved_invitation
 # Add to the mediator.schemas.invitations imports.
 from mediator.schemas.invitations import AcceptInvitationRequest
 
-# Alias the database function so it has a distinct name from the HTTP route.
-from mediator.db.tasks import create_task as save_task
+# Database functions perform the transactions.
+# Aliases distinguish them from the HTTP route functions below.
+from mediator.db.tasks import (
+    create_task as save_task,
+    cancel_task as cancel_saved_task,
+    TaskNotFound,
+    TaskStateConflict,
+)
 
-# Validate the incoming request and outgoing response.
-from mediator.schemas.tasks import CreateTaskRequest, CreateTaskResponse
+# Schemas validate request bodies and successful responses.
+from mediator.schemas.tasks import (
+    CreateTaskRequest,
+    CreateTaskResponse,
+    CancelTaskRequest,
+    CancelTaskResponse,
+)
 
 from mediator.db.projects import (
     create_project as save_project,
@@ -564,6 +575,86 @@ def create_task(
 
     except DatabaseError:
         # Keep SQL errors and connection details out of the response.
+        raise HTTPException(
+            status_code=503,
+            detail="Task database unavailable",
+        ) from None
+
+# CANCEL TASK
+@app.post(
+    "/api/projects/{project_id}/tasks/{task_id}/cancel",
+    response_model=CancelTaskResponse,
+    status_code=200,
+)
+def cancel_task(
+    # Parse the project and task IDs from the URL.
+    project_id: UUID,
+    task_id: UUID,
+
+    # Validate operationId and expectedVersion from the JSON body.
+    request: CancelTaskRequest,
+
+    # Require an operation ID in the request header.
+    idempotency_key: UUID = Header(alias="Idempotency-Key"),
+
+    # Resolve the authenticated user's internal Tandem identity.
+    user: dict[str, str] = Depends(get_current_user),
+) -> CancelTaskResponse:
+    # Header and body must identify the same operation.
+    if idempotency_key != request.operationId:
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key must match operationId",
+        )
+
+    try:
+        # The database function checks permissions, task state,
+        # project version, and retries before committing.
+        return cancel_saved_task(
+            actor_id=UUID(user["id"]),
+            project_id=project_id,
+            task_id=task_id,
+            request=request,
+        )
+
+    except OperationConflict:
+        # An operation ID cannot represent two different requests.
+        raise HTTPException(
+            status_code=409,
+            detail="Operation ID was already used for another request",
+        ) from None
+
+    except ProjectVersionConflict:
+        # The dashboard must reload the changed project before retrying
+        # with a new operation.
+        raise HTTPException(
+            status_code=409,
+            detail="Project changed; reload before cancelling the task",
+        ) from None
+
+    except ProjectAccessDenied:
+        # Only current project owners and reviewers can cancel tasks.
+        raise HTTPException(
+            status_code=403,
+            detail="Project owner or reviewer access is required",
+        ) from None
+
+    except TaskNotFound:
+        # This also covers a task belonging to another project.
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found in this project",
+        ) from None
+
+    except TaskStateConflict:
+        # Active-agent cancellation is not implemented yet.
+        raise HTTPException(
+            status_code=409,
+            detail="Only open tasks can currently be cancelled",
+        ) from None
+
+    except DatabaseError:
+        # Keep database details private.
         raise HTTPException(
             status_code=503,
             detail="Task database unavailable",
