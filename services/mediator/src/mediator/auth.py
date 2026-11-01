@@ -12,6 +12,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 # fetches auth0's public signing keys
 from jwt import PyJWKClient
 
+# Validate Auth0's email using the same rules as invitation emails.
+from pydantic import EmailStr, TypeAdapter, ValidationError
+
 # need different exceptions to distinguish invalid tokens from failures
 from jwt.exceptions import (
     InvalidTokenError,
@@ -109,6 +112,9 @@ def require_access_token(
     # The caller receives verified token claims as a Python dictionary.
     return claims
 
+
+
+# USER PROFILE
 def require_user_profile(
     # Verify the access token before requesting or trusting a profile.
     claims: dict = Depends(require_access_token),
@@ -184,9 +190,46 @@ def require_user_profile(
             detail="User profile is missing a display name",
         )
 
-    # Identity comes from verified claims; display text comes from Auth0.
-    return {
+    # Keep the existing identity fields used by /api/me.
+    result = {
         "issuer": claims["iss"],
         "subject": claims["sub"],
         "name": name.strip(),
     }
+
+    email = profile.get("email")
+
+    # Only accept the actual boolean True from Auth0.
+    # A string such as "false" must never count as verification.
+    if profile.get("email_verified") is True and isinstance(email, str):
+        try:
+            # Match the normalization used by invitation creation.
+            verified_email = TypeAdapter(EmailStr).validate_python(
+                email.strip().lower()
+            )
+        except ValidationError:
+            # Ordinary sign-in can continue without a usable email.
+            # Invitation acceptance will reject the missing verified email.
+            pass
+        else:
+            result["verified_email"] = str(verified_email)
+
+    return result
+
+
+
+def require_verified_email(
+    # Reuse token verification and the matching Auth0 profile lookup.
+    profile: dict[str, str] = Depends(require_user_profile),
+) -> dict[str, str]:
+    """Require a verified email for recipient invitation actions."""
+
+    # This key is added only when Auth0 explicitly confirms verification.
+    if not profile.get("verified_email"):
+        raise HTTPException(
+            status_code=403,
+            detail="Verify your email before accessing invitations",
+        )
+
+    # Return both the verified identity and email for the next dependency.
+    return profile
