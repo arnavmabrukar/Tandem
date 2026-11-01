@@ -18,6 +18,12 @@ from mediator.db.invitations import accept_invitation as accept_saved_invitation
 # Add to the mediator.schemas.invitations imports.
 from mediator.schemas.invitations import AcceptInvitationRequest
 
+# Alias the database function so it has a distinct name from the HTTP route.
+from mediator.db.tasks import create_task as save_task
+
+# Validate the incoming request and outgoing response.
+from mediator.schemas.tasks import CreateTaskRequest, CreateTaskResponse
+
 from mediator.db.projects import (
     create_project as save_project,
     update_project as save_project_update,
@@ -495,4 +501,70 @@ def accept_invitation(
         raise HTTPException(
             status_code=503,
             detail="Invitation database unavailable",
+        ) from None
+
+
+# TASK CREATION
+@app.post(
+    "/api/projects/{project_id}/tasks",
+    response_model=CreateTaskResponse,
+    status_code=201,
+)
+def create_task(
+    # Read the project ID from the URL.
+    # FastAPI rejects values that are not valid UUIDs.
+    project_id: UUID,
+
+    # Validate the submitted JSON using our task request schema.
+    request: CreateTaskRequest,
+
+    # Require the operation ID in the HTTP header.
+    idempotency_key: UUID = Header(alias="Idempotency-Key"),
+
+    # Authenticate the caller and retrieve their Tandem user record.
+    # This dependency calls the Python function, not the /api/me URL.
+    user: dict[str, str] = Depends(get_current_user),
+) -> CreateTaskResponse:
+    # The header and body must identify the same operation.
+    if idempotency_key != request.operationId:
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key must match operationId",
+        )
+
+    try:
+        # The database function checks project permissions,
+        # handles retries, and commits the task before returning.
+        return save_task(
+            actor_id=UUID(user["id"]),
+            project_id=project_id,
+            request=request,
+        )
+
+    except OperationConflict:
+        # The caller reused an operation ID with different request data.
+        raise HTTPException(
+            status_code=409,
+            detail="Operation ID was already used for another request",
+        ) from None
+
+    except ProjectVersionConflict:
+        # The project changed since the dashboard last loaded it.
+        raise HTTPException(
+            status_code=409,
+            detail="Project changed; reload before creating the task",
+        ) from None
+
+    except ProjectAccessDenied:
+        # Only current owners and reviewers may create tasks.
+        raise HTTPException(
+            status_code=403,
+            detail="Project owner or reviewer access is required",
+        ) from None
+
+    except DatabaseError:
+        # Keep SQL errors and connection details out of the response.
+        raise HTTPException(
+            status_code=503,
+            detail="Task database unavailable",
         ) from None
