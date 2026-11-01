@@ -85,3 +85,15 @@ class UpdateProjectRequest(BaseModel):
         if not value.strip():
             raise ValueError("Project name must not be blank")
         return value
+
+class UpdateProjectResponse(BaseModel):
+    """Describe the committed project update."""
+
+    # Identify the project that was updated.
+    projectId: UUID
+
+    # Return its version after this operation.
+    projectVersion: int = Field(ge=1)
+
+    # The affected entity is the project itself.
+    entityId: UUID
