@@ -3,6 +3,9 @@ from functools import lru_cache
 
 import jwt
 
+# HTTP client for requesting the signed-in user's Auth0 profile.
+import httpx
+
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -105,3 +108,85 @@ def require_access_token(
 
     # The caller receives verified token claims as a Python dictionary.
     return claims
+
+def require_user_profile(
+    # Verify the access token before requesting or trusting a profile.
+    claims: dict = Depends(require_access_token),
+
+    # Obtain the original bearer token to send to Auth0.
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+) -> dict[str, str]:
+    """Return a verified identity and its Auth0 display name."""
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing access token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        # Use our configured tenant, never a URL supplied by the caller.
+        # Disable redirects so the token stays with this endpoint.
+        with httpx.Client(timeout=10.0, follow_redirects=False) as client:
+            response = client.get(
+                f"https://{settings.auth0_domain}/userinfo",
+                headers={
+                    "Authorization": f"Bearer {credentials.credentials}",
+                    "Accept": "application/json",
+                },
+            )
+    except httpx.RequestError:
+        # Network failures are service failures, not invalid credentials.
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication service unavailable",
+        ) from None
+
+    if response.status_code == 401:
+        raise HTTPException(
+            status_code=401,
+            detail="Auth0 rejected the access token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if response.status_code != 200:
+        # Avoid exposing Auth0's raw response to dashboard users.
+        raise HTTPException(
+            status_code=503,
+            detail="Could not retrieve user profile",
+        )
+
+    try:
+        profile = response.json()
+    except ValueError:
+        raise HTTPException(
+            status_code=502,
+            detail="Invalid user profile response",
+        ) from None
+
+    # The profile must belong to the same person as the verified token.
+    if not isinstance(profile, dict) or profile.get("sub") != claims["sub"]:
+        raise HTTPException(
+            status_code=502,
+            detail="User profile identity mismatch",
+        )
+
+    # Prefer the person's name; use their Auth0 nickname if needed.
+    # Do not assume the API access token itself contains profile fields.
+    name = profile.get("name")
+    if not isinstance(name, str) or not name.strip():
+        name = profile.get("nickname")
+
+    if not isinstance(name, str) or not name.strip():
+        raise HTTPException(
+            status_code=502,
+            detail="User profile is missing a display name",
+        )
+
+    # Identity comes from verified claims; display text comes from Auth0.
+    return {
+        "issuer": claims["iss"],
+        "subject": claims["sub"],
+        "name": name.strip(),
+    }

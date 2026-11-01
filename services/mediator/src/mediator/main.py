@@ -8,12 +8,21 @@ from psycopg import Error as DatabaseError
 from mediator.config import settings
 from mediator.db.connection import check_database
 
+# keep token verification for the other protected routes
+from mediator.auth import require_access_token, require_user_profile
+
+# Reads the signed-in user's authorized projects from PostgreSQL.
+from mediator.db.workspace import load_workspace
+
+# database function that saves or retrieves the Tandem user
+from mediator.db.users import get_or_create_user
+
 app = FastAPI(title=settings.app_name)
 
 # permit browser requests form the origins listen in config.py
 app.add_middleware(
     CORSMiddleware,
-    allow_origin=settings.cors_origins,
+    allow_origins=settings.cors_origins,
 
     # we use bearer tokens rather than cross-site cookies
     allow_credentials=False,
@@ -48,18 +57,42 @@ def ready() -> dict[str, str]:
 # HTTP 501 explicitly tells the caller that the feature isn't implemented yet.
 
 @app.get("/api/me", dependencies=[Depends(require_access_token)])
-def get_current_user():
-    raise HTTPException(
-        status_code=501,
-        detail="User lookup not implemented",
-    )
+def get_current_user(
+    # FastAPI resolves this dependency before running the route.
+    # It verifies the token and retrieves the matching Auth0 profile.
+    profile: dict[str, str] = Depends(require_user_profile),
+) -> dict[str, str]:
+    try:
+        # Create or update the database row, then return its internal ID.
+        return get_or_create_user(
+            issuer=profile["issuer"],
+            subject=profile["subject"],
+            name=profile["name"],
+        )
+    except DatabaseError:
+        # Keep database connection details and SQL errors private.
+        raise HTTPException(
+            status_code=503,
+            detail="User database unavailable",
+        ) from None
 
 @app.get("/api/workspace", dependencies=[Depends(require_access_token)])
-def get_workspace():
-    raise HTTPException(
-        status_code=501,
-        detail="Workspace lookup not implemented",
-    )
+def get_workspace(
+    # Verify the token and receive its trusted identity claims.
+    # No Auth0 profile request is needed for this database read.
+    claims: dict = Depends(require_access_token),
+) -> dict:
+    try:
+        return load_workspace(
+            issuer=claims["iss"],
+            subject=claims["sub"],
+        )
+    except DatabaseError:
+        # Report database failures without exposing connection details.
+        raise HTTPException(
+            status_code=503,
+            detail="Workspace database unavailable",
+        ) from None
 
 @app.post("/api/projects", dependencies=[Depends(require_access_token)])
 def create_project():
