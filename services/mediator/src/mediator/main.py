@@ -18,6 +18,18 @@ from mediator.schemas.projects import (
     UpdateProjectResponse,
 )
 
+# Database operation and its duplicate-invitation error.
+from mediator.db.invitations import (
+    create_invitation as save_invitation,
+    InvitationConflict,
+)
+
+# Validate invitation requests and responses.
+from mediator.schemas.invitations import (
+    CreateInvitationRequest,
+    InvitationMutationResponse,
+)
+
 from fastapi.middleware.cors import CORSMiddleware
 from mediator.auth import require_access_token
 from psycopg import Error as DatabaseError
@@ -225,4 +237,71 @@ def update_project(
         raise HTTPException(
             status_code=503,
             detail="Project database unavailable",
+        ) from None
+
+
+# INVITATIONS 
+
+@app.post(
+    "/api/projects/{project_id}/invitations",
+    response_model=InvitationMutationResponse,
+    status_code=201,
+)
+def create_invitation(
+    # Identify the project from the URL.
+    project_id: UUID,
+
+    # Validate the email, role, operation ID, and expected version.
+    request: CreateInvitationRequest,
+
+    # Require the operation ID in the header too.
+    idempotency_key: UUID = Header(alias="Idempotency-Key"),
+
+    # Resolve the authenticated user's internal identity.
+    user: dict[str, str] = Depends(get_current_user),
+) -> InvitationMutationResponse:
+    if idempotency_key != request.operationId:
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key must match operationId",
+        )
+
+    try:
+        # The transaction checks that this user currently owns the project.
+        return save_invitation(
+            actor_id=UUID(user["id"]),
+            project_id=project_id,
+            request=request,
+        )
+
+    except OperationConflict:
+        raise HTTPException(
+            status_code=409,
+            detail="Operation ID was already used for another request",
+        ) from None
+
+    except ProjectVersionConflict:
+        raise HTTPException(
+            status_code=409,
+            detail="Project changed; reload before inviting",
+        ) from None
+
+    except InvitationConflict:
+        # An unexpired pending invitation already exists for this address.
+        raise HTTPException(
+            status_code=409,
+            detail="A pending invitation already exists for this email",
+        ) from None
+
+    except ProjectAccessDenied:
+        raise HTTPException(
+            status_code=403,
+            detail="Project owner access is required",
+        ) from None
+
+    except DatabaseError:
+        # Keep SQL errors and connection details private.
+        raise HTTPException(
+            status_code=503,
+            detail="Invitation database unavailable",
         ) from None

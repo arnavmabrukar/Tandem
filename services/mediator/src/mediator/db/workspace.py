@@ -44,7 +44,31 @@ def load_workspace(issuer: str, subject: str) -> dict:
                     JOIN public.users AS member_user
                         ON member_user.id = member.user_id
                     WHERE member.project_id = p.id
-                ) AS members
+                ) AS members,
+
+                -- Read invitations belonging to this authorized project.
+                -- COALESCE returns an empty JSON array when none exist.
+                (
+                    SELECT COALESCE(
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'id', invitation.id::text,
+                                'email', invitation.email,
+                                'role', invitation.role,
+                                'status', invitation.status
+                            )
+                            ORDER BY invitation.created_at, invitation.id
+                        ),
+                        '[]'::jsonb
+                    )
+                    FROM public.project_invitations AS invitation
+                    WHERE invitation.project_id = p.id
+
+                      -- The current frontend supports these two statuses.
+                      -- Accepted invitations become memberships and are
+                      -- omitted from this invitation-management list.
+                      AND invitation.status IN ('pending', 'revoked')
+                ) AS invitations
 
             FROM public.projects AS p
 
@@ -72,7 +96,6 @@ def load_workspace(issuer: str, subject: str) -> dict:
     # Replace these with database reads when implementing each feature.
     for project in projects:
         project.update({
-            "invitations": [],
             "agents": [],
             "tasks": [],
             "approvals": [],
