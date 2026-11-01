@@ -3,6 +3,8 @@ import {
   mutationResultSchema,
   userSchema,
   workspaceSchema,
+  pendingInvitationsResponseSchema,
+  acceptInvitationResultSchema,
   type DashboardApi,
   type MutationRequest,
 } from '../types/domain';
@@ -21,6 +23,9 @@ export const endpoints = {
   me: '/api/me',
   workspace: '/api/workspace',
   projects: '/api/projects',
+
+  // recipient invitation list and acceptance routes
+  invitations: '/api/invitations',
 } as const;
 
 function segment(value: string | null | undefined) {
@@ -226,6 +231,28 @@ export function createApiClient({
   return {
     getCurrentUser: (signal) => request(endpoints.me, userSchema, { signal }),
     load: (signal) => request(endpoints.workspace, workspaceSchema, { signal }),
+        // The server determines the recipient from the bearer token.
+    // No email address is supplied by the browser.
+    getPendingInvitations: (signal) =>
+      request(endpoints.invitations, pendingInvitationsResponseSchema, {
+        signal,
+      }),
+
+    acceptInvitation: (invitationId, operationId) =>
+      request(
+        `${endpoints.invitations}/${segment(invitationId)}/accept`,
+        acceptInvitationResultSchema,
+        {
+          method: 'POST',
+
+          // The shared request helper adds the Idempotency-Key header.
+          operationId,
+
+          // Acceptance requires only the operation ID in the body.
+          // The backend determines identity, email, and granted role.
+          body: { operationId },
+        },
+      ),
     async execute(input) {
       const { method, path, payload } = commandEndpoint(input);
       const result = await request(path, mutationResultSchema, {
@@ -248,3 +275,4 @@ export function createApiClient({
     },
   };
 }
+

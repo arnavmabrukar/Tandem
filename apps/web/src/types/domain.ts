@@ -194,6 +194,17 @@ export interface DashboardApi {
   getCurrentUser(signal?: AbortSignal): Promise<User>;
   load(signal?: AbortSignal): Promise<Workspace>;
   execute(request: MutationRequest): Promise<MutationResult>;
+
+  // List invitations for the signed-in user's verified email.
+  getPendingInvitations(
+    signal?: AbortSignal,
+  ): Promise<PendingInvitationsResponse>;
+
+  // The caller supplies an operation ID and reuses it on retries.
+  acceptInvitation(
+    invitationId: string,
+    operationId: string,
+  ): Promise<AcceptInvitationResult>;
 }
 export const label = (value: string) =>
   value.replaceAll('_', ' ').replace(/^./, (c) => c.toUpperCase());
@@ -204,3 +215,30 @@ export const currentApproval = (approval: Approval, task: Task) =>
   approval.taskVersion === task.version &&
   approval.contractVersion === task.contract.version &&
   approval.head === (task.result?.head ?? null);
+
+// Validate each invitation returned by the recipient endpoint.
+export const pendingInvitationSchema = z.object({
+  id: z.string().uuid(),
+  projectId: z.string().uuid(),
+  projectName: z.string().min(1),
+  email: z.string().email(),
+  role: z.enum(roles),
+  expiresAt: z.string().datetime({ offset: true }),
+});
+
+// The backend wraps the invitation list in an object.
+export const pendingInvitationsResponseSchema = z.object({
+  invitations: z.array(pendingInvitationSchema),
+});
+
+// Acceptance must identify the invitation that was accepted.
+export const acceptInvitationResultSchema = mutationResultSchema.extend({
+  entityId: z.string().uuid(),
+});
+
+// Derive TypeScript types from the response validation schemas.
+export type PendingInvitation = z.infer<typeof pendingInvitationSchema>;
+export type PendingInvitationsResponse =
+  z.infer<typeof pendingInvitationsResponseSchema>;
+export type AcceptInvitationResult =
+  z.infer<typeof acceptInvitationResultSchema>;
