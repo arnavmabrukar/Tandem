@@ -18,15 +18,16 @@ from mediator.schemas.projects import (
     UpdateProjectResponse,
 )
 
-# Database operation and its duplicate-invitation error.
 from mediator.db.invitations import (
     create_invitation as save_invitation,
+    revoke_invitation as cancel_invitation,
     InvitationConflict,
+    InvitationNotFound,
 )
 
-# Validate invitation requests and responses.
 from mediator.schemas.invitations import (
     CreateInvitationRequest,
+    RevokeInvitationRequest,
     InvitationMutationResponse,
 )
 
@@ -301,6 +302,80 @@ def create_invitation(
 
     except DatabaseError:
         # Keep SQL errors and connection details private.
+        raise HTTPException(
+            status_code=503,
+            detail="Invitation database unavailable",
+        ) from None
+
+
+# REVOKE INVITATION
+@app.post(
+    "/api/projects/{project_id}/invitations/{invitation_id}/revoke",
+    response_model=InvitationMutationResponse,
+    status_code=200,
+)
+def revoke_invitation(
+    # Validate both IDs from the URL.
+    project_id: UUID,
+    invitation_id: UUID,
+
+    # Validate the operation ID and expected project version.
+    request: RevokeInvitationRequest,
+
+    # Require the matching operation ID in the header.
+    idempotency_key: UUID = Header(alias="Idempotency-Key"),
+
+    # Authenticate the caller and resolve their internal user ID.
+    user: dict[str, str] = Depends(get_current_user),
+) -> InvitationMutationResponse:
+    if idempotency_key != request.operationId:
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key must match operationId",
+        )
+
+    try:
+        # The database function checks ownership and commits revocation.
+        return cancel_invitation(
+            actor_id=UUID(user["id"]),
+            project_id=project_id,
+            invitation_id=invitation_id,
+            request=request,
+        )
+
+    except OperationConflict:
+        raise HTTPException(
+            status_code=409,
+            detail="Operation ID was already used for another request",
+        ) from None
+
+    except ProjectVersionConflict:
+        raise HTTPException(
+            status_code=409,
+            detail="Project changed; reload before revoking",
+        ) from None
+
+    except InvitationConflict:
+        # Accepted invitations cannot be revoked to remove membership.
+        raise HTTPException(
+            status_code=409,
+            detail="Invitation is no longer pending",
+        ) from None
+
+    except InvitationNotFound:
+        # Also covers an invitation that belongs to another project.
+        raise HTTPException(
+            status_code=404,
+            detail="Invitation not found",
+        ) from None
+
+    except ProjectAccessDenied:
+        raise HTTPException(
+            status_code=403,
+            detail="Project owner access is required",
+        ) from None
+
+    except DatabaseError:
         raise HTTPException(
             status_code=503,
             detail="Invitation database unavailable",
