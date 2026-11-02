@@ -8,12 +8,15 @@ import { Badge, Empty, ErrorNotice, Field, PageHeader, Timestamp } from '../comp
 import { FileClaimsTable } from '../components/FileClaimsTable';
 import { Button } from '../components/ui/button';
 import { Modal } from '../components/ui/dialog';
+import { AgentOAuthSetup } from '../components/AgentOAuthSetup';
 import { AgentTokenButton } from '../components/AgentTokenButton';
 
 export function ConnectAgentPage({ project }: { project: Project }) {
   const { user } = useSession();
   const owner = roleFor(project, user!.id) === 'owner';
   const [open, setOpen] = useState(false);
+  const [setupId, setSetupId] = useState<string | null>(null);
+  const setupAgent = project.agents.find((agent) => agent.id === setupId);
   const [revoking, setRevoking] = useState<Agent | null>(null);
   const add = useAction(project);
   const revoke = useAction(project);
@@ -36,15 +39,16 @@ export function ConnectAgentPage({ project }: { project: Project }) {
             }}
           >
             <Plus size={17} />
-            Add agent record
+            Add agent
           </Button>
         }
       />
+      <p><Link to="/mcp/connections">Manage OAuth connections</Link></p>
       <div className="notice">
         <div>
-          <strong>Agent connections are managed by the mediator.</strong>
+          <strong>Connect your IDE in three steps.</strong>
           <p>
-            Adding a record does not start an agent. See the{' '}
+            Add an agent, connect it with OAuth, then verify access from your IDE. See the{' '}
             <Link to={`/projects/${project.id}/connections`}>connection guide</Link> for the
             integration steps.
           </p>
@@ -53,7 +57,7 @@ export function ConnectAgentPage({ project }: { project: Project }) {
       {project.agents.length === 0 ? (
         <section className="panel">
           <Empty title="No agents registered">
-            Add an agent record, then generate its connection token.
+            Add your Codex or Claude Code agent to begin browser sign-in. No manual token is needed.
           </Empty>
         </section>
       ) : (
@@ -105,10 +109,18 @@ export function ConnectAgentPage({ project }: { project: Project }) {
                 Presence does not prove task progress. Revoking a grant does not release claims or
                 stop the local agent.
               </p>
-              {owner && agent.grant !== 'revoked' && (
-                <AgentTokenButton key={`${project.id}:${agent.id}:${user!.id}`}
-                  project={project} agent={agent} />
-              )}
+              {owner && agent.ownerId === user!.id && agent.grant !== 'revoked' && <>
+                <Button onClick={() => setSetupId(agent.id)}>Connect with OAuth</Button>
+                <p className="small muted">{agent.grant === 'pending'
+                  ? 'Awaiting authorization. Connect from your IDE to activate access.'
+                  : 'Access is enabled. Use setup to connect another IDE or verify your connection.'}</p>
+                <details className="agent-advanced">
+                  <summary>Advanced: manual connection token</summary>
+                  <p className="small muted">Use a token only for clients that cannot sign in with OAuth.</p>
+                  <AgentTokenButton key={`${project.id}:${agent.id}:${user!.id}`} project={project} agent={agent} />
+                </details>
+              </>}
+              {agent.ownerId !== user!.id && <p className="small muted">{agent.owner} manages this agent’s connection.</p>}
               {owner && agent.grant !== 'revoked' && (
                 <Button
                   variant="outline"
@@ -125,6 +137,8 @@ export function ConnectAgentPage({ project }: { project: Project }) {
           ))}
         </div>
       )}
+      {setupAgent && <AgentOAuthSetup key={setupAgent.id} project={project} agent={setupAgent}
+        onClose={() => setSetupId(null)} />}
       <FileClaimsTable project={project} />
       <Modal
         open={open}
@@ -138,7 +152,7 @@ export function ConnectAgentPage({ project }: { project: Project }) {
           onSubmit={async (e) => {
             e.preventDefault();
             try {
-              await add.mutateAsync({
+              const created = await add.mutateAsync({
                 type: 'add-agent',
                 name,
                 client,
@@ -154,6 +168,7 @@ export function ConnectAgentPage({ project }: { project: Project }) {
                 ],
               });
               setOpen(false);
+              if (created.entityId) setSetupId(created.entityId);
               setName('');
               setMachine('');
               setCapabilities('');
@@ -205,7 +220,7 @@ export function ConnectAgentPage({ project }: { project: Project }) {
               Cancel
             </Button>
             <Button type="submit" disabled={add.isPending}>
-              {add.isPending ? 'Adding…' : 'Add record'}
+              {add.isPending ? 'Adding…' : 'Add and connect'}
             </Button>
           </div>
         </form>

@@ -54,7 +54,7 @@ def verify_agent_token(token: str) -> dict | None:
 
 
 class AgentBearerMiddleware:
-    """Require a fixed bearer credential; this is not an OAuth login flow."""
+    """Accept OAuth credentials and existing manually issued agent tokens."""
     def __init__(self, app):
         # Use the SDK's own request identity context for tools and sessions.
         self.app = AuthContextMiddleware(app)
@@ -65,18 +65,31 @@ class AgentBearerMiddleware:
             return
         header = Request(scope).headers.get("authorization", "")
         scheme, _, token = header.partition(" ")
+        access = None
         try:
+            if settings.mcp_oauth_enabled and scheme.lower() == "bearer" and token.startswith("tdoa_"):
+                from mediator.mcp.oauth import provider
+                access = await provider.load_access_token(token)
             # Synchronous psycopg must not block the ASGI event loop.
-            identity = await run_in_threadpool(verify_agent_token, token) if scheme.lower() == "bearer" else None
+            if access is not None:
+                identity = access.claims["tandem_identity"]
+            elif scheme.lower() == "bearer":
+                identity = await run_in_threadpool(verify_agent_token, token)
+            else:
+                identity = None
         except (psycopg.Error, RuntimeError):
             await JSONResponse({"detail": "Agent authentication unavailable"}, status_code=503,
                                headers={"Cache-Control": "no-store"})(scope, receive, send)
             return
+        challenge = "Bearer"
+        if settings.mcp_oauth_enabled:
+            from mediator.mcp.oauth import issuer
+            challenge += f' resource_metadata="{issuer()}/.well-known/oauth-protected-resource/mcp/", scope="tandem:agent"'
         if identity is None:
             await JSONResponse({"detail": "Valid agent token required"}, status_code=401,
-                               headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"})(scope, receive, send)
+                               headers={"WWW-Authenticate": challenge, "Cache-Control": "no-store"})(scope, receive, send)
             return
-        scope["user"] = AuthenticatedUser(AccessToken(
+        scope["user"] = AuthenticatedUser(access or AccessToken(
             token=token, client_id=identity["agentId"], subject=identity["ownerId"],
             scopes=[], claims={"tandem_identity": identity},
         ))

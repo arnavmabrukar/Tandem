@@ -1159,3 +1159,12 @@ td:first-child {
     scroll-behavior: auto !important;
   }
 }
+
+/* Keep configuration snippets readable inside the connection wizard on narrow screens. */
+.oauth-step { border-top: 1px solid #dce5eb; padding-block: 1rem; }
+.oauth-step h3 { margin-bottom: .75rem; font-size: 1.1rem; }
+.oauth-step p, .oauth-step details { margin-block: .75rem; }
+.oauth-code { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem;
+  border: 1px solid #dce5eb; border-radius: .5rem; background: #f5f8fa; font-size: .85rem; }
+.agent-advanced { margin-block: 1rem; }
+.agent-advanced summary, .oauth-step summary { cursor: pointer; }

@@ -77,3 +77,8 @@ In pgAdmin, use the direct host, role, password and database from Neon's
 **Connect** dialog for the same branch, port `5432`, and SSL mode `require`.
 Your local Homebrew PostgreSQL database is separate from this hosted database.
 No schema or records were migrated during this setup.
+
+## Hosted MCP OAuth
+
+See [MCP_OAUTH.md](MCP_OAUTH.md) for migration 011, local and Render settings,
+browser consent, credential lifetimes, disconnecting clients, and verification.

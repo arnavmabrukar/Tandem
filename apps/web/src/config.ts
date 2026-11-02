@@ -64,6 +64,11 @@ export function safeReturnTo(value: unknown) {
     return '/';
   }
 
+  // Preserve an opaque OAuth request through Auth0's browser round trip.
+  if (/^\/mcp\/authorize\/req_[A-Za-z0-9_-]{43}$/.test(value) || value === '/mcp/connections') {
+    return value;
+  }
+
   // Allow returning to invitations after authentication.
   if (value === '/invitations') {
     return value;

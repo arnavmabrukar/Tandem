@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Find the repository root from this file, regardless of the terminal directory.
@@ -31,6 +31,23 @@ class Settings(BaseSettings):
 
     # must match the Auth0 api indentifier
     auth0_audience: str = Field(min_length=1)
+
+    # Enable only after migration 011 and the consent page have been deployed.
+    mcp_oauth_enabled: bool = False
+    mcp_oauth_issuer: str = "https://tandem-jr3e.onrender.com"
+    mcp_oauth_dashboard: str = "https://agentictandem.vercel.app"
+
+    @field_validator("mcp_oauth_issuer", "mcp_oauth_dashboard")
+    @classmethod
+    def validate_oauth_origin(cls, value: str) -> str:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(value)
+        if (not parsed.hostname or parsed.username or parsed.password or parsed.query
+            or parsed.fragment or parsed.path not in ("", "/")
+            or not (parsed.scheme == "https" or (parsed.scheme == "http"
+                and parsed.hostname in ("localhost", "127.0.0.1", "::1")))):
+            raise ValueError("Use an HTTPS origin, or HTTP loopback for local development")
+        return value.rstrip("/")
 
     # cross browser origins allowed to call the backend
     cors_origins: list[str] = [

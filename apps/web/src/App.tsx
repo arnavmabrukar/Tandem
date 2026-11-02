@@ -1,3 +1,4 @@
+import { McpOAuthPage, McpConnectionsPage } from './pages/McpOAuthPage';
 import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactNode } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useMatch } from 'react-router-dom';
 import { useSession } from './auth/session';
@@ -219,7 +220,7 @@ export default function App() {
         Checking your session…
       </main>
     );
-  if (!user && (authenticated || error)) return <SignInPage />;
+  if (!user && (authenticated || error) && !location.pathname.startsWith("/mcp/")) return <SignInPage />;
   return (
     <ErrorBoundary>
       <Routes>
@@ -227,6 +228,8 @@ export default function App() {
           path="/signin"
           element={user ? <Navigate to={returnTo} replace /> : <SignInPage />}
         />
+        <Route path="/mcp/authorize/:ticket" element={<McpOAuthPage key={location.pathname} />} />
+        <Route path="/mcp/connections" element={<McpConnectionsPage />} />
         <Route path="*" element={<Dashboard />} />
       </Routes>
     </ErrorBoundary>

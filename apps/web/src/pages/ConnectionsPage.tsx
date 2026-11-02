@@ -1,13 +1,27 @@
+import { useMcpDiscovery } from '../components/AgentOAuthSetup';
+import { ErrorNotice } from '../components/common';
+import { Link } from 'react-router-dom';
 import { PageHeader } from '../components/common';
 import { configuration } from '../config';
 
 export function ConnectionsPage() {
+  const discovery = useMcpDiscovery();
   return (
     <>
       <PageHeader
         title="Connection guide"
         description="The frontend calls one authenticated human API. Implement its endpoints in the mediator."
       />
+      <section className="panel">
+        <h2>Connect an IDE agent with OAuth</h2>
+        <p>Add this remote MCP URL in your IDE, then choose its sign-in or authenticate action:</p>
+        {discovery.data && <p><code>{discovery.data}</code></p>}
+        {discovery.isPending && <p role="status">Checking MCP server…</p>}
+        <ErrorNotice error={discovery.error} retry={() => void discovery.refetch()} />
+        <p>Sign in to Tandem in the browser, choose your agent and project, and allow the connection.
+          Create an agent record in the project's Agents page first. Use the Connect with OAuth button on your agent card for guided setup.</p>
+        <Link to="/mcp/connections">Manage and disconnect OAuth clients</Link>
+      </section>
       <section className="panel">
         <h2>Configured services</h2>
         <dl className="details-grid">

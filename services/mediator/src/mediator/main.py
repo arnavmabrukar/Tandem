@@ -914,3 +914,66 @@ def record_contract_decision(
         raise HTTPException(status_code=409, detail=str(error)) from None
     except DatabaseError:
         raise HTTPException(status_code=503, detail="Approval database unavailable") from None
+
+
+# OAuth uses the same Auth0-authenticated human as the existing dashboard.
+# No client-supplied owner ID or Auth0 credential is forwarded to an MCP client.
+if settings.mcp_oauth_enabled:
+    from mediator.mcp.oauth import oauth_routes, finish_consent
+    from mediator.mcp.oauth_store import store as oauth_store
+    from pydantic import BaseModel, ConfigDict, Field
+
+    app.router.routes.extend(oauth_routes())
+
+    class OAuthConsentRequest(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        ticket: str = Field(pattern=r"^req_[A-Za-z0-9_-]{43}$")
+        allow: bool = False
+        projectId: UUID | None = None
+        agentId: str | None = Field(default=None, max_length=200)
+
+    class OAuthPreviewRequest(BaseModel):
+        ticket: str = Field(pattern=r"^req_[A-Za-z0-9_-]{43}$")
+
+    @app.post("/api/mcp/oauth/preview")
+    def preview_oauth(body: OAuthPreviewRequest, response: Response,
+                      user: dict = Depends(get_current_user)):
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            result = oauth_store.preview(body.ticket,user["id"])
+        except DatabaseError:
+            raise HTTPException(503,"OAuth storage unavailable") from None
+        if not result:
+            raise HTTPException(404,"Authorization request expired or already completed. Reconnect from your IDE.")
+        return result
+
+    @app.post("/api/mcp/oauth/consent")
+    def consent_oauth(body: OAuthConsentRequest, response: Response,
+                      user: dict = Depends(get_current_user)):
+        response.headers["Cache-Control"] = "no-store"
+        if body.allow and (body.projectId is None or not body.agentId):
+            raise HTTPException(400,"Choose an agent and project")
+        try:
+            result = oauth_store.consent(body.ticket,user["id"],body.projectId,body.agentId,body.allow)
+        except PermissionError:
+            raise HTTPException(403,"You must own the selected agent and project") from None
+        except DatabaseError:
+            raise HTTPException(503,"OAuth storage unavailable") from None
+        if not result:
+            raise HTTPException(409,"Authorization request expired or already completed. Reconnect from your IDE.")
+        return {"redirectUrl":finish_consent(result)}
+
+    @app.get("/api/mcp/oauth/connections")
+    def oauth_connections(response: Response, user: dict = Depends(get_current_user)):
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            return oauth_store.connections(user["id"])
+        except DatabaseError:
+            raise HTTPException(503,"OAuth storage unavailable") from None
+
+    @app.delete("/api/mcp/oauth/connections/{session_id}", status_code=204)
+    def disconnect_oauth(session_id: UUID, user: dict = Depends(get_current_user)):
+        try:
+            oauth_store.disconnect(user["id"],session_id)
+        except DatabaseError:
+            raise HTTPException(503,"OAuth storage unavailable") from None
