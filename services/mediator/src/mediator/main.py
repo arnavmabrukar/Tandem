@@ -3,7 +3,11 @@
 from uuid import UUID
 from mediator.db.approvals import decide_contract, ApprovalNotFound, ApprovalConflict
 from mediator.schemas.approvals import DecideContractRequest, DecideContractResponse
-from fastapi import Depends, FastAPI, Header, HTTPException
+from mediator.db.agents import register_agent as save_agent, AgentNameConflict
+from mediator.schemas.agents import RegisterAgentRequest, RegisterAgentResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from mediator.db.agents import issue_agent_token, AgentNotFound, AgentTokenConflict
+from mediator.schemas.agents import IssueAgentTokenRequest, IssueAgentTokenResponse
 
 # Configure which hostnames may receive MCP requests.
 from mcp.server.transport_security import TransportSecuritySettings
@@ -14,6 +18,7 @@ from collections.abc import AsyncIterator
 
 # Import the server containing our registered MCP tools.
 from mediator.mcp.server import mcp
+from mediator.mcp.auth import AgentBearerMiddleware
 
 # Add to the existing mediator.auth import.
 from mediator.auth import require_verified_email
@@ -153,7 +158,7 @@ app = FastAPI(
 
 # Expose the MCP application at /mcp/.
 # Existing /api/... routes continue to work.
-app.mount("/mcp", mcp_http_app)
+app.mount("/mcp", AgentBearerMiddleware(mcp_http_app))
 
 
 
@@ -348,6 +353,67 @@ def update_project(
             status_code=503,
             detail="Project database unavailable",
         ) from None
+
+
+# Register a pending agent; credential issuance is a separate operation.
+@app.post(
+    "/api/projects/{project_id}/agents",
+    response_model=RegisterAgentResponse,
+    status_code=201,
+)
+def register_agent(
+    project_id: UUID,
+    request: RegisterAgentRequest,
+    idempotency_key: UUID = Header(alias="Idempotency-Key"),
+    user: dict[str, str] = Depends(get_current_user),
+) -> RegisterAgentResponse:
+    # Reject inconsistent retry identifiers before performing database writes.
+    if idempotency_key != request.operationId:
+        raise HTTPException(status_code=400, detail="Idempotency-Key must match operationId")
+
+    try:
+        # Ownership comes from authentication, never the submitted owner label.
+        # The transaction also checks current project-owner permission.
+        return save_agent(
+            actor_id=UUID(user["id"]),
+            project_id=project_id,
+            request=request,
+        )
+    except ProjectAccessDenied:
+        raise HTTPException(status_code=403, detail="Project owner access is required") from None
+    except (OperationConflict, ProjectVersionConflict, AgentNameConflict) as error:
+        # These exceptions contain controlled public messages, not SQL details.
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    except DatabaseError:
+        raise HTTPException(status_code=503, detail="Agent database unavailable") from None
+
+
+@app.post(
+    "/api/projects/{project_id}/agents/{agent_id}/token",
+    response_model=IssueAgentTokenResponse,
+)
+def issue_registered_agent_token(
+    project_id: UUID,
+    agent_id: str,
+    request: IssueAgentTokenRequest,
+    response: Response,
+    idempotency_key: UUID = Header(alias="Idempotency-Key"),
+    user: dict[str, str] = Depends(get_current_user),
+) -> IssueAgentTokenResponse:
+    # Credential responses must not be cached by browsers or intermediaries.
+    response.headers["Cache-Control"] = "no-store"
+    if idempotency_key != request.operationId:
+        raise HTTPException(status_code=400, detail="Idempotency-Key must match operationId")
+    try:
+        return issue_agent_token(UUID(user["id"]), project_id, agent_id, request)
+    except ProjectAccessDenied:
+        raise HTTPException(status_code=403, detail="Project owner access is required") from None
+    except AgentNotFound:
+        raise HTTPException(status_code=404, detail="Agent not found") from None
+    except (OperationConflict, ProjectVersionConflict, AgentTokenConflict) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    except DatabaseError:
+        raise HTTPException(status_code=503, detail="Agent database unavailable") from None
 
 
 # INVITATIONS 

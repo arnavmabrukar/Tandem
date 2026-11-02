@@ -8,6 +8,7 @@ import { Badge, Empty, ErrorNotice, Field, PageHeader, Timestamp } from '../comp
 import { FileClaimsTable } from '../components/FileClaimsTable';
 import { Button } from '../components/ui/button';
 import { Modal } from '../components/ui/dialog';
+import { AgentTokenButton } from '../components/AgentTokenButton';
 
 export function ConnectAgentPage({ project }: { project: Project }) {
   const { user } = useSession();
@@ -52,7 +53,7 @@ export function ConnectAgentPage({ project }: { project: Project }) {
       {project.agents.length === 0 ? (
         <section className="panel">
           <Empty title="No agents registered">
-            Add an agent record, then authenticate the client through the mediator’s OAuth flow.
+            Add an agent record, then generate its connection token.
           </Empty>
         </section>
       ) : (
@@ -104,6 +105,10 @@ export function ConnectAgentPage({ project }: { project: Project }) {
                 Presence does not prove task progress. Revoking a grant does not release claims or
                 stop the local agent.
               </p>
+              {owner && agent.grant !== 'revoked' && (
+                <AgentTokenButton key={`${project.id}:${agent.id}:${user!.id}`}
+                  project={project} agent={agent} />
+              )}
               {owner && agent.grant !== 'revoked' && (
                 <Button
                   variant="outline"

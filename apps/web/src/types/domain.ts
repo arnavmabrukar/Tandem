@@ -48,6 +48,7 @@ export const agentSchema = z.object({
   name: z.string(),
   client: z.enum(['Codex', 'Claude Code', 'Other']),
   owner: z.string(),
+  ownerId: z.string().uuid().optional(),
   machine: z.string(),
   capabilities: z.array(z.string()),
   grant: z.enum(['pending', 'active', 'revoked']),
@@ -193,6 +194,8 @@ export const mutationResultSchema = z.object({
   entityId: z.string().optional(),
 });
 export interface DashboardApi {
+  issueAgentToken(projectId: string, agentId: string, operationId: string,
+    expectedVersion: number): Promise<{ projectId: string; projectVersion: number; entityId: string; token: string }>;
   getCurrentUser(signal?: AbortSignal): Promise<User>;
   load(signal?: AbortSignal): Promise<Workspace>;
   execute(request: MutationRequest): Promise<MutationResult>;

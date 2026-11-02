@@ -70,6 +70,61 @@ def load_workspace(issuer: str, subject: str) -> dict:
                       AND invitation.status IN ('pending', 'revoked')
                 ) AS invitations,
 
+                -- Show only agents with a grant for this authorized project.
+                -- Never expose token_hash or other credential material.
+                (
+                    SELECT COALESCE(
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'id', agent.id,
+                                'name', agent.name,
+                                'client', agent.client,
+                                'owner', agent_owner.name,
+                                'ownerId', agent_owner.id::text,
+                                'machine', agent.machine,
+                                'capabilities', agent.capabilities,
+
+                                -- Both global and project access must be active.
+                                -- Revocation takes precedence over pending.
+                                'grant', CASE
+                                    WHEN agent.grant_status = 'revoked'
+                                      OR project_grant.status = 'revoked'
+                                        THEN 'revoked'
+                                    WHEN agent.grant_status = 'active'
+                                      AND project_grant.status = 'active'
+                                        THEN 'active'
+                                    ELSE 'pending'
+                                END,
+
+                                -- A stored registration is not a live connection.
+                                -- Inactive grants must not appear online.
+                                'presence', CASE
+                                    WHEN agent.grant_status = 'active'
+                                      AND project_grant.status = 'active'
+                                        THEN agent.presence
+                                    ELSE 'offline'
+                                END,
+                                'lastSeen', agent.last_seen_at,
+                                'session', CASE
+                                    WHEN agent.grant_status = 'active'
+                                      AND project_grant.status = 'active'
+                                        THEN agent.session
+                                    ELSE NULL
+                                END
+                            )
+                            ORDER BY project_grant.created_at, agent.id
+                        ),
+                        '[]'::jsonb
+                    )
+                    FROM public.agent_project_grants AS project_grant
+                    JOIN public.agents AS agent
+                        ON agent.id = project_grant.agent_id
+                       AND agent.owner_user_id = project_grant.owner_user_id
+                    JOIN public.users AS agent_owner
+                        ON agent_owner.id = agent.owner_user_id
+                    WHERE project_grant.project_id = p.id
+                ) AS agents,
+
                 -- Read tasks belonging to this authorized project.
                 (
                     SELECT COALESCE(
@@ -270,11 +325,10 @@ def load_workspace(issuer: str, subject: str) -> dict:
             (issuer, subject),
         ).fetchall()
 
-    # Tasks, approvals, messages, and activity come from the SQL query above.
-    # These remaining collections await their feature implementations.
+    # Agents and the other implemented collections come from the query above.
+    # File claims still await their feature implementation.
     for project in projects:
         project.update({
-            "agents": [],
             "claims": [],
         })
 
