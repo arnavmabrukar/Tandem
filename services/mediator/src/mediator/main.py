@@ -25,6 +25,7 @@ from mediator.db.tasks import (
     cancel_task as cancel_saved_task,
     TaskNotFound,
     TaskStateConflict,
+    InvalidTaskDependencies,
 )
 
 # Schemas validate request bodies and successful responses.
@@ -551,6 +552,13 @@ def create_task(
             project_id=project_id,
             request=request,
         )
+
+    except InvalidTaskDependencies:
+        # Do not reveal whether an inaccessible prerequisite exists elsewhere.
+        raise HTTPException(
+            status_code=422,
+            detail="Every dependency must be a task in this project",
+        ) from None
 
     except OperationConflict:
         # The caller reused an operation ID with different request data.

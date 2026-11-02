@@ -32,6 +32,24 @@ class CreateTaskRequest(BaseModel):
     paths: list[str] = Field(max_length=100)
     criteria: list[str] = Field(max_length=100)
 
+    # IDs of existing tasks that must finish before this task can start.
+    # UUID validates each identifier's format.
+    # default_factory creates a separate empty list for each request
+    # and keeps existing clients working when they omit this field.
+    dependencies: list[UUID] = Field(default_factory=list, max_length=100)
+
+    @field_validator("dependencies")
+    @classmethod
+    def validate_dependencies(cls, values: list[UUID]) -> list[UUID]:
+        # Reject duplicates instead of inserting the same relationship twice.
+        # A set contains only unique values.
+        if len(values) != len(set(values)):
+            raise ValueError("Dependencies must not contain duplicate task IDs")
+
+        # Dependency order has no meaning.
+        # Sort consistently so reordered IDs compare equally on retries.
+        return sorted(values, key=str)
+
     @field_validator("title")
     @classmethod
     def validate_title(cls, value: str) -> str:

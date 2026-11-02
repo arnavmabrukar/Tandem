@@ -18,6 +18,9 @@ from mediator.schemas.tasks import (
     CancelTaskResponse,
 )
 
+class InvalidTaskDependencies(Exception):
+    """One or more prerequisites do not belong to this project."""
+
 def create_task(
     actor_id: UUID,
     project_id: UUID,
@@ -106,7 +109,8 @@ def create_task(
             # Reusing an operation ID with different data is a conflict.
             if (
                 existing["operation_type"] != "create_task"
-                or existing["request_payload"] != payload
+                # Requests saved before dependencies existed mean an empty list.
+                or {"dependencies": [], **existing["request_payload"]} != payload
             ):
                 raise OperationConflict(
                     "Operation ID was already used for another request"
@@ -140,6 +144,29 @@ def create_task(
                     "Project changed; reload before creating the task"
                 )
 
+            # Check prerequisites only for a NEW operation.
+            # An identical retry should return its original saved response.
+            if request.dependencies:
+                prerequisites = connection.execute(
+                    """
+                    SELECT id
+                    FROM public.tasks
+                    WHERE project_id = %s
+                      AND id = ANY(%s::uuid[])
+                    ORDER BY id
+                    FOR KEY SHARE
+                    """,
+                    (project_id, request.dependencies),
+                ).fetchall()
+
+                # The schema already rejects duplicate IDs.
+                # A smaller result means at least one task is missing
+                # or belongs to another project.
+                if len(prerequisites) != len(request.dependencies):
+                    raise InvalidTaskDependencies(
+                        "Every dependency must be a task in this project"
+                    )
+
             # Create the task using server-controlled identity and defaults.
             # The database supplies status='open', version=1, and timestamps.
             # For now, use the title as the initial contract summary.
@@ -170,6 +197,22 @@ def create_task(
 
             if task is None:
                 raise RuntimeError("Task creation returned no row")
+
+            # Save prerequisites atomically with the task and operation result.
+            if request.dependencies:
+                with connection.cursor() as cursor:
+                    cursor.executemany(
+                        """
+                        INSERT INTO public.task_dependencies (
+                            project_id, task_id, depends_on_task_id
+                        )
+                        VALUES (%s, %s, %s)
+                        """,
+                        [
+                            (project_id, task["id"], prerequisite_id)
+                            for prerequisite_id in request.dependencies
+                        ],
+                    )
 
             # entityId is the TASK ID, while projectVersion belongs
             # to the project containing that task.
