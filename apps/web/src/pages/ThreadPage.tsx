@@ -25,6 +25,10 @@ export function ThreadPage({ project }: { project: Project }) {
 function ThreadDetail({ project, task }: { project: Project; task: Task }) {
   const { user } = useSession();
   const writable = canEdit(roleFor(project, user!.id));
+  // Cancellation currently supports only open, unassigned tasks.
+  // Owners and reviewers have write access.
+  const canCancel =
+    writable && task.status === 'open' && task.agentId === null;
   const message = useAction(project);
   const cancel = useAction(project);
   const [body, setBody] = useState('');
@@ -80,7 +84,7 @@ function ThreadDetail({ project, task }: { project: Project; task: Task }) {
             ))}
           </p>
         )}
-        {writable && !['merged', 'cancelled'].includes(task.status) && (
+        {canCancel && (
           <Button
             variant="outline"
             size="sm"
@@ -288,7 +292,7 @@ function ThreadDetail({ project, task }: { project: Project; task: Task }) {
           if (!cancel.isPending) setCancelOpen(open);
         }}
         title="Cancel this task?"
-        description="The task will be marked cancelled. File claims are retained for explicit reconciliation; no local agent is stopped."
+        description="This unassigned task will be marked cancelled. Its details will remain available."
       >
         <ErrorNotice error={cancel.error} />
         <div className="row end">
@@ -297,13 +301,19 @@ function ThreadDetail({ project, task }: { project: Project; task: Task }) {
           </Button>
           <Button
             variant="destructive"
-            disabled={cancel.isPending}
+            // Disable confirmation while saving or when refreshed state forbids it.
+            disabled={cancel.isPending || !canCancel}
             onClick={async () => {
+              // The task or user's permissions may change while the modal is open.
+              if (!canCancel || cancel.isPending) return;
+
               try {
+                // useAction supplies the operation ID and expected project version.
                 await cancel.mutateAsync({ type: 'cancel-task', taskId: task.id });
+                // Close only after a successful response.
                 setCancelOpen(false);
               } catch {
-                /* Shown above. */
+                // The existing ErrorNotice displays the failure.
               }
             }}
           >
