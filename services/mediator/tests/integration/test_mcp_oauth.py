@@ -33,21 +33,22 @@ class OAuthIntegrationTests(unittest.TestCase):
                 raise RuntimeError('Refusing to run on a database with existing application tables')
             # Minimal real relational foundation needed by migrations 010/011.
             c.execute('''CREATE TABLE public.users(id UUID PRIMARY KEY,name TEXT);
-                CREATE TABLE public.projects(id UUID PRIMARY KEY,name TEXT);
+                CREATE TABLE public.projects(id UUID PRIMARY KEY,name TEXT,version BIGINT DEFAULT 1);
                 CREATE TABLE public.project_memberships(project_id UUID REFERENCES public.projects,
                     user_id UUID REFERENCES public.users,role TEXT,PRIMARY KEY(project_id,user_id));
-                CREATE TABLE public.agents(id TEXT PRIMARY KEY,name TEXT,client TEXT,owner_user_id UUID REFERENCES public.users,
-                    grant_status TEXT,token_hash TEXT,UNIQUE(id,owner_user_id));
+                CREATE TABLE public.agents(id TEXT PRIMARY KEY,name TEXT UNIQUE,client TEXT,owner_user_id UUID REFERENCES public.users,
+                    grant_status TEXT,token_hash TEXT,owner TEXT,machine TEXT,capabilities TEXT[],presence TEXT,UNIQUE(id,owner_user_id));
                 CREATE TABLE public.agent_project_grants(project_id UUID,agent_id TEXT,owner_user_id UUID,
-                    status TEXT,updated_at TIMESTAMPTZ DEFAULT now(),PRIMARY KEY(project_id,agent_id),
+                    status TEXT,granted_by UUID,updated_at TIMESTAMPTZ DEFAULT now(),PRIMARY KEY(project_id,agent_id),
                     FOREIGN KEY(agent_id,owner_user_id) REFERENCES public.agents(id,owner_user_id),
                     FOREIGN KEY(project_id,owner_user_id) REFERENCES public.project_memberships ON DELETE CASCADE);''')
             migration = Path(__file__).resolve().parents[2]/'migrations/versions/011_create_mcp_oauth.sql'
             c.execute(migration.read_text())
+            c.execute((migration.parent/'003_create_operations.sql').read_text())
             c.execute('INSERT INTO public.users VALUES (%s,%s),(%s,%s)',(cls.owner,'Owner',cls.other,'Other'))
-            c.execute('INSERT INTO public.projects VALUES (%s,%s)',(cls.project,'Test project'))
+            c.execute('INSERT INTO public.projects(id,name) VALUES (%s,%s)',(cls.project,'Test project'))
             c.execute("INSERT INTO public.project_memberships VALUES (%s,%s,'owner')",(cls.project,cls.owner))
-            c.execute("INSERT INTO public.agents VALUES (%s,'Test agent','Codex',%s,'pending','unissued')",(cls.agent,cls.owner))
+            c.execute("INSERT INTO public.agents(id,name,client,owner_user_id,grant_status,token_hash) VALUES (%s,'Test agent','Codex',%s,'pending','unissued')",(cls.agent,cls.owner))
             c.execute("INSERT INTO public.agent_project_grants(project_id,agent_id,owner_user_id,status) VALUES (%s,%s,%s,'pending')",(cls.project,cls.agent,cls.owner))
         import logging
         logging.getLogger('httpx').setLevel(logging.WARNING)
@@ -63,6 +64,9 @@ class OAuthIntegrationTests(unittest.TestCase):
         import psycopg
         with psycopg.connect(DSN) as c:
             c.execute('TRUNCATE public.mcp_oauth_clients CASCADE')
+            c.execute('DELETE FROM public.agent_project_grants WHERE agent_id <> %s',(self.agent,))
+            c.execute('DELETE FROM public.agents WHERE id <> %s',(self.agent,))
+            c.execute('UPDATE public.projects SET version=1')
             c.execute("UPDATE public.agents SET grant_status='pending'")
             c.execute("UPDATE public.agent_project_grants SET status='pending'")
             c.execute("UPDATE public.project_memberships SET role='owner'")
@@ -151,6 +155,39 @@ class OAuthIntegrationTests(unittest.TestCase):
         self.assertEqual(self.refresh(first['refresh_token']).status_code,400)
         self.assertEqual(self.whoami(second['access_token']).status_code,401)
         self.assertEqual(self.refresh(second['refresh_token']).status_code,400)
+
+    def test_create_agent_during_browser_consent(self):
+        ticket = self.authorize().headers['location'].rsplit('/',1)[-1]
+        preview = self.http.post('/api/mcp/oauth/preview',json={'ticket':ticket}).json()
+        operation = str(uuid4())
+        body = {'operationId':operation,'expectedVersion':preview['projects'][0]['version'],
+                'name':'New IDE agent','client':'Codex','owner':'ignored',
+                'machine':'','capabilities':[]}
+        url = '/api/projects/'+self.project+'/agents'
+        headers = {'Idempotency-Key':operation}
+        created = self.http.post(url,json=body,headers=headers)
+        self.assertEqual(created.status_code,201,created.text)
+        # A retry from the approval page must reuse the same record.
+        self.assertEqual(self.http.post(url,json=body,headers=headers).json(),created.json())
+        approved = self.http.post('/api/mcp/oauth/consent',json={'ticket':ticket,'allow':True,
+            'projectId':self.project,'agentId':created.json()['entityId']})
+        self.assertEqual(approved.status_code,200,approved.text)
+        code = parse_qs(urlsplit(approved.json()['redirectUrl']).query)['code'][0]
+        tokens = self.exchange(code)
+        self.assertEqual(tokens.status_code,200,tokens.text)
+        self.assertEqual(self.whoami(tokens.json()['access_token']).status_code,200)
+
+    def test_preview_offers_only_owned_projects(self):
+        response = self.authorize()
+        ticket = response.headers['location'].split('/')[-1]
+        preview = self.http.post('/api/mcp/oauth/preview',json={'ticket':ticket}).json()
+        self.assertEqual(preview['projects'],[{'id':self.project,'name':'Test project','version':1}])
+        import psycopg
+        with psycopg.connect(DSN) as c:
+            c.execute("UPDATE public.project_memberships SET role='viewer'")
+        preview = self.http.post('/api/mcp/oauth/preview',json={'ticket':ticket}).json()
+        self.assertEqual(preview['projects'],[])
+        self.assertEqual(preview['choices'],[])
 
     def test_disconnect_and_revoked_project_grant(self):
         import psycopg

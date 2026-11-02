@@ -6,8 +6,11 @@ forwarded to an IDE: the IDE receives separate, opaque Tandem OAuth credentials.
 
 Users add the remote `/mcp/` URL in their MCP client and select its authenticate/sign-in
 action. Their browser opens Tandem, they sign in with Auth0, select an existing owned
-agent/project, and explicitly allow or deny the connection. An agent record must exist
-first (Agents → Add agent record). Consent currently requires project owner membership,
+agent/project, and explicitly allow or deny the connection. Start with Agents → Connect
+your IDE. During browser approval, select an existing agent or create a new one by
+choosing a project, name, and client. Registration uses the existing permission-checked,
+idempotent API; if authorization is interrupted, the pending record can be reused.
+Consent currently requires project owner membership,
 matching manual token issuance. Connecting does not start an agent or implement new tools.
 
 ## Enable locally

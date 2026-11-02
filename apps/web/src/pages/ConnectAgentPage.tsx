@@ -15,6 +15,7 @@ export function ConnectAgentPage({ project }: { project: Project }) {
   const { user } = useSession();
   const owner = roleFor(project, user!.id) === 'owner';
   const [open, setOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
   const [setupId, setSetupId] = useState<string | null>(null);
   const setupAgent = project.agents.find((agent) => agent.id === setupId);
   const [revoking, setRevoking] = useState<Agent | null>(null);
@@ -39,16 +40,16 @@ export function ConnectAgentPage({ project }: { project: Project }) {
             }}
           >
             <Plus size={17} />
-            Add agent
+            Add agent manually
           </Button>
         }
       />
-      <p><Link to="/mcp/connections">Manage OAuth connections</Link></p>
+      <p><Button onClick={() => setConnectOpen(true)}>Connect your IDE</Button></p>
       <div className="notice">
         <div>
           <strong>Connect your IDE in three steps.</strong>
           <p>
-            Add an agent, connect it with OAuth, then verify access from your IDE. See the{' '}
+            Choose your IDE, sign in, and allow access to your project. See the{' '}
             <Link to={`/projects/${project.id}/connections`}>connection guide</Link> for the
             integration steps.
           </p>
@@ -57,7 +58,7 @@ export function ConnectAgentPage({ project }: { project: Project }) {
       {project.agents.length === 0 ? (
         <section className="panel">
           <Empty title="No agents registered">
-            Add your Codex or Claude Code agent to begin browser sign-in. No manual token is needed.
+            Connect your IDE to get started. You can name your agent during sign-in.
           </Empty>
         </section>
       ) : (
@@ -72,8 +73,16 @@ export function ConnectAgentPage({ project }: { project: Project }) {
               </div>
               <h2>{agent.name}</h2>
               <p className="muted">
-                {agent.client} · {agent.owner}
+                {agent.client}
               </p>
+              {owner && agent.ownerId === user!.id && agent.grant !== 'revoked' && <>
+                <Button onClick={() => setSetupId(agent.id)}>Connect agent</Button>
+                <p className="small muted">{agent.grant === 'pending'
+                  ? 'Sign in from your IDE to get started.'
+                  : 'Access enabled. Connect or check your IDE.'}</p>
+              </>}
+              <details className="agent-advanced">
+                <summary>Details and settings</summary>
               <dl className="details-grid">
                 <dt>Machine</dt>
                 <dd>{agent.machine}</dd>
@@ -105,38 +114,22 @@ export function ConnectAgentPage({ project }: { project: Project }) {
                   </span>
                 ))}
               </div>
-              <p className="small muted">
-                Presence does not prove task progress. Revoking a grant does not release claims or
-                stop the local agent.
-              </p>
-              {owner && agent.ownerId === user!.id && agent.grant !== 'revoked' && <>
-                <Button onClick={() => setSetupId(agent.id)}>Connect with OAuth</Button>
-                <p className="small muted">{agent.grant === 'pending'
-                  ? 'Awaiting authorization. Connect from your IDE to activate access.'
-                  : 'Access is enabled. Use setup to connect another IDE or verify your connection.'}</p>
-                <details className="agent-advanced">
-                  <summary>Advanced: manual connection token</summary>
-                  <p className="small muted">Use a token only for clients that cannot sign in with OAuth.</p>
+                {owner && agent.ownerId === user!.id && agent.grant !== 'revoked' && <>
+                  <p className="small muted">Manual token for clients without browser sign-in:</p>
                   <AgentTokenButton key={`${project.id}:${agent.id}:${user!.id}`} project={project} agent={agent} />
-                </details>
-              </>}
-              {agent.ownerId !== user!.id && <p className="small muted">{agent.owner} manages this agent’s connection.</p>}
-              {owner && agent.grant !== 'revoked' && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    revoke.reset();
-                    setRevoking(agent);
-                  }}
-                >
-                  Revoke grant
-                </Button>
-              )}
+                </>}
+                {owner && agent.grant !== 'revoked' && <>
+                  <p className="small muted">Revoking access does not stop the agent on its machine.</p>
+                  <Button variant="outline" size="sm" onClick={() => { revoke.reset(); setRevoking(agent); }}>
+                    Revoke access
+                  </Button>
+                </>}
+              </details>
             </article>
           ))}
         </div>
       )}
+      {connectOpen && <AgentOAuthSetup project={project} onClose={() => setConnectOpen(false)} />}
       {setupAgent && <AgentOAuthSetup key={setupAgent.id} project={project} agent={setupAgent}
         onClose={() => setSetupId(null)} />}
       <FileClaimsTable project={project} />

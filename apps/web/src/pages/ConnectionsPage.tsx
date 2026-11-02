@@ -10,7 +10,7 @@ export function ConnectionsPage() {
     <>
       <PageHeader
         title="Connection guide"
-        description="The frontend calls one authenticated human API. Implement its endpoints in the mediator."
+        description="Connect your coding agent to a Tandem project."
       />
       <section className="panel">
         <h2>Connect an IDE agent with OAuth</h2>
@@ -19,7 +19,7 @@ export function ConnectionsPage() {
         {discovery.isPending && <p role="status">Checking MCP server…</p>}
         <ErrorNotice error={discovery.error} retry={() => void discovery.refetch()} />
         <p>Sign in to Tandem in the browser, choose your agent and project, and allow the connection.
-          Create an agent record in the project's Agents page first. Use the Connect with OAuth button on your agent card for guided setup.</p>
+          Choose an existing agent or create one during sign-in. Use Connect your IDE on the Agents page for guided setup.</p>
         <Link to="/mcp/connections">Manage and disconnect OAuth clients</Link>
       </section>
       <section className="panel">
