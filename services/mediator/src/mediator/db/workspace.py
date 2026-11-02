@@ -138,7 +138,70 @@ def load_workspace(issuer: str, subject: str) -> dict:
 
                     -- Keep each project's tasks scoped to that project.
                     WHERE task.project_id = p.id
-                ) AS tasks
+                ) AS tasks,
+
+                -- Read events belonging to this authorized project.
+                (
+                    SELECT COALESCE(
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'id', event.id::text,
+                                'sequence', event.sequence,
+
+                                -- Project-level events may have no task.
+                                'taskId', event.task_id::text,
+                                'kind', event.kind,
+
+                                -- Preserve the historical actor display name.
+                                'actor', event.actor_name,
+                                'text', event.text,
+
+                                -- JSONB serializes the timestamp as a string.
+                                'createdAt', event.created_at
+                            )
+                            -- The frontend reverses this for newest first.
+                            ORDER BY event.sequence
+                        ),
+                        '[]'::jsonb
+                    )
+                    FROM public.project_activity AS event
+                    WHERE event.project_id = p.id
+                ) AS activity,
+
+                -- Load human notes for this authorized project.
+                (
+                    SELECT COALESCE(
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'id', message.id,
+                                'taskId', message.task_id::text,
+                                'sequence', message.sequence,
+
+                                -- Use the name captured when the note was posted.
+                                'sender', message.sender_name,
+                                'type', message.type,
+                                'body', message.body,
+                                'createdAt', message.created_at,
+                                'replyTo', message.reply_to_message_id,
+
+                                -- Saving a note does not prove agent receipt.
+                                'receipt', 'pending'
+                            )
+                            ORDER BY message.task_id, message.sequence
+                        ),
+
+                        -- Projects without notes return an empty array.
+                        '[]'::jsonb
+                    )
+                    FROM public.messages AS message
+                    WHERE message.project_id = p.id
+                      AND message.task_id IS NOT NULL
+
+                      -- Only expose the human-message flow implemented so far.
+                      -- Agent messages will join this projection with MCP work.
+                      AND message.sender_user_id IS NOT NULL
+                      AND message.type = 'human_note'
+                ) AS messages
 
             FROM public.projects AS p
 
@@ -161,16 +224,13 @@ def load_workspace(issuer: str, subject: str) -> dict:
             (issuer, subject),
         ).fetchall()
 
-    # These features have no storage or working write endpoints yet.
-    # Newly created projects therefore have no entries in these collections.
-    # Replace these with database reads when implementing each feature.
+    # Tasks and activity now come from the SQL query above.
+    # These remaining collections await their feature implementations.
     for project in projects:
         project.update({
             "agents": [],
             "approvals": [],
-            "messages": [],
             "claims": [],
-            "activity": [],
         })
 
     # An empty projects list now means the query found no memberships.

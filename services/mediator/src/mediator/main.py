@@ -64,6 +64,18 @@ from mediator.schemas.invitations import (
     InvitationMutationResponse,
 )
 
+# Database function and the error raised for an invalid reply target.
+from mediator.db.messages import (
+    create_message as save_message,
+    InvalidReplyTarget,
+)
+
+# Models that validate message requests and successful responses.
+from mediator.schemas.messages import (
+    CreateMessageRequest,
+    CreateMessageResponse,
+)
+
 from fastapi.middleware.cors import CORSMiddleware
 from mediator.auth import require_access_token
 from psycopg import Error as DatabaseError
@@ -666,4 +678,82 @@ def cancel_task(
         raise HTTPException(
             status_code=503,
             detail="Task database unavailable",
+        ) from None
+
+
+@app.post(
+    "/api/projects/{project_id}/tasks/{task_id}/messages",
+    response_model=CreateMessageResponse,
+    status_code=201,
+)
+def create_message(
+    # Validate the project and task IDs from the URL.
+    project_id: UUID,
+    task_id: UUID,
+
+    # Validate the message body, reply target, and operation metadata.
+    request: CreateMessageRequest,
+
+    # Require the same operation ID in the header and request body.
+    idempotency_key: UUID = Header(alias="Idempotency-Key"),
+
+    # Authenticate the caller and retrieve their internal Tandem identity.
+    user: dict[str, str] = Depends(get_current_user),
+) -> CreateMessageResponse:
+    if idempotency_key != request.operationId:
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key must match operationId",
+        )
+
+    try:
+        # Identity comes from authentication.
+        # The database function commits before returning its response.
+        return save_message(
+            actor_id=UUID(user["id"]),
+            project_id=project_id,
+            task_id=task_id,
+            request=request,
+        )
+
+    except OperationConflict:
+        # An operation ID cannot be reused with different request data.
+        raise HTTPException(
+            status_code=409,
+            detail="Operation ID was already used for another request",
+        ) from None
+
+    except ProjectVersionConflict:
+        # Another action changed the project after the dashboard loaded it.
+        raise HTTPException(
+            status_code=409,
+            detail="Project changed; reload before posting the message",
+        ) from None
+
+    except ProjectAccessDenied:
+        # Viewers and nonmembers cannot post notes.
+        raise HTTPException(
+            status_code=403,
+            detail="Project owner or reviewer access is required",
+        ) from None
+
+    except TaskNotFound:
+        # Do not reveal whether the task exists in another project.
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found in this project",
+        ) from None
+
+    except InvalidReplyTarget:
+        # Reject missing reply targets and targets from another thread.
+        raise HTTPException(
+            status_code=422,
+            detail="Reply target must belong to this task",
+        ) from None
+
+    except DatabaseError:
+        # Keep database credentials and SQL details private.
+        raise HTTPException(
+            status_code=503,
+            detail="Message database unavailable",
         ) from None
