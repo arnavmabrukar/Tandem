@@ -130,7 +130,8 @@ export function InvitationsPage() {
         <>
           {invitations.data.invitations.length === 0 && (
             <Empty title="No pending invitations">
-              Invitations sent to your verified email will appear here.
+              Invitations must use the same address as your verified Auth0 email.
+              Ask the project owner to invite that exact address, then refresh.
             </Empty>
           )}
 
