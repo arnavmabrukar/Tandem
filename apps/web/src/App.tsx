@@ -102,7 +102,7 @@ function Dashboard() {
           <span className="spinner" />
           Loading project snapshot…
         </div>
-      ) : query.data && !accessDenied ? (
+      ) : (
         <Suspense
           fallback={
             <div role="status" className="loading">
@@ -111,66 +111,100 @@ function Dashboard() {
           }
         >
           <Routes>
-            <Route
-              path="/"
-              element={
-                <Navigate
-                  to={projects[0] ? `/projects/${projects[0].id}/activity` : '/projects/new'}
-                  replace
-                />
-              }
-            />
-            <Route path="/projects/new" element={<ProjectSetupPage key="new" project={null} />} />
-            <Route
-              path="/projects/:projectId"
-              element={
-                project ? <Navigate to={`/projects/${project.id}/activity`} replace /> : notFound
-              }
-            />
-            <Route
-              path="/projects/:projectId/activity"
-              element={project ? <ActivityPage key={project.id} project={project} /> : notFound}
-            />
-            <Route
-              path="/projects/:projectId/tasks"
-              element={project ? <TasksPage key={project.id} project={project} /> : notFound}
-            />
-            <Route
-              path="/projects/:projectId/tasks/:taskId"
-              element={project ? <ThreadPage key={project.id} project={project} /> : notFound}
-            />
-            <Route
-              path="/projects/:projectId/agents"
-              element={project ? <ConnectAgentPage key={project.id} project={project} /> : notFound}
-            />
-            <Route
-              path="/projects/:projectId/approvals"
-              element={project ? <ApprovalsPage key={project.id} project={project} /> : notFound}
-            />
-            <Route
-              path="/projects/:projectId/setup"
-              element={project ? <ProjectSetupPage key={project.id} project={project} /> : notFound}
-            />
-            <Route
-              path="/projects/:projectId/connections"
-              element={project ? <ConnectionsPage /> : notFound}
-            />
-            <Route
-              path="*"
-              element={
-                <Empty title="Page not found">
-                  <Link to="/">Return to your project</Link>.
-                </Empty>
-              }
-            />
-            {/* Available even when the signed-in user has no projects. */}
+            {/* Recipient inbox must stay above path="*" or it is unreachable. */}
             <Route
               path="/invitations"
               element={<InvitationsPage key={user.id} />}
             />
+            <Route path="/projects/new" element={<ProjectSetupPage key="new" project={null} />} />
+            {query.data && !accessDenied ? (
+              <>
+                <Route
+                  path="/"
+                  element={
+                    <Navigate
+                      to={
+                        projects[0]
+                          ? `/projects/${projects[0].id}/activity`
+                          : '/invitations'
+                      }
+                      replace
+                    />
+                  }
+                />
+                <Route
+                  path="/projects/:projectId"
+                  element={
+                    project ? (
+                      <Navigate to={`/projects/${project.id}/activity`} replace />
+                    ) : (
+                      notFound
+                    )
+                  }
+                />
+                <Route
+                  path="/projects/:projectId/activity"
+                  element={
+                    project ? <ActivityPage key={project.id} project={project} /> : notFound
+                  }
+                />
+                <Route
+                  path="/projects/:projectId/tasks"
+                  element={project ? <TasksPage key={project.id} project={project} /> : notFound}
+                />
+                <Route
+                  path="/projects/:projectId/tasks/:taskId"
+                  element={project ? <ThreadPage key={project.id} project={project} /> : notFound}
+                />
+                <Route
+                  path="/projects/:projectId/agents"
+                  element={
+                    project ? <ConnectAgentPage key={project.id} project={project} /> : notFound
+                  }
+                />
+                <Route
+                  path="/projects/:projectId/approvals"
+                  element={
+                    project ? <ApprovalsPage key={project.id} project={project} /> : notFound
+                  }
+                />
+                <Route
+                  path="/projects/:projectId/setup"
+                  element={
+                    project ? <ProjectSetupPage key={project.id} project={project} /> : notFound
+                  }
+                />
+                <Route
+                  path="/projects/:projectId/connections"
+                  element={project ? <ConnectionsPage /> : notFound}
+                />
+                <Route
+                  path="*"
+                  element={
+                    <Empty title="Page not found">
+                      <Link to="/">Return to your project</Link>.
+                    </Empty>
+                  }
+                />
+              </>
+            ) : (
+              <>
+                <Route path="/" element={<Navigate to="/invitations" replace />} />
+                <Route
+                  path="*"
+                  element={
+                    <Empty title="Workspace unavailable">
+                      Open <Link to="/invitations">invitations</Link> or{' '}
+                      <Link to="/projects/new">create a project</Link>, then retry the
+                      workspace refresh.
+                    </Empty>
+                  }
+                />
+              </>
+            )}
           </Routes>
         </Suspense>
-      ) : null}
+      )}
     </AppLayout>
   );
 }

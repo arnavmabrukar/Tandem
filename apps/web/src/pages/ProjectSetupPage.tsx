@@ -149,8 +149,8 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
           <section className="panel">
             <h2>Invitation records</h2>
             <p className="muted">
-              The backend manages invitation delivery and acceptance. A pending record is not proof
-              of delivery.
+              Recipients accept from the sidebar Invitations page after signing in with the same
+              verified email you invite. A pending record is not proof they have access yet.
             </p>
             {owner && (
               <form
