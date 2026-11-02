@@ -11,6 +11,7 @@ from mediator.db.projects import (
     ProjectVersionConflict,
 )
 from mediator.schemas.invitations import (
+    AcceptInvitationRequest,
     CreateInvitationRequest,
     RevokeInvitationRequest,
     InvitationMutationResponse,
