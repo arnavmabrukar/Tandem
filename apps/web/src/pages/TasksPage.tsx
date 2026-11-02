@@ -20,6 +20,8 @@ export function TasksPage({ project }: { project: Project }) {
   const [agentId, setAgentId] = useState('');
   const [paths, setPaths] = useState('');
   const [criteria, setCriteria] = useState('');
+  // Store the IDs of prerequisites selected for the new task.
+  const [dependencies, setDependencies] = useState<string[]>([]);
   const search = params.get('q') ?? '';
   const status = params.get('status') ?? 'all';
   const owner = params.get('agent') ?? 'all';
@@ -155,7 +157,12 @@ export function TasksPage({ project }: { project: Project }) {
                 agentId: agentId || null,
                 paths: lines(paths),
                 criteria: lines(criteria),
+                // Send prerequisite IDs alongside the task's other fields.
+                dependencies,
               });
+              // Clear selections only after the server confirms creation.
+              // Keep them on failure so the user can correct or retry.
+              setDependencies([]);
               setOpen(false);
               navigate(`/projects/${project.id}/tasks/${result.entityId}`);
             } catch {
@@ -209,6 +216,45 @@ export function TasksPage({ project }: { project: Project }) {
               onChange={(e) => setCriteria(e.target.value)}
             />
           </Field>
+                    {/* Group the checkboxes under an accessible heading. */}
+          <fieldset disabled={action.isPending}>
+            <legend>Depends on</legend>
+            <p className="muted">
+              Select prerequisite tasks from this project. Up to 100.
+            </p>
+
+            {project.tasks.length === 0 ? (
+              <p className="muted">No existing tasks to select.</p>
+            ) : (
+              project.tasks.map((prerequisite) => {
+                const selected = dependencies.includes(prerequisite.id);
+
+                return (
+                  <label key={prerequisite.id} className="row">
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      // At the limit, allow unchecking existing selections.
+                      disabled={!selected && dependencies.length >= 100}
+                      onChange={(event) => {
+                        const checked = event.currentTarget.checked;
+
+                        // Create a new array rather than mutating React state.
+                        setDependencies((current) =>
+                          checked
+                            ? [...current, prerequisite.id]
+                            : current.filter((id) => id !== prerequisite.id),
+                        );
+                      }}
+                    />
+                    <span>
+                      {prerequisite.title} — {label(prerequisite.status)}
+                    </span>
+                  </label>
+                );
+              })
+            )}
+          </fieldset>
           <ErrorNotice error={action.error} />
           <div className="row end">
             <Button variant="outline" disabled={action.isPending} onClick={() => setOpen(false)}>

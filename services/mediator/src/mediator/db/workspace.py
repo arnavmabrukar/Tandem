@@ -93,8 +93,25 @@ def load_workspace(issuer: str, subject: str) -> dict:
                                 'receipt', 'pending',
                                 'acceptance', 'pending',
 
-                                -- Dependency storage is not implemented yet.
-                                'dependencies', '[]'::jsonb,
+                                -- Return the prerequisite IDs saved for this task.
+                                'dependencies', (
+                                    SELECT COALESCE(
+                                        jsonb_agg(
+                                            -- The frontend expects string IDs.
+                                            dependency.depends_on_task_id::text
+                                            ORDER BY dependency.depends_on_task_id
+                                        ),
+
+                                        -- No prerequisites means an empty list.
+                                        '[]'::jsonb
+                                    )
+                                    FROM public.task_dependencies AS dependency
+
+                                    -- Read relationships for this task only,
+                                    -- within its authorized project.
+                                    WHERE dependency.project_id = task.project_id
+                                      AND dependency.task_id = task.id
+                                ),
 
                                 -- Translate database columns into the nested
                                 -- contract object expected by the frontend.

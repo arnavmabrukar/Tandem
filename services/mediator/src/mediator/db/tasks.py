@@ -5,6 +5,8 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from mediator.config import settings
+# Record timeline events inside the existing task transaction.
+from mediator.db.activity import record_task_activity
 from mediator.db.projects import (
     OperationConflict,
     ProjectAccessDenied,
@@ -214,6 +216,17 @@ def create_task(
                         ],
                     )
 
+            # Record only new operations; retries return their saved response.
+            # If event recording fails, task creation rolls back too.
+            record_task_activity(
+                connection,
+                project_id=project_id,
+                task_id=task["id"],
+                actor_id=actor_id,
+                kind="task_created",
+                text=f"Created task: {request.title}",
+            )
+
             # entityId is the TASK ID, while projectVersion belongs
             # to the project containing that task.
             result = CreateTaskResponse(
@@ -368,7 +381,8 @@ def cancel_task(
             # between our check and the UPDATE below.
             task = connection.execute(
                 """
-                SELECT id, status
+                -- Read the title for the cancellation event's description.
+                SELECT id, status, title
                 FROM public.tasks
                 WHERE id = %s AND project_id = %s
                 FOR UPDATE
@@ -397,6 +411,17 @@ def cancel_task(
                 WHERE id = %s AND project_id = %s
                 """,
                 (task_id, project_id),
+            )
+
+            # Save the event in the same transaction as the status update.
+            # This branch is skipped when replaying a successful cancellation.
+            record_task_activity(
+                connection,
+                project_id=project_id,
+                task_id=task_id,
+                actor_id=actor_id,
+                kind="task_cancelled",
+                text=f"Cancelled task: {task['title']}",
             )
 
             result = CancelTaskResponse(

@@ -64,10 +64,14 @@ In the table, `:p`, `:i`, `:a`, `:t`, `:r` represent the project, invitation, ag
 | `POST /api/projects/:p/invitations/:i/revoke`  | None                                                                                       | Owner                                                                           |
 | `POST /api/projects/:p/agents`                 | `name`, `client`, `owner`, `machine`, `capabilities: string[]`                             | Owner                                                                           |
 | `POST /api/projects/:p/agents/:a/revoke`       | None                                                                                       | Owner                                                                           |
-| `POST /api/projects/:p/tasks`                  | `title`, `description`, `agentId: string \| null`, `paths: string[]`, `criteria: string[]` | Owner or reviewer                                                               |
+| `POST /api/projects/:p/tasks`                  | `title`, `description`, `agentId: string \| null`, `paths: string[]`, `criteria: string[]`, `dependencies?: string[]` | Owner or reviewer                                                               |
 | `POST /api/projects/:p/tasks/:t/cancel`        | None                                                                                       | Owner or reviewer                                                               |
 | `POST /api/projects/:p/tasks/:t/messages`      | `body`, `replyTo: string \| null`                                                          | Owner or reviewer                                                               |
 | `POST /api/projects/:p/approvals/:r/decisions` | `decision`: `approved` or `rejected`; `note`, `target` below                               | Owner or reviewer                                                               |
+
+Task creation optionally accepts `dependencies`, an array of up to 100 unique prerequisite task UUIDs. Omitting it means no dependencies. Every prerequisite must already exist in the same project. Invalid prerequisites return HTTP 422. The task and its dependency relationships are saved in one transaction. Dependency IDs are returned in each task's `dependencies` array in the workspace response.
+
+Dependencies can currently be selected only during task creation. They record prerequisites; agent start restrictions are not implemented yet. Cancelling a prerequisite does not satisfy or remove the dependency.
 
 All authorities must be enforced by the server, regardless of UI controls. Viewers have no mutation controls. The server also validates resource scope, role changes, field limits, lifecycle transitions and all domain-specific restrictions.
 

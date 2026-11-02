@@ -157,6 +157,8 @@ export type Command =
       agentId: string | null;
       paths: string[];
       criteria: string[];
+      // Optional for existing callers; the backend defaults to an empty list.
+      dependencies?: string[];
     }
   | { type: 'cancel-task'; taskId: string }
   | { type: 'send-message'; taskId: string; body: string; replyTo: string | null }
