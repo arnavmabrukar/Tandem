@@ -200,6 +200,27 @@ def create_task(
             if task is None:
                 raise RuntimeError("Task creation returned no row")
 
+            # Snapshot the stored contract and repository for human review.
+            # This runs inside the task transaction: either both records are
+            # committed, or neither is. Identical retries skip this branch.
+            connection.execute(
+                """
+                INSERT INTO public.contract_approvals (
+                    project_id, task_id, repository,
+                    task_version, contract_version,
+                    contract_summary, contract_paths, acceptance_criteria
+                )
+                SELECT t.project_id, t.id, p.repository,
+                       t.version, t.contract_version,
+                       t.contract_summary, t.contract_paths,
+                       t.acceptance_criteria
+                FROM public.tasks AS t
+                JOIN public.projects AS p ON p.id = t.project_id
+                WHERE t.project_id = %s AND t.id = %s
+                """,
+                (project_id, task["id"]),
+            )
+
             # Save prerequisites atomically with the task and operation result.
             if request.dependencies:
                 with connection.cursor() as cursor:
@@ -411,6 +432,18 @@ def cancel_task(
                 WHERE id = %s AND project_id = %s
                 """,
                 (task_id, project_id),
+            )
+
+            # A cancelled task must no longer offer a pending review.
+            # Preserve completed decisions as historical records.
+            connection.execute(
+                """
+                UPDATE public.contract_approvals
+                SET status = 'stale'
+                WHERE project_id = %s AND task_id = %s
+                  AND status = 'pending'
+                """,
+                (project_id, task_id),
             )
 
             # Save the event in the same transaction as the status update.

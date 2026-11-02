@@ -140,6 +140,52 @@ def load_workspace(issuer: str, subject: str) -> dict:
                     WHERE task.project_id = p.id
                 ) AS tasks,
 
+                -- Load contract reviews only within this authorized project.
+                (
+                    SELECT COALESCE(
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'id', approval.id::text,
+                                'taskId', approval.task_id::text,
+                                'action', 'Approve contract',
+                                'repository', approval.repository,
+
+                                -- A pending request stops being actionable
+                                -- when its target changes. Preserve completed
+                                -- decisions as history of their original target.
+                                'status', CASE
+                                    WHEN approval.status = 'pending' AND (
+                                        approval.repository <> p.repository
+                                        OR approval.task_version <> reviewed_task.version
+                                        OR approval.contract_version <> reviewed_task.contract_version
+                                        OR reviewed_task.status <> 'open'
+                                    ) THEN 'stale'
+                                    ELSE approval.status
+                                END,
+                                'taskVersion', approval.task_version,
+                                'contractVersion', approval.contract_version,
+
+                                -- Contract reviews have no code commit target.
+                                'head', NULL,
+                                'requestedAt', approval.requested_at,
+                                'decidedBy', approval.decided_by_name,
+                                'decidedAt', approval.decided_at,
+
+                                -- The frontend expects a string even before
+                                -- a reviewer has supplied a decision note.
+                                'note', COALESCE(approval.note, '')
+                            )
+                            ORDER BY approval.requested_at, approval.id
+                        ),
+                        '[]'::jsonb
+                    )
+                    FROM public.contract_approvals AS approval
+                    JOIN public.tasks AS reviewed_task
+                        ON reviewed_task.project_id = approval.project_id
+                       AND reviewed_task.id = approval.task_id
+                    WHERE approval.project_id = p.id
+                ) AS approvals,
+
                 -- Read events belonging to this authorized project.
                 (
                     SELECT COALESCE(
@@ -224,12 +270,11 @@ def load_workspace(issuer: str, subject: str) -> dict:
             (issuer, subject),
         ).fetchall()
 
-    # Tasks and activity now come from the SQL query above.
+    # Tasks, approvals, messages, and activity come from the SQL query above.
     # These remaining collections await their feature implementations.
     for project in projects:
         project.update({
             "agents": [],
-            "approvals": [],
             "claims": [],
         })
 
