@@ -1,7 +1,19 @@
 # class used to create web app
 # Parse UUIDs and read the Idempotency-Key request header.
 from uuid import UUID
+from mediator.db.approvals import decide_contract, ApprovalNotFound, ApprovalConflict
+from mediator.schemas.approvals import DecideContractRequest, DecideContractResponse
 from fastapi import Depends, FastAPI, Header, HTTPException
+
+# Configure which hostnames may receive MCP requests.
+from mcp.server.transport_security import TransportSecuritySettings
+
+# Used to manage startup and shutdown of the MCP server.
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+
+# Import the server containing our registered MCP tools.
+from mediator.mcp.server import mcp
 
 # Add to the existing mediator.auth import.
 from mediator.auth import require_verified_email
@@ -93,7 +105,59 @@ from mediator.db.workspace import load_workspace
 # database function that saves or retrieves the Tandem user
 from mediator.db.users import get_or_create_user
 
-app = FastAPI(title=settings.app_name)
+
+
+
+
+# Build the HTTP application before accessing its session manager.
+mcp_http_app = mcp.streamable_http_app(
+    streamable_http_path="/",
+    stateless_http=True,
+    json_response=True,
+
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+
+        # Hostnames only: no https:// prefix or /mcp/ path.
+        allowed_hosts=[
+            "localhost:*",
+            "127.0.0.1:*",
+            "tandem-jr3e.onrender.com",
+        ],
+
+        # Validate Origin when a client sends that header.
+        allowed_origins=[
+            "http://localhost:*",
+            "http://127.0.0.1:*",
+            "https://tandem-jr3e.onrender.com",
+        ],
+    ),
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Start MCP's background resources when FastAPI starts.
+    async with mcp.session_manager.run():
+        # FastAPI serves requests while execution is paused here.
+        yield
+
+    # Leaving the context shuts down MCP's resources cleanly.
+
+
+# Give FastAPI responsibility for MCP startup and shutdown.
+app = FastAPI(
+    title=settings.app_name,
+    lifespan=lifespan,
+)
+
+# Expose the MCP application at /mcp/.
+# Existing /api/... routes continue to work.
+app.mount("/mcp", mcp_http_app)
+
+
+
+
 
 # permit browser requests form the origins listen in config.py
 app.add_middleware(
@@ -757,3 +821,30 @@ def create_message(
             status_code=503,
             detail="Message database unavailable",
         ) from None
+
+
+@app.post(
+    "/api/projects/{project_id}/approvals/{approval_id}/decisions",
+    response_model=DecideContractResponse,
+)
+def record_contract_decision(
+    project_id: UUID,
+    approval_id: UUID,
+    request: DecideContractRequest,
+    idempotency_key: UUID = Header(alias="Idempotency-Key"),
+    user: dict[str, str] = Depends(get_current_user),
+) -> DecideContractResponse:
+    # Require consistent retry identifiers; identity comes from authentication.
+    if idempotency_key != request.operationId:
+        raise HTTPException(status_code=400, detail="Idempotency-Key must match operationId")
+    try:
+        return decide_contract(UUID(user["id"]), project_id, approval_id, request)
+    except ProjectAccessDenied:
+        raise HTTPException(status_code=403, detail="Project owner or reviewer access is required") from None
+    except ApprovalNotFound:
+        raise HTTPException(status_code=404, detail="Approval not found in this project") from None
+    except (OperationConflict, ProjectVersionConflict, ApprovalConflict) as error:
+        # These domain errors contain only controlled, public explanations.
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    except DatabaseError:
+        raise HTTPException(status_code=503, detail="Approval database unavailable") from None

@@ -17,6 +17,7 @@ dependencies = [
     "PyJWT[crypto]>=2.10,<3", # verifies auth0 jwt signatures using public rsa
     "httpx>=0.28,<1", # calls Auth0's user profile endpoint from Python
     "email-validator>=2,<3", # Required by Pydantic's EmailStr
+    "mcp[cli]>=2,<3", # MCP server SDK and development tools
 ]
 
 [project.optional-dependencies]
