@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tandem": {
+      "type": "http",
+      "url": "https://tandem-jr3e.onrender.com/mcp/"
+    }
+  }
+}
