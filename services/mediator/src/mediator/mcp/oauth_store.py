@@ -84,9 +84,12 @@ class OAuthStore:
                 WHERE g.owner_user_id=%s AND m.role='owner'
                   AND g.status <> 'revoked' AND a.grant_status <> 'revoked'
                 ORDER BY p.name,a.name''', (owner_id,)).fetchall()
+            projects = c.execute('''SELECT p.id::text AS id,p.name,p.version
+                FROM public.projects p JOIN public.project_memberships m ON m.project_id=p.id
+                WHERE m.user_id=%s AND m.role='owner' ORDER BY p.name''', (owner_id,)).fetchall()
             return {'clientName': metadata.get('client_name') or 'Unnamed MCP client',
                     'clientId': row['client_id'], 'redirectUri': row['params']['redirect_uri'],
-                    'choices': choices}
+                    'choices': choices, 'projects': projects}
 
     def consent(self, ticket, owner_id, project_id, agent_id, allow):
         with database() as c:
