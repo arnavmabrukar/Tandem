@@ -151,6 +151,21 @@ def register_agent(
     return result
 
 
+def record_agent_seen(agent_id: str) -> None:
+    """Record that an authenticated agent just made an MCP request."""
+    if settings.database_url is None or not settings.database_url.get_secret_value().strip():
+        raise RuntimeError("DATABASE_URL is not configured")
+    # Check-ins must not hold up the agent's actual request for long.
+    with psycopg.connect(settings.database_url.get_secret_value(), connect_timeout=3) as connection:
+        # Agents can call tools rapidly, so write at most once every 30 seconds.
+        connection.execute(
+            """UPDATE public.agents SET last_seen_at = clock_timestamp()
+               WHERE id = %s AND (last_seen_at IS NULL
+                   OR last_seen_at < clock_timestamp() - interval '30 seconds')""",
+            (agent_id,),
+        )
+
+
 def issue_agent_token(
     actor_id: UUID, project_id: UUID, agent_id: str,
     request: IssueAgentTokenRequest,
@@ -224,7 +239,7 @@ def issue_agent_token(
         connection.execute(
             """UPDATE public.agents
                SET token_hash = %s, grant_status = 'active', presence = 'offline',
-                   session = NULL, updated_at = clock_timestamp()
+                   last_seen_at = NULL, session = NULL, updated_at = clock_timestamp()
                WHERE id = %s""",
             (token_hash, agent_id),
         )

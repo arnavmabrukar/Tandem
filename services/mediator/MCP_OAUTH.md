@@ -76,8 +76,8 @@ migration does not break existing manually issued `tdm_` credentials.
   OAuth credentials authorize only the consented project, not every grant on that agent.
 - `/revoke` supports public clients. Agents → Manage OAuth connections also disconnects
   owned sessions. Disconnecting OAuth does not rotate an independently issued manual token.
-- Only `tandem_status` and `tandem_whoami` exist today. Future tools must enforce permissions
-  using the request's `tandem_identity`; OAuth never authorizes human approval actions.
+- Tools enforce permissions using the request's `tandem_identity`, and OAuth never authorizes
+  human approval actions. See [README.md](README.md#agent-tools-and-presence) for the tools.
 - Anonymous registration/authorization endpoints are capped at 60 requests/minute each
   per worker, and OAuth POST bodies at 16 KiB. Use an edge/global rate limit when scaling.
 - This implementation uses DCR for IDE compatibility; it does not fetch arbitrary client

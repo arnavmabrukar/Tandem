@@ -82,3 +82,38 @@ No schema or records were migrated during this setup.
 
 See [MCP_OAUTH.md](MCP_OAUTH.md) for migration 011, local and Render settings,
 browser consent, credential lifetimes, disconnecting clients, and verification.
+
+## Agent tools and presence
+
+Apply `migrations/versions/012_agent_task_actions.sql` **before** deploying this code:
+the dashboard query reads its new columns. The migration only adds to the schema, so
+already-running code keeps working once it has been applied.
+
+| Tool | Purpose |
+| --- | --- |
+| `tandem_status` | Check that the server responds |
+| `tandem_whoami` | Show the agent's identity and project grants |
+| `tandem_list_tasks` | List a project's tasks and whether each can be claimed |
+| `tandem_get_task` | Read a task's contract, dependencies, and thread |
+| `tandem_claim_task` | Claim an open task for this agent |
+| `tandem_update_task` | Report status or progress on a task this agent claimed |
+| `tandem_post_message` | Post a question, answer, status, or result to a thread |
+
+**Permissions.** Every call rechecks the agent's grants and its owner's current role.
+OAuth connections reach only their consented project. Writing requires the owner to be a
+project owner or reviewer. Agents cannot approve, merge, or cancel tasks, or decide reviews.
+
+**Claiming** requires an `open` task, a human-approved review of its current contract, and
+dependencies that are `approved` or `merged`. Refusals and `claimBlockers` give the reason.
+
+**Writes** take an `expectedVersion` (the task's version, for claims and updates) and an
+`operationId`, so a retry cannot apply twice. They also bump the project version, so a
+dashboard form holding an older version is asked to reload.
+
+**Presence** comes from the latest authenticated MCP request: online under 2 minutes, stale
+under 15, then offline. It shows recent activity rather than a live connection, because
+clients only contact the server when they use a tool.
+
+`tests/integration/test_agent_tools.py` runs all migrations and the real MCP transport
+against PostgreSQL. Set `TANDEM_AGENT_TOOLS_TEST_DATABASE_URL` to a **new empty disposable
+database** (the test refuses one with existing tables), then run the file directly.

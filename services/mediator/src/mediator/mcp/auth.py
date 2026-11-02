@@ -1,5 +1,6 @@
 """Authenticate Tandem-issued agent tokens on the hosted MCP transport."""
 import hashlib
+import logging
 import re
 
 import psycopg
@@ -13,6 +14,9 @@ from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.provider import AccessToken
 
 from mediator.config import settings
+from mediator.db.agents import record_agent_seen
+
+logger = logging.getLogger(__name__)
 
 
 def verify_agent_token(token: str) -> dict | None:
@@ -89,6 +93,11 @@ class AgentBearerMiddleware:
             await JSONResponse({"detail": "Valid agent token required"}, status_code=401,
                                headers={"WWW-Authenticate": challenge, "Cache-Control": "no-store"})(scope, receive, send)
             return
+        # Presence is informational: failing to record it must not fail the request.
+        try:
+            await run_in_threadpool(record_agent_seen, identity["agentId"])
+        except (psycopg.Error, RuntimeError) as error:
+            logger.warning("Could not record agent check-in: %s", type(error).__name__)
         scope["user"] = AuthenticatedUser(access or AccessToken(
             token=token, client_id=identity["agentId"], subject=identity["ownerId"],
             scopes=[], claims={"tandem_identity": identity},

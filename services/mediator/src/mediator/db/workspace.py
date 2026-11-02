@@ -98,10 +98,16 @@ def load_workspace(issuer: str, subject: str) -> dict:
 
                                 -- A stored registration is not a live connection.
                                 -- Inactive grants must not appear online.
+                                -- Derived from the latest check-in so it expires
+                                -- when an agent stops making requests.
                                 'presence', CASE
-                                    WHEN agent.grant_status = 'active'
-                                      AND project_grant.status = 'active'
-                                        THEN agent.presence
+                                    WHEN agent.grant_status <> 'active'
+                                      OR project_grant.status <> 'active'
+                                        THEN 'offline'
+                                    WHEN agent.last_seen_at > now() - interval '2 minutes'
+                                        THEN 'online'
+                                    WHEN agent.last_seen_at > now() - interval '15 minutes'
+                                        THEN 'stale'
                                     ELSE 'offline'
                                 END,
                                 'lastSeen', agent.last_seen_at,
@@ -137,8 +143,8 @@ def load_workspace(issuer: str, subject: str) -> dict:
                                 'version', task.version,
                                 'progress', task.progress,
 
-                                -- Tasks are currently unassigned.
-                                'agentId', NULL,
+                                -- The agent holding the claim, if any.
+                                'agentId', task.claimed_by_agent_id,
 
                                 -- Use the task ID as its stable thread key.
                                 -- Message storage will be implemented separately.
@@ -269,7 +275,7 @@ def load_workspace(issuer: str, subject: str) -> dict:
                     WHERE event.project_id = p.id
                 ) AS activity,
 
-                -- Load human notes for this authorized project.
+                -- Load human and agent messages for this authorized project.
                 (
                     SELECT COALESCE(
                         jsonb_agg(
@@ -297,11 +303,6 @@ def load_workspace(issuer: str, subject: str) -> dict:
                     FROM public.messages AS message
                     WHERE message.project_id = p.id
                       AND message.task_id IS NOT NULL
-
-                      -- Only expose the human-message flow implemented so far.
-                      -- Agent messages will join this projection with MCP work.
-                      AND message.sender_user_id IS NOT NULL
-                      AND message.type = 'human_note'
                 ) AS messages
 
             FROM public.projects AS p
