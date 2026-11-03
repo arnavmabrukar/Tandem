@@ -16,6 +16,13 @@ MODEL_API_KEY=your-meta-api-key
 TANDEM_META_MODEL=muse-spark-1.3-contributor
 ```
 
+Paste the bare key with no quotes. Surrounding whitespace is ignored; a key that
+still contains quotes, spaces, or non-ASCII characters produces 503.
+
+Backend logs record why generation failed, without any prompt, model output, or
+credential: Meta's HTTP status and error code, a timeout or connection error, or
+which plan fields failed validation. Search them for `Meta` or `MODEL_API_KEY`.
+
 Restart the backend after changing configuration. No new migration is needed.
 Deploy both frontend and backend before using the hosted UI.
 
