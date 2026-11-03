@@ -77,6 +77,12 @@ export function commandEndpoint(request: MutationRequest): {
         path: `${base}/tasks/${segment(command.taskId)}/cancel`,
         payload: {},
       };
+    case 'review-task':
+      return { method: 'POST', path: `${base}/tasks/${segment(command.taskId)}/review`,
+        payload: { decision: command.decision, note: command.note } };
+    case 'release-task':
+      return { method: 'POST', path: `${base}/tasks/${segment(command.taskId)}/release`,
+        payload: { note: command.note } };
     case 'send-message':
       return {
         method: 'POST',

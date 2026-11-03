@@ -28,6 +28,16 @@ describe('real HTTP client contract', () => {
       .toEqual({ method: 'POST', path: '/api/projects/project-1/tasks/t-1/assignment',
         payload: { agentId: null, autoSelect: true } });
   });
+  it('sends human decisions on agent work to their task routes', () => {
+    expect(commandEndpoint(request({ type: 'review-task', taskId: 't-1', decision: 'accept', note: null })))
+      .toEqual({ method: 'POST', path: '/api/projects/project-1/tasks/t-1/review',
+        payload: { decision: 'accept', note: null } });
+    expect(commandEndpoint(request({ type: 'review-task', taskId: 't-1', decision: 'request_changes', note: 'Fix it' })))
+      .toEqual({ method: 'POST', path: '/api/projects/project-1/tasks/t-1/review',
+        payload: { decision: 'request_changes', note: 'Fix it' } });
+    expect(commandEndpoint(request({ type: 'release-task', taskId: 't-1', note: null })))
+      .toEqual({ method: 'POST', path: '/api/projects/project-1/tasks/t-1/release', payload: { note: null } });
+  });
   it('reads only server data with a bearer token and validates the snapshot', async () => {
     const { api, fetcher } = setup(Response.json({ schemaVersion: 1, projects: [] }));
     expect(await api.load()).toEqual({ schemaVersion: 1, projects: [] });

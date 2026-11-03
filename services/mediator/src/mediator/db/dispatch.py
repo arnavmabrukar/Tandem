@@ -7,6 +7,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from mediator.db import agent_tasks
+from mediator.db.activity import record_task_activity
 from mediator.db.assignments import assign_task
 from mediator.db.projects import OperationConflict, ProjectAccessDenied, ProjectVersionConflict
 from mediator.schemas.assignments import AssignTaskRequest, AutoDelegateRequest
@@ -53,6 +54,38 @@ def set_auto_delegate(actor_id: UUID, project_id: UUID, request: AutoDelegateReq
     return result
 
 
+def return_stale_assignments(project_id: UUID, actor_id: UUID) -> int:
+    """Requeue unstarted automatic assignments whose agent has gone offline.
+
+    Claims are left alone: that agent may have work in progress, and a second agent
+    could duplicate it. A person decides those with the task's Release action.
+    """
+    stale_query = """t.project_id=%s AND t.status='open' AND t.auto_assigned
+                     AND t.claimed_by_agent_id IS NULL
+                     AND t.assigned_agent_id IN (SELECT a.id FROM public.agents a
+                         WHERE a.last_seen_at IS NULL
+                            OR a.last_seen_at <= now() - interval '15 minutes')"""
+    with agent_tasks._transaction() as connection:
+        connection.execute("SET LOCAL statement_timeout = '5s'")
+        # Check without locks first, since nearly every sweep finds nothing.
+        if connection.execute(f"SELECT 1 FROM public.tasks t WHERE {stale_query} LIMIT 1",
+                              (project_id,)).fetchone() is None:
+            return 0
+        # Lock the project before tasks, matching every other task writer.
+        connection.execute("UPDATE public.projects SET version=version+1 WHERE id=%s", (project_id,))
+        tasks = connection.execute(
+            f"""UPDATE public.tasks t SET assigned_agent_id=NULL, auto_assigned=false,
+                   updated_at=clock_timestamp()
+               WHERE {stale_query} RETURNING t.id, t.title""",
+            (project_id,),
+        ).fetchall()
+        for task in tasks:
+            record_task_activity(connection, project_id=project_id, task_id=task["id"],
+                                 actor_id=actor_id, kind="task_released",
+                                 text=f"Took back from an offline agent: {task['title']}")
+    return len(tasks)
+
+
 def dispatch_once(stop: Event | None = None) -> int:
     """Assign up to 100 ready tasks per opted-in project per sweep.
 
@@ -72,6 +105,7 @@ def dispatch_once(stop: Event | None = None) -> int:
         if stop is not None and stop.is_set():
             break
         try:
+            return_stale_assignments(project["id"], project["auto_delegate_by"])
             with agent_tasks._transaction() as connection:
                 connection.execute("SET LOCAL statement_timeout = '5s'")
                 # Filter before LIMIT so blocked old tasks cannot starve ready ones.

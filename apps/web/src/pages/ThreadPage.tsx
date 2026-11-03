@@ -32,6 +32,11 @@ function ThreadDetail({ project, task }: { project: Project; task: Task }) {
   const message = useAction(project);
   const cancel = useAction(project);
   const assignment = useAction(project);
+  const decision = useAction(project);
+  const [decisionNote, setDecisionNote] = useState('');
+  const canReview = writable && ['in_review', 'blocked'].includes(task.status);
+  const canRelease = writable && (['claimed', 'in_progress', 'in_review', 'blocked', 'conflict'].includes(task.status)
+    || (task.status === 'open' && !!task.assignedAgentId));
   const [selectedAgent, setSelectedAgent] = useState(task.assignedAgentId ?? '');
   // Show the mediator's chosen agent after the refreshed snapshot arrives.
   useEffect(() => setSelectedAgent(task.assignedAgentId ?? ''), [task.assignedAgentId]);
@@ -125,6 +130,45 @@ function ThreadDetail({ project, task }: { project: Project; task: Task }) {
             </Button>
           </form>
         )}
+        {canReview && (
+          <>
+            <h3>Review this work</h3>
+            <p className="muted">{task.status === 'in_review'
+              ? 'Merge the pull request first. Accepting marks this task finished and lets tasks that depend on it start.'
+              : 'The agent could not finish. Tell it what to do differently, or release the task below.'}</p>
+            <Field label="Note for the agent">
+              <textarea maxLength={10000} value={decisionNote} disabled={decision.isPending}
+                onChange={(event) => setDecisionNote(event.target.value)} />
+            </Field>
+            <div className="row">
+              {task.status === 'in_review' && (
+                <Button disabled={decision.isPending} onClick={async () => {
+                  try {
+                    await decision.mutateAsync({ type: 'review-task', taskId: task.id, decision: 'accept',
+                      note: decisionNote.trim() ? decisionNote : null });
+                    setDecisionNote('');
+                  } catch { /* ErrorNotice displays the API refusal. */ }
+                }}>Accept work</Button>
+              )}
+              <Button variant="outline" disabled={decision.isPending || !decisionNote.trim()} onClick={async () => {
+                try {
+                  await decision.mutateAsync({ type: 'review-task', taskId: task.id,
+                    decision: 'request_changes', note: decisionNote });
+                  setDecisionNote('');
+                } catch { /* ErrorNotice displays the API refusal. */ }
+              }}>Request changes</Button>
+            </div>
+          </>
+        )}
+        {canRelease && (
+          <Button variant="outline" size="sm" disabled={decision.isPending} onClick={async () => {
+            if (!window.confirm('Return this task to the queue? The agent will lose it, and any work it has not pushed stays on its machine.')) return;
+            try {
+              await decision.mutateAsync({ type: 'release-task', taskId: task.id, note: null });
+            } catch { /* ErrorNotice displays the API refusal. */ }
+          }}>Release task</Button>
+        )}
+        <ErrorNotice error={decision.error} />
         {canCancel && (
           <Button
             variant="outline"

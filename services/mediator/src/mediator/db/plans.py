@@ -228,6 +228,7 @@ def approve_plan(actor_id: UUID, project_id: UUID, plan_id: UUID,
         # Validate stored content again before it becomes live work.
         proposal = PlanProposal.model_validate(revision["proposal"])
         ids = {task.key: uuid4() for task in proposal.tasks}
+        reviewer = c.execute("SELECT name FROM public.users WHERE id=%s", (actor_id,)).fetchone()
         c.execute(
             """INSERT INTO public.plan_approvals(plan_id,project_id,plan_version,approved_by,note)
                VALUES (%s,%s,%s,%s,%s)""",
@@ -244,12 +245,19 @@ def approve_plan(actor_id: UUID, project_id: UUID, plan_id: UUID,
             )
             c.execute("INSERT INTO public.plan_tasks(project_id,plan_id,task_key,task_id) VALUES (%s,%s,%s,%s)",
                       (project_id, plan_id, task.key, task_id))
-            # Preserve the existing per-task human contract review gate.
+            # Each task keeps a human contract review record. startNow records this
+            # same reviewer's decision now, instead of asking for it per task.
             c.execute(
                 """INSERT INTO public.contract_approvals(project_id,task_id,repository,
-                       task_version,contract_version,contract_summary,contract_paths,acceptance_criteria)
-                   VALUES (%s,%s,%s,1,1,%s,%s,%s)""",
-                (project_id, task_id, project["repository"], task.contractSummary, task.paths, task.criteria),
+                       task_version,contract_version,contract_summary,contract_paths,acceptance_criteria,
+                       status,decided_by,decided_by_name,decided_at,note)
+                   VALUES (%s,%s,%s,1,1,%s,%s,%s,%s,%s,%s,CASE WHEN %s THEN clock_timestamp() END,%s)""",
+                (project_id, task_id, project["repository"], task.contractSummary, task.paths, task.criteria,
+                 "approved" if request.startNow else "pending",
+                 actor_id if request.startNow else None,
+                 reviewer["name"] if request.startNow else None,
+                 request.startNow,
+                 request.note if request.startNow else None),
             )
             record_task_activity(c, project_id=project_id, task_id=task_id, actor_id=actor_id,
                                  kind="task_created", text=f"Created from approved plan: {task.title}")
@@ -258,6 +266,10 @@ def approve_plan(actor_id: UUID, project_id: UUID, plan_id: UUID,
             for prerequisite in task.dependencies:
                 c.execute("INSERT INTO public.task_dependencies(project_id,task_id,depends_on_task_id) VALUES (%s,%s,%s)",
                           (project_id, ids[task.key], ids[prerequisite]))
+        if request.startNow:
+            # Approving plans already requires project ownership, as does delegation.
+            c.execute("UPDATE public.projects SET auto_delegate=true,auto_delegate_by=%s WHERE id=%s",
+                      (actor_id, project_id))
         result = ApprovePlanResponse(projectId=project_id, projectVersion=project["version"],
                                      planId=plan_id, planVersion=revision["version"], taskIds=ids)
         c.execute("UPDATE public.operations SET response_payload=%s WHERE actor_id=%s AND operation_id=%s",
