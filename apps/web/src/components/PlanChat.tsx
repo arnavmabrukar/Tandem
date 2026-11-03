@@ -12,20 +12,25 @@ import { PlanApproval } from './PlanApproval';
 
 type Message = { role: 'user' | 'assistant'; content: string; proposal?: PlanProposal; saved?: PlanRevision; approved?: boolean };
 
-function DraftCard({ proposal, project, disabled, message, onUpdate }: { proposal: PlanProposal; project: Project; disabled: boolean; message: Message; onUpdate: (patch: Partial<Message>) => void }) {
+export function DraftCard({ proposal, project, disabled, message, onUpdate, saveDraft }: { proposal: PlanProposal; project: Project; disabled: boolean; message: Message; onUpdate: (patch: Partial<Message>) => void; saveDraft?: () => Promise<PlanRevision> }) {
   const { api, user } = useSession();
   const client = useQueryClient();
   const pending = useRef<SavePlanRequest | null>(null);
   const [approved, setApproved] = useState(message.approved ?? false);
   const [saved, setSaved] = useState<PlanRevision | null>(message.saved ?? null);
+  useEffect(() => {
+    if (message.saved) setSaved(message.saved);
+    if (message.approved) setApproved(true);
+  }, [message.saved, message.approved]);
   const save = useMutation({
     mutationFn: () => {
+      if (saveDraft) return saveDraft();
       // A retry reuses the operation ID so an uncertain save cannot duplicate the plan.
       pending.current ??= { operationId: crypto.randomUUID(), expectedVersion: project.version, proposal };
       return api.savePlan(project.id, null, pending.current);
     },
     onSuccess: result => {
-      const revision = { ...result, createdBy: user!.id, createdAt: new Date().toISOString(), approvedPlanVersion: null, proposal };
+      const revision = saveDraft ? result as PlanRevision : { ...result, createdBy: user!.id, createdAt: new Date().toISOString(), approvedPlanVersion: null, proposal };
       setSaved(revision); onUpdate({ saved: revision });
       void client.invalidateQueries({ queryKey: ['plans', user!.id, project.id] });
       void client.invalidateQueries({ queryKey: ['workspace', user!.id] });

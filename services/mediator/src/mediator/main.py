@@ -1283,3 +1283,42 @@ def delete_project(project_id: UUID, request: DeleteProjectRequest,
         raise HTTPException(400, "Idempotency-Key must match operationId")
     with plan_api_errors():
         return delete_saved_project(UUID(user["id"]), project_id, request)
+
+# Human room endpoints use dashboard authentication, never agent credentials.
+from mediator.db import room as project_room
+from mediator.schemas.room import RoomMessageRequest
+
+
+@contextmanager
+def room_api_errors():
+    try:
+        yield
+    except agent_tasks.AgentAccessDenied as error:
+        raise HTTPException(403, str(error)) from None
+    except agent_tasks.AgentOperationConflict as error:
+        raise HTTPException(409, str(error)) from None
+    except PlannerUnavailable:
+        raise HTTPException(503, 'The mediator model is not configured') from None
+    except PlannerFailed:
+        raise HTTPException(502, 'The mediator could not reply. Retry your message.') from None
+    except DatabaseError:
+        raise HTTPException(503, 'The project room is unavailable') from None
+
+
+@app.get('/api/projects/{project_id}/room')
+def get_project_room(project_id: UUID, user=Depends(get_current_user)):
+    with room_api_errors():
+        return project_room.read_room(project_id, user_id=UUID(user['id']))
+
+
+@app.post('/api/projects/{project_id}/room')
+def post_project_room(project_id: UUID, request: RoomMessageRequest,
+                      user=Depends(get_current_user)):
+    with room_api_errors():
+        return project_room.post_message(project_id, request, user_id=UUID(user['id']))
+
+
+@app.post('/api/projects/{project_id}/room/{exchange_id}/draft')
+def save_room_draft(project_id: UUID, exchange_id: UUID, user=Depends(get_current_user)):
+    with room_api_errors(), plan_api_errors():
+        return project_room.save_draft(project_id, exchange_id, UUID(user['id']))

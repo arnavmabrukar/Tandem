@@ -1336,3 +1336,34 @@ td:first-child {
   .chat-footnote details { text-align: left; }
 }
 @media (prefers-reduced-motion: reduce) { .chat-dots { animation: none; } }
+
+/* A project conversation with a compact, persistent agent roster. */
+.agent-room-layout { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 20px; align-items: start; }
+.agent-room-chat { min-width: 0; margin: 0; }
+.room-transcript { flex: 1; min-height: 0; overflow-y: auto; }
+.agent-room-chat .chat-header, .agent-room-chat .chat-bottom { flex-shrink: 0; }
+.agent-room-chat .chat-footnote { justify-content: flex-start; align-items: center; flex-wrap: nowrap; }
+.agent-room-chat .chat-footnote svg { flex-shrink: 0; }
+.room-roster { background: white; border: 1px solid var(--border, #dfe7ed); border-radius: 18px; padding: 18px; }
+.room-roster > button { width: 100%; }
+.room-roster h2 { font-size: 15px; margin: 24px 0 14px; }
+.room-roster h3 { font-size: 13px; color: #64748b; margin: 24px 0 12px; }
+.roster-member { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.roster-member strong { display: block; font-size: 14px; overflow-wrap: anywhere; }
+.roster-member small { display: block; font-size: 12px; color: #64748b; }
+.roster-member .badge { margin-left: auto; font-size: 11px; }
+.roster-member .agent-icon { flex-shrink: 0; width: 34px; height: 34px; }
+.roster-agent { padding: 12px 0; border-bottom: 1px solid #edf1f5; }
+.roster-agent summary { cursor: pointer; list-style: none; }
+.roster-agent .details-grid { font-size: 12px; margin: 16px 0; }
+.room-exchange { padding: 10px 0 22px; border-bottom: 1px solid #edf1f5; margin-bottom: 18px; }
+.room-message { padding: 14px 18px; border-radius: 14px; }
+.room-human { background: #f0f7f5; }
+.room-agent { background: #f4f6fa; }
+.room-mediator { margin-top: 8px; }
+.room-message strong { font-size: 14px; }
+.room-message time { font-size: 11px; color: #64748b; }
+.room-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+.room-change { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid #dfe7ed; border-radius: 10px; margin: 8px 0; }
+.room-claims { margin-top: 20px; }
+@media (max-width: 1050px) { .agent-room-layout { grid-template-columns: minmax(0, 1fr); } .room-roster { grid-row: 1; } .room-roster h2, .room-roster h3 { margin-top: 14px; } }

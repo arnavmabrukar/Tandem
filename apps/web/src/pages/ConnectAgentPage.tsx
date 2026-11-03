@@ -1,14 +1,14 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { Bot, Plus } from 'lucide-react';
 import { useSession } from '../auth/session';
 import { useAction } from '../hooks/useWorkspace';
 import { roleFor, type Agent, type Project } from '../types/domain';
-import { Badge, Empty, ErrorNotice, Field, PageHeader, Timestamp } from '../components/common';
+import { Badge, ErrorNotice, Field, Timestamp } from '../components/common';
 import { FileClaimsTable } from '../components/FileClaimsTable';
 import { Button } from '../components/ui/button';
 import { Modal } from '../components/ui/dialog';
 import { AgentOAuthSetup } from '../components/AgentOAuthSetup';
+import { AgentRoom } from '../components/AgentRoom';
 import { AgentTokenButton } from '../components/AgentTokenButton';
 
 export function ConnectAgentPage({ project }: { project: Project }) {
@@ -28,111 +28,31 @@ export function ConnectAgentPage({ project }: { project: Project }) {
   const [capabilities, setCapabilities] = useState('');
   return (
     <>
-      <PageHeader
-        title="Agent connections"
-        description="Each agent keeps its own machine, context, credentials and local worktree."
-        action={
-          <Button
-            disabled={!owner}
-            onClick={() => {
-              add.reset();
-              setOpen(true);
-            }}
-          >
-            <Plus size={17} />
-            Add agent manually
-          </Button>
-        }
-      />
-      <p><Button onClick={() => setConnectOpen(true)}>Connect your IDE</Button></p>
-      <div className="notice">
-        <div>
-          <strong>Connect your IDE in three steps.</strong>
-          <p>
-            Choose your IDE, sign in, and allow access to your project. See the{' '}
-            <Link to={`/projects/${project.id}/connections`}>connection guide</Link> for the
-            integration steps.
-          </p>
-        </div>
+      <div className="agent-room-layout">
+        <AgentRoom key={project.id} project={project} />
+        <aside className="room-roster" aria-label="Project agents">
+          <Button onClick={() => setConnectOpen(true)}><Plus size={17} />Connect agent</Button>
+          <h2>In this project</h2>
+          <div className="roster-member"><span className="agent-icon"><Bot size={20} /></span><div><strong>Mediator</strong><small>Plans & coordination · on request</small></div></div>
+          <h3>Agents · {project.agents.length}</h3>
+          {project.agents.length === 0 && <p className="small muted">Connect an IDE agent to join the room.</p>}
+          {project.agents.map(agent => <details className="roster-agent" key={agent.id}>
+            <summary><span className="roster-member"><span className="agent-icon"><Bot size={18} /></span><span><strong>{agent.name}</strong><small>{agent.client}</small></span><Badge value={agent.grant === 'active' ? agent.presence : agent.grant} /></span></summary>
+            <dl className="details-grid"><dt>Machine</dt><dd>{agent.machine}</dd><dt>Last seen</dt><dd><Timestamp value={agent.lastSeen} /></dd><dt>Tasks</dt><dd>{project.tasks.filter(t => t.agentId === agent.id && !['merged', 'cancelled'].includes(t.status)).length}</dd></dl>
+            {owner && agent.ownerId === user!.id && agent.grant !== 'revoked' && <>
+              <Button size="sm" onClick={() => setSetupId(agent.id)}>Connect</Button>
+              <details><summary>Manual token</summary><AgentTokenButton project={project} agent={agent} /></details>
+            </>}
+            {owner && agent.grant !== 'revoked' && <Button size="sm" variant="outline" onClick={() => { revoke.reset(); setRevoking(agent); }}>Revoke access</Button>}
+          </details>)}
+          {owner && <details className="agent-advanced"><summary>Advanced</summary><Button variant="ghost" size="sm" onClick={() => { add.reset(); setOpen(true); }}>Add agent manually</Button></details>}
+          <p className="small muted">Agents talk to the mediator through MCP. An online status does not mean an agent is working.</p>
+        </aside>
       </div>
-      {project.agents.length === 0 ? (
-        <section className="panel">
-          <Empty title="No agents registered">
-            Connect your IDE to get started. You can name your agent during sign-in.
-          </Empty>
-        </section>
-      ) : (
-        <div className="agent-grid">
-          {project.agents.map((agent) => (
-            <article className="panel" key={agent.id}>
-              <div className="row between">
-                <span className="agent-icon">
-                  <Bot size={22} />
-                </span>
-                <Badge value={agent.grant} />
-              </div>
-              <h2>{agent.name}</h2>
-              <p className="muted">
-                {agent.client}
-              </p>
-              {owner && agent.ownerId === user!.id && agent.grant !== 'revoked' && <>
-                <Button onClick={() => setSetupId(agent.id)}>Connect agent</Button>
-                <p className="small muted">{agent.grant === 'pending'
-                  ? 'Sign in from your IDE to get started.'
-                  : 'Access enabled. Connect or check your IDE.'}</p>
-              </>}
-              <details className="agent-advanced">
-                <summary>Details and settings</summary>
-              <dl className="details-grid">
-                <dt>Machine</dt>
-                <dd>{agent.machine}</dd>
-                <dt>Presence</dt>
-                <dd>
-                  <Badge value={agent.presence} />
-                </dd>
-                <dt>Last check-in</dt>
-                <dd>
-                  <Timestamp value={agent.lastSeen} />
-                </dd>
-                <dt>Session</dt>
-                <dd>
-                  <code>{agent.session ?? 'No session'}</code>
-                </dd>
-                <dt>Open tasks</dt>
-                <dd>
-                  {
-                    project.tasks.filter(
-                      (t) => t.agentId === agent.id && !['merged', 'cancelled'].includes(t.status),
-                    ).length
-                  }
-                </dd>
-              </dl>
-              <div className="row wrap">
-                {agent.capabilities.map((capability) => (
-                  <span className="tag" key={capability}>
-                    {capability}
-                  </span>
-                ))}
-              </div>
-                {owner && agent.ownerId === user!.id && agent.grant !== 'revoked' && <>
-                  <p className="small muted">Manual token for clients without browser sign-in:</p>
-                  <AgentTokenButton key={`${project.id}:${agent.id}:${user!.id}`} project={project} agent={agent} />
-                </>}
-                {owner && agent.grant !== 'revoked' && <>
-                  <p className="small muted">Revoking access does not stop the agent on its machine.</p>
-                  <Button variant="outline" size="sm" onClick={() => { revoke.reset(); setRevoking(agent); }}>
-                    Revoke access
-                  </Button>
-                </>}
-              </details>
-            </article>
-          ))}
-        </div>
-      )}
       {connectOpen && <AgentOAuthSetup project={project} onClose={() => setConnectOpen(false)} />}
       {setupAgent && <AgentOAuthSetup key={setupAgent.id} project={project} agent={setupAgent}
         onClose={() => setSetupId(null)} />}
-      <FileClaimsTable project={project} />
+      <details className="room-claims"><summary>File claims</summary><FileClaimsTable project={project} /></details>
       <Modal
         open={open}
         onOpenChange={(v) => {

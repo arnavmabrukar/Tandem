@@ -26,6 +26,65 @@ async function connect(page: Page) {
 }
 const thread = '/#/projects/project-1/tasks/task-1';
 
+test('delayed session restoration preserves the task route across reload', async ({ page }) => {
+  const state = await connect(page);
+  await page.goto('/?test-auth=delayed#/projects/project-1/tasks/task-1');
+  await expect(page.getByRole('button', { name: 'Sign in with Auth0' })).toHaveCount(0);
+  expect(state.reads).toBe(0);
+  await expect(page.getByRole('status')).toContainText('Checking your session');
+  await page.evaluate(() => window.dispatchEvent(new Event('test-auth-restored')));
+  await expect(page.getByRole('heading', { name: 'Task returned by test API', exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('status')).toContainText('Checking your session');
+  await page.evaluate(() => window.dispatchEvent(new Event('test-auth-restored')));
+  await expect(page.getByRole('button', { name: 'Sign in with Auth0' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Task returned by test API', exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/#\/projects\/project-1\/tasks\/task-1$/);
+});
+
+test('project edits persist after reload and stale tabs cannot overwrite them', async ({ page, context }) => {
+  const state = await connect(page);
+  const second = await context.newPage();
+  const secondState = await connect(second);
+  // Share the server record, while keeping each tab's form version independent.
+  secondState.project = state.project;
+  const writes: Request[] = [];
+  for (const tab of [page, second]) {
+    await tab.route('**/api/projects/project-1', async (route) => {
+      const body = route.request().postDataJSON();
+      writes.push(route.request());
+      if (body.expectedVersion !== state.project.version) {
+        await route.fulfill({ status: 409, json: { detail: 'Project version changed' } });
+        return;
+      }
+      state.project.description = body.description;
+      state.project.version++;
+      await route.fulfill({ json: {
+        projectId: state.project.id, entityId: state.project.id,
+        projectVersion: state.project.version,
+      } });
+    });
+    await tab.goto('/#/projects/project-1/setup');
+    await expect(tab.getByRole('button', { name: 'Save project', exact: true })).toBeEnabled();
+  }
+  await second.getByLabel('Description', { exact: true }).fill('Stale tab draft');
+  await page.getByLabel('Description', { exact: true }).fill('Saved owner description');
+  await page.getByRole('button', { name: 'Save project', exact: true }).click();
+  await expect(page.getByText('Project saved by the backend.')).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel('Description', { exact: true })).toHaveValue('Saved owner description');
+  // Refresh exercises the same workspace update that polling delivers.
+  await second.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(second.getByText('Newer project data is available.')).toBeVisible();
+  await expect(second.getByRole('button', { name: 'Save project', exact: true })).toBeDisabled();
+  await expect(second.getByLabel('Description', { exact: true })).toHaveValue('Stale tab draft');
+  await second.getByRole('button', { name: 'Reload details', exact: true }).click();
+  await expect(second.getByLabel('Description', { exact: true })).toHaveValue('Saved owner description');
+  expect(writes).toHaveLength(1);
+  expect(state.project.version).toBe(5);
+  await second.close();
+});
+
 test('missing configuration shows setup, with no network or fabricated workspace', async ({
   page,
 }) => {
@@ -134,7 +193,14 @@ test('a missing or offline API shows failure without sample records', async ({ p
   const state = await connect(page);
   state.readStatus = 404;
   await page.goto('/');
-  await expect(page.getByRole('alert')).toContainText('API endpoint was not found');
+  // Multiple sections may report the same backend outage at once. Target the
+  // shared 404 message instead of assuming that the page renders one alert.
+  await expect(
+    page
+      .getByRole('alert')
+      .filter({ hasText: 'The requested resource or API endpoint was not found' })
+      .first(),
+  ).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Create a shared project' })).toHaveCount(0);
   await expect(page.getByRole('option', { name: 'API project' })).toHaveCount(0);
   expect(state.writes).toHaveLength(0);
@@ -291,4 +357,27 @@ test('viewer permissions come from the server membership', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Review target' })).toBeDisabled();
   await expect(page.getByLabel('Human note', { exact: true })).toHaveCount(0);
   expect(state.writes).toHaveLength(0);
+});
+
+test('agent room sends private human messages and opens connection onboarding', async ({ page }) => {
+  await connect(page);
+  const exchanges: Record<string, unknown>[] = [];
+  await page.route('**/api/projects/project-1/room', async route => {
+    if (route.request().method() === 'POST') {
+      const request = route.request().postDataJSON();
+      const exchange = { id: 'exchange-1', operationId: request.operationId, senderUserId: 'user-1', sender: 'Test owner', kind: 'human', body: request.body, state: 'complete', createdAt: new Date().toISOString(),
+        response: { reply: 'Let’s review the next tasks together.', proposal: null, cancelTaskIds: [] } };
+      exchanges.push(exchange);
+      await route.fulfill({ json: exchange });
+    } else await route.fulfill({ json: { exchanges } });
+  });
+  await page.goto('/#/projects/project-1/agents');
+  await expect(page.getByRole('heading', { name: 'Project room', exact: true })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Message mediator' }).fill('Change our next milestone');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(page.getByText('Let’s review the next tasks together.')).toBeVisible();
+  await expect(page.getByText('Human · hidden from agents', { exact: true })).toBeVisible();
+  await page.screenshot({ path: '/tmp/tandem-agent-room-' + page.viewportSize()!.width + '.png', fullPage: true });
+  await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
 });

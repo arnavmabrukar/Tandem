@@ -9,6 +9,8 @@ import { Button } from './components/ui/button';
 import { SignInPage } from './pages/SignInPage';
 import { ApiError } from './api/client';
 import { safeReturnTo } from './config';
+
+// Keep project screens lazy so the dashboard only downloads the view the user opens.
 const ActivityPage = lazy(() =>
   import('./pages/ActivityPage').then((m) => ({ default: m.ActivityPage })),
 );
