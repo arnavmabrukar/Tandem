@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { planRevisionSchema, savedPlanSchema, approvedPlanSchema } from '../types/plans';
+import { planProposalSchema, planRevisionSchema, savedPlanSchema, approvedPlanSchema } from '../types/plans';
 import {
   mutationResultSchema,
   userSchema,
@@ -44,6 +44,8 @@ export function commandEndpoint(request: MutationRequest): {
   if (type === 'create-project') return { method: 'POST', path: endpoints.projects, payload };
   const base = `${endpoints.projects}/${segment(request.projectId)}`;
   switch (command.type) {
+    case 'auto-delegate':
+      return { method: 'POST', path: `${base}/auto-delegate`, payload: { enabled: command.enabled } };
     case 'update-project':
       return { method: 'PATCH', path: base, payload };
     case 'invite':
@@ -64,6 +66,9 @@ export function commandEndpoint(request: MutationRequest): {
       };
     case 'create-task':
       return { method: 'POST', path: `${base}/tasks`, payload };
+    case 'assign-task':
+      return { method: 'POST', path: `${base}/tasks/${segment(command.taskId)}/assignment`,
+        payload: { agentId: command.agentId, ...(command.autoSelect ? { autoSelect: true } : {}) } };
     case 'cancel-task':
       return {
         method: 'POST',
@@ -115,14 +120,14 @@ export function createApiClient({
   async function request<T>(
     path: string,
     schema: z.ZodType<T>,
-    options: { method?: string; body?: object; operationId?: string; signal?: AbortSignal } = {},
+    options: { method?: string; body?: object; operationId?: string; signal?: AbortSignal; timeoutMs?: number } = {},
   ): Promise<T> {
     const mutation = !!options.method && options.method !== 'GET';
     const controller = new AbortController();
     const signal = options.signal
       ? AbortSignal.any([options.signal, controller.signal])
       : controller.signal;
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? timeoutMs);
     let abortListener: (() => void) | undefined;
     const aborted = new Promise<never>((_, reject) => {
       abortListener = () => reject(new DOMException('Request aborted', 'AbortError'));
@@ -230,6 +235,9 @@ export function createApiClient({
     }
   }
   return {
+    generatePlan: (projectId, goal) => request(
+      `${endpoints.projects}/${segment(projectId)}/plans/generate`, planProposalSchema,
+      { method: 'POST', body: { goal }, timeoutMs: 135_000 }),
     approvePlan: (projectId, planId, body) => request(
       `${endpoints.projects}/${segment(projectId)}/plans/${segment(planId)}/approve`,
       approvedPlanSchema, { method: 'POST', operationId: body.operationId, body }),

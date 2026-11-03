@@ -110,3 +110,58 @@ and confirm subsequent calls fail or request reauthentication. Browser/IDE and h
 verification are separate from the automated tests.
 
 Protocol reference: https://modelcontextprotocol.io/specification/latest/basic/authorization
+
+
+## Delegated tasks
+
+Apply `migrations/versions/016_add_task_assignments.sql` to the backend's database
+before deploying this code. Assignment is separate from an execution claim.
+
+A project owner or reviewer can open a task thread and assign an agent with an
+active project grant whose owner still has owner/reviewer access. The task must
+be open, unclaimed, have an approved current contract, and have all prerequisites
+approved or merged. The server enforces these conditions again when claiming.
+
+The IDE agent calls `tandem_get_assignments(projectId)` to fetch its unfinished
+assignments, then `tandem_claim_task` with the returned task version before work.
+An assignment prevents another agent claiming that task. Unassigned tasks retain
+the existing claim workflow. This does not launch or wake an IDE agent. A persistent execution loop remains future work.
+
+Owners/reviewers can clear or replace an assignment before the task is claimed.
+Revoking an agent does not silently release its work. Clear its unclaimed
+assignment explicitly before choosing a replacement.
+
+Assignment mutations use the project version and operation ID for safe retries.
+They leave the task/contract review version unchanged because assignment metadata
+is not a change to the reviewed scope. Each mutation records project activity.
+
+In the task thread, select **Let Tandem choose** for automatic selection. The
+mediator balances unfinished task counts within the project, including claimed
+work that was never assigned. Eligibility requires an active grant and a current
+owner/reviewer role for the agent's owner. Offline agents can receive assignments;
+selection does not imply availability or start an IDE session. Automatic agent
+selection is available on demand or through the project Auto-delegate setting.
+
+
+## Recurring automatic delegation
+
+Apply migration `017_add_auto_delegation.sql` after `016` before deploying.
+Existing projects default to manual assignment. In **Project setup**, a current
+owner can enable **Auto-delegate**. The mediator checks opted-in projects about
+every 15 seconds while its web process is running, processing up to 100 ready
+tasks per project per sweep. It catches later approvals, finished prerequisites,
+and newly eligible agents on the next sweep.
+
+Each assignment uses the enabling owner's current authority and records an
+Automatic assignment event. If that person loses owner access, dispatch stops
+for the project until a current owner enables it again. Revoked agents are not
+selected. Existing assignments and claims are never replaced by the dispatcher.
+Turning the setting off leaves assigned work in place. While on, clearing an
+assignment makes it eligible for automatic assignment again.
+
+The worker starts/stops with FastAPI and retries transient database failures.
+Project locks and version checks prevent duplicate assignment across web workers.
+Sleeping/stopped hosting pauses checks; restarting resumes from database state.
+`TANDEM_DISPATCH_ENABLED=false` is an optional backend-wide kill switch (default
+true); enabling a project's switch is refused while the worker is disabled.
+No runner is launched: IDE agents must still fetch and claim work through MCP.

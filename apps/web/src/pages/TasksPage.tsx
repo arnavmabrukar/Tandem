@@ -17,7 +17,6 @@ export function TasksPage({ project }: { project: Project }) {
   const action = useAction(project);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [agentId, setAgentId] = useState('');
   const [paths, setPaths] = useState('');
   const [criteria, setCriteria] = useState('');
   // Store the IDs of prerequisites selected for the new task.
@@ -39,7 +38,7 @@ export function TasksPage({ project }: { project: Project }) {
           ? ['blocked', 'conflict'].includes(task.status)
           : task.status === status)) &&
       (owner === 'all' ||
-        (owner === 'unassigned' ? task.agentId === null : task.agentId === owner)),
+        (owner === 'unassigned' ? (task.assignedAgentId ?? task.agentId) === null : (task.assignedAgentId ?? task.agentId) === owner)),
   );
   const lines = (value: string) =>
     value
@@ -121,7 +120,7 @@ export function TasksPage({ project }: { project: Project }) {
                 <p>{task.progress}</p>
                 <div className="task-meta">
                   <span>
-                    {project.agents.find((a) => a.id === task.agentId)?.name ?? 'Unassigned'}
+                    {project.agents.find((a) => a.id === (task.assignedAgentId ?? task.agentId))?.name ?? 'Unassigned'}
                   </span>
                   <span>Receipt: {task.receipt}</span>
                   <span>Acceptance: {task.acceptance}</span>
@@ -154,7 +153,7 @@ export function TasksPage({ project }: { project: Project }) {
                 type: 'create-task',
                 title,
                 description,
-                agentId: agentId || null,
+                agentId: null,
                 paths: lines(paths),
                 criteria: lines(criteria),
                 // Send prerequisite IDs alongside the task's other fields.
@@ -186,18 +185,7 @@ export function TasksPage({ project }: { project: Project }) {
               onChange={(e) => setDescription(e.target.value)}
             />
           </Field>
-          <Field label="Proposed agent">
-            <select value={agentId} onChange={(e) => setAgentId(e.target.value)}>
-              <option value="">Unassigned</option>
-              {project.agents
-                .filter((a) => a.grant === 'active')
-                .map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-            </select>
-          </Field>
+          <p className="muted">Assign an agent from the task thread after its contract is approved.</p>
           <Field
             label="File scope"
             hint="One exact repository-relative path per line. These are proposed paths, not acquired claims."

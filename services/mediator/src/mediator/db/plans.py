@@ -263,3 +263,13 @@ def approve_plan(actor_id: UUID, project_id: UUID, plan_id: UUID,
         c.execute("UPDATE public.operations SET response_payload=%s WHERE actor_id=%s AND operation_id=%s",
                   (Jsonb(result.model_dump(mode="json")), actor_id, request.operationId))
     return result
+
+
+def generation_context(actor_id: UUID, project_id: UUID) -> dict:
+    """Read bounded project metadata after checking owner access; no network under locks."""
+    with _connect() as connection:
+        _authorize(connection, actor_id, project_id, write=True)
+        return connection.execute(
+            "SELECT name, repository, left(description, 10000) AS description FROM public.projects WHERE id=%s",
+            (project_id,),
+        ).fetchone()

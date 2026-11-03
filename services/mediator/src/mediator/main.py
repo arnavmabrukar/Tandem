@@ -1,3 +1,13 @@
+from mediator.meta_planner import generate_plan as generate_meta_plan, PlannerFailed, PlannerUnavailable
+from mediator.db.plans import generation_context
+from mediator.schemas.plans import GeneratePlanRequest, PlanProposal
+import asyncio
+from threading import Event
+from mediator.db.dispatch import set_auto_delegate, run_dispatcher
+from mediator.schemas.assignments import AutoDelegateRequest
+from mediator.db.assignments import assign_task as save_assignment
+from mediator.schemas.assignments import AssignTaskRequest
+from mediator.db import agent_tasks
 # class used to create web app
 # Parse UUIDs and read the Idempotency-Key request header.
 from uuid import UUID
@@ -151,8 +161,15 @@ mcp_http_app = mcp.streamable_http_app(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Start MCP's background resources when FastAPI starts.
     async with mcp.session_manager.run():
-        # FastAPI serves requests while execution is paused here.
-        yield
+        stop = Event()
+        worker = (asyncio.create_task(asyncio.to_thread(run_dispatcher, stop))
+                  if settings.dispatch_enabled else None)
+        try:
+            yield
+        finally:
+            stop.set()
+            if worker is not None:
+                await worker
 
     # Leaving the context shuts down MCP's resources cleanly.
 
@@ -684,6 +701,25 @@ def plan_api_errors():
         raise HTTPException(503, "Plan database unavailable") from None
 
 
+# A preview never creates tasks, approvals, or operations.
+
+
+@app.post("/api/projects/{project_id}/plans/generate", response_model=PlanProposal)
+def generate_plan_preview(project_id: UUID, request: GeneratePlanRequest,
+                          user: dict[str, str] = Depends(get_current_user)):
+    with plan_api_errors():
+        context = generation_context(UUID(user["id"]), project_id)
+        try:
+            proposal = generate_meta_plan(request.goal, context)
+        except PlannerUnavailable:
+            raise HTTPException(503, "Meta planning is not configured") from None
+        except PlannerFailed:
+            raise HTTPException(502, "Meta could not generate a valid plan") from None
+        # Membership may have changed during the external call.
+        generation_context(UUID(user["id"]), project_id)
+        return proposal
+
+
 @app.post("/api/projects/{project_id}/plans", response_model=SavePlanResponse, status_code=201)
 def create_plan(
     project_id: UUID,
@@ -816,6 +852,43 @@ def create_task(
             status_code=503,
             detail="Task database unavailable",
         ) from None
+
+@app.post("/api/projects/{project_id}/auto-delegate")
+def configure_auto_delegate(project_id: UUID, request: AutoDelegateRequest,
+                            idempotency_key: UUID = Header(alias="Idempotency-Key"),
+                            user: dict[str, str] = Depends(get_current_user)) -> dict:
+    if idempotency_key != request.operationId:
+        raise HTTPException(400, "Idempotency-Key must match operationId")
+    if request.enabled and not settings.dispatch_enabled:
+        raise HTTPException(503, "Automatic delegation is disabled on this backend")
+    try:
+        return set_auto_delegate(UUID(user["id"]), project_id, request)
+    except ProjectAccessDenied as error:
+        raise HTTPException(403, str(error)) from None
+    except (OperationConflict, ProjectVersionConflict) as error:
+        raise HTTPException(409, str(error)) from None
+    except (DatabaseError, RuntimeError):
+        raise HTTPException(503, "Delegation settings unavailable") from None
+
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/assignment")
+def assign_task(project_id: UUID, task_id: UUID, request: AssignTaskRequest,
+                idempotency_key: UUID = Header(alias="Idempotency-Key"),
+                user: dict[str, str] = Depends(get_current_user)) -> dict:
+    if idempotency_key != request.operationId:
+        raise HTTPException(400, "Idempotency-Key must match operationId")
+    try:
+        return save_assignment(UUID(user["id"]), project_id, task_id, request)
+    except (ProjectAccessDenied, agent_tasks.AgentAccessDenied) as error:
+        raise HTTPException(403, str(error)) from None
+    except agent_tasks.AgentTaskNotFound:
+        raise HTTPException(404, "Task not found in this project") from None
+    except (OperationConflict, ProjectVersionConflict, agent_tasks.AgentTaskConflict,
+            agent_tasks.AgentClaimBlocked) as error:
+        raise HTTPException(409, str(error)) from None
+    except (DatabaseError, RuntimeError):
+        raise HTTPException(503, "Task assignment unavailable") from None
+
 
 # CANCEL TASK
 @app.post(

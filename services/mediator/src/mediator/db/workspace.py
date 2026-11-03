@@ -29,6 +29,7 @@ def load_workspace(issuer: str, subject: str) -> dict:
                 p.repository,
                 p.description,
                 p.version,
+                p.auto_delegate AS "autoDelegate",
 
                 -- Collect all members of each authorized project.
                 (
@@ -145,6 +146,7 @@ def load_workspace(issuer: str, subject: str) -> dict:
 
                                 -- The agent holding the claim, if any.
                                 'agentId', task.claimed_by_agent_id,
+                                'assignedAgentId', task.assigned_agent_id,
 
                                 -- Use the task ID as its stable thread key.
                                 -- Message storage will be implemented separately.

@@ -88,6 +88,18 @@ def tandem_list_tasks(projectId: UUID, status: TaskStatusFilter | None = None) -
 
 
 @mcp.tool()
+def tandem_get_assignments(projectId: UUID) -> dict[str, Any]:
+    """Fetch your unfinished delegated tasks and their current claim blockers.
+
+    This only reads work. Claim a claimable task with tandem_claim_task before
+    executing it. Assignment does not launch an IDE session or approve work.
+    If truncated is true, use tandem_list_tasks / tandem_get_task to inspect work.
+    """
+    identity = _project_identity(projectId)
+    return _run(lambda: agent_tasks.get_assignments(identity, projectId))
+
+
+@mcp.tool()
 def tandem_get_task(projectId: UUID, taskId: UUID) -> dict[str, Any]:
     """Return one task's contract, dependencies, and latest thread messages."""
     identity = _project_identity(projectId)

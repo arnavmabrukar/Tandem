@@ -12,6 +12,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from uuid import uuid4
 
+os.environ["TANDEM_DISPATCH_ENABLED"] = "false"
+
 DSN = os.environ.get("TANDEM_AGENT_TOOLS_TEST_DATABASE_URL")
 if DSN:
     os.environ["DATABASE_URL"] = DSN
@@ -66,6 +68,7 @@ class AgentToolIntegrationTests(unittest.TestCase):
         return agent_id, token
 
     def setUp(self):
+        self.execute("UPDATE public.projects SET auto_delegate=false")
         self.owner, self.project = str(uuid4()), str(uuid4())
         self.execute(
             """INSERT INTO public.users (id, auth_issuer, auth_subject, name)
@@ -139,6 +142,213 @@ class AgentToolIntegrationTests(unittest.TestCase):
         workspace = load_workspace("issuer", self.owner)
         projects = workspace["projects"] if isinstance(workspace, dict) else workspace
         return next(project for project in projects if project["id"] == self.project)
+
+    def assign(self, task, agent, operation=None, version=None, actor=None, auto=False):
+        from mediator.db.assignments import assign_task
+        from mediator.schemas.assignments import AssignTaskRequest
+        from uuid import UUID
+        return assign_task(UUID(actor or self.owner), UUID(self.project), UUID(task),
+                           AssignTaskRequest(operationId=operation or uuid4(),
+                                             expectedVersion=version or self.project_version(),
+                                             agentId=agent, autoSelect=auto))
+
+    def policy(self, enabled, operation=None, version=None):
+        from mediator.db.dispatch import set_auto_delegate
+        from mediator.schemas.assignments import AutoDelegateRequest
+        from uuid import UUID
+        return set_auto_delegate(UUID(self.owner), UUID(self.project),
+            AutoDelegateRequest(operationId=operation or uuid4(),
+                                expectedVersion=version or self.project_version(), enabled=enabled))
+
+    def test_dispatch_opt_in_readiness_and_repeat_safety(self):
+        from mediator.db.dispatch import dispatch_once
+        ready = self.make_task()
+        self.make_task(review='pending')
+        prerequisite = self.make_task(status='in_progress')
+        dependent = self.make_task(depends_on=[prerequisite])
+        self.assertEqual(dispatch_once(), 0)
+        op, version = uuid4(), self.project_version()
+        policy = self.policy(True, op, version)
+        self.assertEqual(policy, self.policy(True, op, version))
+        self.assertEqual(dispatch_once(), 1)
+        self.assertEqual(dispatch_once(), 0)
+        self.assertTrue(self.workspace_project()['autoDelegate'])
+        # Readiness changes are picked up by the next sweep without an API hook.
+        self.execute("UPDATE public.tasks SET status='approved' WHERE id=%s", (prerequisite,))
+        self.assertEqual(dispatch_once(), 1)
+        self.policy(False)
+        self.make_task()
+        self.assertEqual(dispatch_once(), 0)
+        self.assertEqual(self.execute("SELECT assigned_agent_id FROM public.tasks WHERE id=%s", (ready,))[0][0], self.agent)
+
+    def test_dispatch_does_not_overwrite_or_act_for_demoted_owner(self):
+        from mediator.db.dispatch import dispatch_once
+        from mediator.db.projects import ProjectAccessDenied
+        task = self.make_task()
+        self.assign(task, self.agent)
+        self.policy(True)
+        self.assertEqual(dispatch_once(), 0)
+        self.make_task()
+        self.execute("UPDATE public.project_memberships SET role='reviewer' WHERE user_id=%s", (self.owner,))
+        self.assertEqual(dispatch_once(), 0)
+        with self.assertRaises(ProjectAccessDenied):
+            self.policy(False)
+
+    def test_concurrent_dispatch_assigns_each_task_once(self):
+        from mediator.db.dispatch import dispatch_once
+        self.make_agent(self.owner, self.project, f'Dispatch {uuid4()}')
+        tasks = [self.make_task() for _ in range(4)]
+        self.policy(True)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            runs = [pool.submit(dispatch_once) for _ in range(2)]
+            for run in runs:
+                run.result()
+        dispatch_once()  # A version conflict defers remaining work to another sweep.
+        rows = self.execute("SELECT assigned_agent_id,count(*) FROM public.tasks WHERE project_id=%s GROUP BY assigned_agent_id", (self.project,))
+        self.assertEqual(sorted(count for agent, count in rows), [2, 2])
+        self.assertTrue(all(agent is not None for agent, count in rows))
+        self.assertEqual(self.execute("SELECT count(*) FROM public.project_activity WHERE project_id=%s AND kind='task_assigned'", (self.project,))[0][0], 4)
+
+    def test_dispatch_inflight_checks_disabled_policy(self):
+        from mediator.db.assignments import assign_task
+        from mediator.db.projects import ProjectAccessDenied
+        from mediator.schemas.assignments import AssignTaskRequest
+        from uuid import UUID
+        task = self.make_task()
+        self.policy(True)
+        self.policy(False)
+        with self.assertRaises(ProjectAccessDenied):
+            assign_task(UUID(self.owner), UUID(self.project), UUID(task),
+                        AssignTaskRequest(operationId=uuid4(), expectedVersion=self.project_version(),
+                                          agentId=None, autoSelect=True), automatic=True)
+        self.assertIsNone(self.execute("SELECT assigned_agent_id FROM public.tasks WHERE id=%s", (task,))[0][0])
+
+    def test_auto_assignment_balances_load_and_replays_original_choice(self):
+        other, _ = self.make_agent(self.owner, self.project, f'Other {uuid4()}')
+        first_task, second_task = self.make_task(), self.make_task()
+        operation, version = uuid4(), self.project_version()
+        first = self.assign(first_task, None, operation, version, auto=True)
+        self.assertEqual(first['assignedAgentId'], min(self.agent, other))
+        second = self.assign(second_task, None, auto=True)
+        self.assertNotEqual(first['assignedAgentId'], second['assignedAgentId'])
+        self.assertEqual(first, self.assign(first_task, None, operation, version, auto=True))
+        self.assertEqual(first['selection'], 'least_loaded')
+        from mediator.db.agent_tasks import AgentTaskConflict
+        with self.assertRaises(AgentTaskConflict):
+            self.assign(first_task, None, auto=True)
+
+    def test_auto_assignment_excludes_revoked_and_pending_and_checks_readiness(self):
+        from mediator.db.agent_tasks import AgentTaskConflict, AgentClaimBlocked
+        self.make_agent(self.owner, self.project, f'Pending {uuid4()}', grant='pending')
+        self.make_agent(self.owner, self.project, f'Revoked {uuid4()}', grant='revoked')
+        ready = self.make_task()
+        self.assertEqual(self.assign(ready, None, auto=True)['assignedAgentId'], self.agent)
+        pending = self.make_task(review='pending')
+        before = self.project_version()
+        with self.assertRaises(AgentClaimBlocked):
+            self.assign(pending, None, auto=True)
+        self.assertEqual(self.project_version(), before)
+        self.execute("UPDATE public.agent_project_grants SET status='revoked' WHERE agent_id=%s", (self.agent,))
+        with self.assertRaises(AgentTaskConflict):
+            self.assign(pending, None, auto=True)
+        self.assertEqual(self.project_version(), before)
+
+    def test_auto_assignment_counts_claimed_unassigned_work(self):
+        other, _ = self.make_agent(self.owner, self.project, f'Other {uuid4()}')
+        working = self.make_task()
+        self.ok('tandem_claim_task', **self.claim(working))
+        ready = self.make_task()
+        self.assertEqual(self.assign(ready, None, auto=True)['assignedAgentId'], other)
+
+    def test_assignment_http_boundary(self):
+        from mediator.main import app, get_current_user
+        task = self.make_task()
+        app.dependency_overrides[get_current_user] = lambda: {"id": self.owner}
+        try:
+            operation = str(uuid4())
+            payload = {"operationId": operation, "expectedVersion": self.project_version(),
+                       "agentId": self.agent}
+            path = f'/api/projects/{self.project}/tasks/{task}/assignment'
+            self.assertEqual(self.http.post(path, json=payload,
+                headers={'Idempotency-Key': str(uuid4())}).status_code, 400)
+            result = self.http.post(path, json=payload, headers={'Idempotency-Key': operation})
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()['assignedAgentId'], self.agent)
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def test_assignment_is_exclusive_and_visible_through_mcp(self):
+        task = self.make_task()
+        other, token = self.make_agent(self.owner, self.project, 'Other')
+        operation, version = uuid4(), self.project_version()
+        first = self.assign(task, self.agent, operation, version)
+        self.assertEqual(first, self.assign(task, self.agent, operation, version))
+        self.assertEqual(self.project_version(), version + 1)
+        assigned = self.ok('tandem_get_assignments')['tasks']
+        self.assertEqual([row['id'] for row in assigned], [task])
+        self.assertTrue(assigned[0]['claimable'])
+        self.assertEqual(self.ok('tandem_get_assignments', token)['tasks'], [])
+        self.refused('assigned to another agent', 'tandem_claim_task', token, **self.claim(task))
+        self.assertEqual(self.workspace_project()['tasks'][0]['assignedAgentId'], self.agent)
+        self.ok('tandem_claim_task', **self.claim(task))
+        from mediator.db.agent_tasks import AgentTaskConflict
+        with self.assertRaises(AgentTaskConflict):
+            self.assign(task, other)
+        self.assertEqual(self.execute("SELECT count(*) FROM public.project_activity WHERE task_id=%s AND kind='task_assigned'", (task,))[0][0], 1)
+
+    def test_assignment_readiness_permissions_and_rollback(self):
+        from mediator.db.agent_tasks import AgentClaimBlocked, AgentAccessDenied
+        from mediator.db.projects import ProjectAccessDenied, ProjectVersionConflict, OperationConflict
+        task = self.make_task(review='pending')
+        before = self.project_version()
+        with self.assertRaises(AgentClaimBlocked):
+            self.assign(task, self.agent)
+        self.assertEqual(self.project_version(), before)
+        prerequisite = self.make_task()
+        dependent = self.make_task(depends_on=[prerequisite])
+        with self.assertRaises(AgentClaimBlocked):
+            self.assign(dependent, self.agent)
+        ready = self.make_task()
+        revoked, _ = self.make_agent(self.owner, self.project, 'Revoked', grant='revoked')
+        with self.assertRaises(AgentAccessDenied):
+            self.assign(ready, revoked)
+        # Stale versions cannot replace another successful delegation.
+        op = uuid4()
+        self.assign(ready, self.agent, op, before)
+        with self.assertRaises(ProjectVersionConflict):
+            self.assign(ready, None, version=before)
+        with self.assertRaises(OperationConflict):
+            self.assign(ready, None, op, before)
+        self.execute("UPDATE public.project_memberships SET role='viewer' WHERE user_id=%s", (self.owner,))
+        with self.assertRaises(ProjectAccessDenied):
+            self.assign(ready, self.agent, op, before)
+
+    def test_assignment_can_be_cleared_after_revocation(self):
+        task = self.make_task()
+        self.assign(task, self.agent)
+        self.execute("UPDATE public.agent_project_grants SET status='revoked' WHERE agent_id=%s", (self.agent,))
+        self.assign(task, None)
+        other, token = self.make_agent(self.owner, self.project, 'Replacement')
+        self.assign(task, other)
+        self.ok('tandem_claim_task', token, **self.claim(task))
+
+    def test_assignment_and_competing_claim_serialize(self):
+        task = self.make_task()
+        other, token = self.make_agent(self.owner, self.project, 'Competitor')
+        def assign():
+            try:
+                self.assign(task, self.agent)
+                return True
+            except Exception as error:
+                from mediator.db.agent_tasks import AgentTaskConflict
+                from mediator.db.projects import ProjectVersionConflict
+                if isinstance(error, (AgentTaskConflict, ProjectVersionConflict)):
+                    return False
+                raise
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            assigned = pool.submit(assign)
+            claimed = pool.submit(self.call, 'tandem_claim_task', token, **self.claim(task))
+        self.assertNotEqual(assigned.result(), not claimed.result().get('isError', False))
 
     def test_plan_submission_is_attributed_and_idempotent(self):
         proposal = {"goal": "Ship feature", "summary": "Implement and verify", "tasks": [

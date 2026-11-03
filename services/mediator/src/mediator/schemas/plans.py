@@ -154,3 +154,13 @@ class ApprovePlanRequest(BaseModel):
 
 class ApprovePlanResponse(SavePlanResponse):
     taskIds: dict[str, UUID]
+
+
+class GeneratePlanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    goal: str = Field(min_length=1, max_length=10000)
+
+    @field_validator("goal")
+    @classmethod
+    def valid_goal(cls, value: str) -> str:
+        return PlanProposal.meaningful_text(value)

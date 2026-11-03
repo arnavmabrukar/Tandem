@@ -20,6 +20,7 @@ export const taskSchema = z.object({
   description: z.string(),
   status: z.enum(taskStatuses),
   agentId: z.string().nullable(),
+  assignedAgentId: z.string().nullable().optional(),
   version: z.number().int(),
   threadId: z.string(),
   receipt: z.enum(['pending', 'received']),
@@ -82,6 +83,7 @@ export const messageSchema = z.object({
   receipt: z.enum(['pending', 'received']),
 });
 export const projectSchema = z.object({
+  autoDelegate: z.boolean().optional(),
   id: z.string(),
   name: z.string(),
   repository: z.string(),
@@ -138,6 +140,7 @@ export const userSchema = z.object({ id: z.string().min(1), name: z.string().min
 export type User = z.infer<typeof userSchema>;
 
 export type Command =
+  | { type: 'auto-delegate'; enabled: boolean }
   | { type: 'create-project'; name: string; repository: string; description: string }
   | { type: 'update-project'; name: string; repository: string; description: string }
   | { type: 'invite'; email: string; role: Role }
@@ -161,6 +164,7 @@ export type Command =
       // Optional for existing callers; the backend defaults to an empty list.
       dependencies?: string[];
     }
+  | { type: 'assign-task'; taskId: string; agentId: string | null; autoSelect?: boolean }
   | { type: 'cancel-task'; taskId: string }
   | { type: 'send-message'; taskId: string; body: string; replyTo: string | null }
   | {
@@ -194,6 +198,7 @@ export const mutationResultSchema = z.object({
   entityId: z.string().optional(),
 });
 export interface DashboardApi {
+  generatePlan(projectId: string, goal: string): Promise<import('./plans').PlanProposal>;
   approvePlan(projectId: string, planId: string, body: import('./plans').ApprovePlanRequest): Promise<import('zod').infer<typeof import('./plans').approvedPlanSchema>>;
   listPlans(projectId: string, signal?: AbortSignal): Promise<import('./plans').PlanRevision[]>;
   savePlan(projectId: string, planId: string | null, body: import('./plans').SavePlanRequest):

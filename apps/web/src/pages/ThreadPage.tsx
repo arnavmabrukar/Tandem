@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, MessageSquare, Send } from 'lucide-react';
 import { useSession } from '../auth/session';
@@ -31,6 +31,18 @@ function ThreadDetail({ project, task }: { project: Project; task: Task }) {
     writable && task.status === 'open' && task.agentId === null;
   const message = useAction(project);
   const cancel = useAction(project);
+  const assignment = useAction(project);
+  const [selectedAgent, setSelectedAgent] = useState(task.assignedAgentId ?? '');
+  // Show the mediator's chosen agent after the refreshed snapshot arrives.
+  useEffect(() => setSelectedAgent(task.assignedAgentId ?? ''), [task.assignedAgentId]);
+  const eligibleAgents = project.agents.filter((agent) => agent.grant === 'active'
+    && !!agent.ownerId && canEdit(roleFor(project, agent.ownerId)));
+  const readyToAssign = task.status === 'open' && task.agentId === null
+    && project.approvals.some((approval) => approval.taskId === task.id
+      && approval.contractVersion === task.contract.version && approval.status === 'approved')
+    && task.dependencies.every((id) => ['approved', 'merged'].includes(
+      project.tasks.find((dependency) => dependency.id === id)?.status ?? ''));
+
   const [body, setBody] = useState('');
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -55,7 +67,7 @@ function ThreadDetail({ project, task }: { project: Project; task: Task }) {
           <div>
             <small>Assigned agent</small>
             <strong>
-              {project.agents.find((a) => a.id === task.agentId)?.name ?? 'Unassigned'}
+              {project.agents.find((a) => a.id === (task.assignedAgentId ?? task.agentId))?.name ?? 'Unassigned'}
             </strong>
           </div>
           <div>
@@ -83,6 +95,35 @@ function ThreadDetail({ project, task }: { project: Project; task: Task }) {
               </Link>
             ))}
           </p>
+        )}
+        {writable && task.status === 'open' && task.agentId === null && (
+          <form onSubmit={async (event) => {
+            event.preventDefault();
+            try {
+              await assignment.mutateAsync({ type: 'assign-task', taskId: task.id,
+                agentId: selectedAgent === '__auto__' ? null : selectedAgent || null,
+                autoSelect: selectedAgent === '__auto__' });
+            } catch { /* ErrorNotice displays the API refusal. */ }
+          }}>
+            <Field label="Delegate to an agent">
+              <select value={selectedAgent} onChange={(event) => setSelectedAgent(event.target.value)}>
+                <option value="">Unassigned</option>
+                {!task.assignedAgentId && <option value="__auto__">Let Tandem choose</option>}
+                {eligibleAgents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+              </select>
+            </Field>
+            <p className="muted">{readyToAssign
+              ? selectedAgent === '__auto__'
+                ? 'Tandem picks an eligible agent with the fewest unfinished tasks in this project. It does not start the IDE agent.'
+                : 'The agent can fetch this assignment from Tandem and claim it before starting.'
+              : 'Approve the contract and finish its dependencies before assigning work.'}</p>
+            <ErrorNotice error={assignment.error} />
+            <Button type="submit" disabled={assignment.isPending
+              || selectedAgent === (task.assignedAgentId ?? '')
+              || (!!selectedAgent && !readyToAssign)}>
+              {assignment.isPending ? 'Saving…' : selectedAgent ? 'Assign task' : 'Clear assignment'}
+            </Button>
+          </form>
         )}
         {canCancel && (
           <Button

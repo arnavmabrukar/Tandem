@@ -15,6 +15,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
   const [description, setDescription] = useState(project?.description ?? '');
   const [formVersion, setFormVersion] = useState(project?.version ?? null);
   const save = useAction(project ? { ...project, version: formVersion! } : null);
+  const delegate = useAction(project);
   const invite = useAction(project);
   const revoke = useAction(project);
   const [email, setEmail] = useState('');
@@ -127,6 +128,20 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
           )}
         </form>
       </section>
+      {project && (
+        <section className="panel narrow-panel">
+          <h2>Auto-delegate</h2>
+          <p>Automatically assign approved, ready tasks to eligible agents, balancing their workload in this project.</p>
+          <p className="muted">Checks about every 15 seconds while the backend is running. Agents must still fetch and claim work from their IDE. Existing assignments stay in place when you turn this off. While enabled, clearing an assignment makes it eligible for assignment again.</p>
+          <Button role="switch" aria-checked={!!project.autoDelegate}
+            disabled={!owner || delegate.isPending}
+            onClick={() => delegate.mutate({ type: 'auto-delegate', enabled: !project.autoDelegate })}>
+            {delegate.isPending ? 'Saving…' : project.autoDelegate ? 'Auto-delegate: On' : 'Auto-delegate: Off'}
+          </Button>
+          {!owner && <p className="muted">Only project owners can change automatic delegation.</p>}
+          <ErrorNotice error={delegate.error} />
+        </section>
+      )}
       {project && (
         <div className="two-column">
           <section className="panel">

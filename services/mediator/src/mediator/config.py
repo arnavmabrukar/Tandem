@@ -8,6 +8,12 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 class Settings(BaseSettings):
     app_name: str = "Tandem Mediator"
+    # Operational kill switch; individual projects still opt in explicitly.
+    dispatch_enabled: bool = True
+
+    # Meta credentials stay on the backend, never in VITE_* variables.
+    model_api_key: SecretStr | None = Field(default=None, validation_alias="MODEL_API_KEY")
+    meta_model: str = "muse-spark-1.3-contributor"
 
     # Neon supplies DATABASE_URL, without our usual TANDEM_ prefix.
     # SecretStr hides the password if the settings object is printed.

@@ -61,11 +61,12 @@ class ProjectScopeTests(ToolTestCase):
     def test_all_project_tools_are_registered(self):
         names = {tool["name"] for tool in self.request("tools/list").json()["result"]["tools"]}
         self.assertLessEqual({"tandem_list_tasks", "tandem_get_task", "tandem_claim_task",
-                              "tandem_update_task", "tandem_post_message"}, names)
+                              "tandem_update_task", "tandem_post_message", "tandem_get_assignments"}, names)
 
     def test_other_projects_are_refused_before_reaching_database(self):
         calls = (
             ("tandem_list_tasks", {}, "list_tasks"),
+            ("tandem_get_assignments", {}, "get_assignments"),
             ("tandem_get_task", {"taskId": TASK_ID}, "get_task"),
             ("tandem_claim_task", {"taskId": TASK_ID, "expectedVersion": 1,
                                    "operationId": str(uuid4())}, "claim_task"),

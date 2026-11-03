@@ -23,6 +23,11 @@ function setup(response: Response = Response.json(success)) {
   return { api, fetcher, getAccessToken, onUnauthorized };
 }
 describe('real HTTP client contract', () => {
+  it('sends automatic selection without an explicit agent', () => {
+    expect(commandEndpoint(request({ type: 'assign-task', taskId: 't-1', agentId: null, autoSelect: true })))
+      .toEqual({ method: 'POST', path: '/api/projects/project-1/tasks/t-1/assignment',
+        payload: { agentId: null, autoSelect: true } });
+  });
   it('reads only server data with a bearer token and validates the snapshot', async () => {
     const { api, fetcher } = setup(Response.json({ schemaVersion: 1, projects: [] }));
     expect(await api.load()).toEqual({ schemaVersion: 1, projects: [] });
@@ -43,6 +48,8 @@ describe('real HTTP client contract', () => {
   });
   it('maps every supported command to an explicit REST route', () => {
     const cases: [Command, string, string][] = [
+      [{ type: 'auto-delegate', enabled: true }, 'POST', '/api/projects/project-1/auto-delegate'],
+      [{ type: 'assign-task', taskId: 't-1', agentId: 'a-1' }, 'POST', '/api/projects/project-1/tasks/t-1/assignment'],
       [
         { type: 'create-project', name: 'P', repository: 'owner/repo', description: '' },
         'POST',
@@ -258,4 +265,15 @@ describe('connection configuration', () => {
     expect(safeReturnTo('//outside.example')).toBe('/');
     expect(safeReturnTo('https://outside.example')).toBe('/');
   });
+});
+
+
+it('generates a validated preview through the authenticated backend', async () => {
+  const proposal = { goal: 'Build a feature', summary: 'A plan', tasks: [{ key: 'build',
+    title: 'Build', description: '', contractSummary: 'Scope', paths: [], criteria: ['It works'], dependencies: [] }] };
+  const { api, fetcher } = setup(Response.json(proposal));
+  expect(await api.generatePlan('project-1', proposal.goal)).toEqual(proposal);
+  expect(fetcher).toHaveBeenCalledWith('https://api.example.test/api/projects/project-1/plans/generate',
+    expect.objectContaining({ method: 'POST', body: JSON.stringify({ goal: proposal.goal }),
+      headers: expect.objectContaining({ Authorization: 'Bearer test-token' }) }));
 });

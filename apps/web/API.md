@@ -142,3 +142,46 @@ Implement the API handlers and projection assembly inside `services/mediator/`, 
 Adding an agent submits a grant record request; the backend determines its actual grant/presence state and completes the separate agent authorization flow. It does not launch an agent. Invitations require backend identity/delivery handling. Task creation proposes assignment and scope; it does not prove acceptance or acquire file claims. Cancellation/revocation must reconcile claims explicitly. Result submission is separate from approval, and only verified GitHub merge evidence should mark a result merged.
 
 First integrate authentication, `/api/me`, and a real empty `/api/workspace`; then project creation, tasks/messages, agent state, and approvals. Add actual tenant/backend integration tests before relying on access control or distributed coordination. Existing frontend browser tests use isolated responses under `tests/` and do not implement or certify these server behaviors.
+
+
+### Task assignment
+
+`POST /api/projects/{projectId}/tasks/{taskId}/assignment` accepts
+`{ operationId, expectedVersion, agentId }`, with matching `Idempotency-Key`.
+`expectedVersion` is the project version; `agentId: null` clears an assignment.
+Only owners/reviewers may delegate, only active project agents with a writable
+owner role are eligible, and only approved, dependency-ready open tasks can be
+assigned. Claimed tasks cannot be reassigned or cleared. Returns
+`{ projectId, projectVersion, entityId, taskVersion, assignedAgentId }`.
+Task snapshots now include nullable `assignedAgentId`; `agentId` remains the
+agent holding the execution claim. Assignment does not start execution.
+
+For mediator selection, send `agentId: null, autoSelect: true`. This chooses the
+eligible agent with the fewest unfinished assigned/claimed tasks in this project
+(ties break by agent ID). Existing assignments cannot be automatically replaced.
+The project lock serializes workload selection; exact operation retries return
+the original choice. No eligible agent or an unready task returns HTTP 409.
+
+
+### Automatic delegation policy
+
+`POST /api/projects/{projectId}/auto-delegate` accepts
+`{ operationId, expectedVersion, enabled }` with matching `Idempotency-Key`.
+Only current project owners may change the policy. The project version guards
+concurrent edits; exact retries return the saved receipt. Success returns
+`{ projectId, projectVersion, entityId, autoDelegate }`. Workspace projects expose
+`autoDelegate` (boolean). Existing projects default to false.
+
+The background worker rechecks the enabling owner's role and the enabled policy
+inside each assignment transaction. Disabling prevents subsequent assignments,
+without revoking existing assignments or claims.
+
+### Generate a plan preview
+
+`POST /api/projects/{project_id}/plans/generate` accepts `{ "goal": "..." }`
+(1–10,000 meaningful characters), requires authenticated current owner access,
+and returns a validated PlanProposal. Only goal and bounded project metadata
+are sent to Meta. The request does not save/approve a plan or create tasks.
+The editor saves reviewed content through the existing plans endpoint.
+No automatic retries; a manual retry can incur another provider charge.
+See `services/mediator/META_PLANNER.md` for backend environment configuration.

@@ -36,7 +36,7 @@ TASK_LIMIT = 200
 _TASK_SELECT = """
     SELECT t.id::text AS id, t.title, t.description, t.status, t.version,
            t.progress, t.contract_version, t.contract_summary, t.contract_paths,
-           t.acceptance_criteria, t.claimed_by_agent_id, t.claimed_at, t.updated_at,
+           t.acceptance_criteria, t.assigned_agent_id, t.claimed_by_agent_id, t.claimed_at, t.updated_at,
            -- Only a review of the CURRENT contract can authorize work on it.
            (SELECT approval.status FROM public.contract_approvals AS approval
             WHERE approval.project_id = t.project_id AND approval.task_id = t.id
@@ -117,9 +117,11 @@ def _current_role(connection, identity: dict, project_id: UUID) -> str:
     return row["role"]
 
 
-def claim_blockers(task: dict) -> list[str]:
+def claim_blockers(task: dict, agent_id: str | None = None) -> list[str]:
     """Explain why a task cannot be claimed; an empty list means it can."""
     blockers = []
+    if agent_id is not None and task.get("assigned_agent_id") not in (None, agent_id):
+        blockers.append("Task is assigned to another agent")
     if task["status"] != "open":
         blockers.append(f"Task status is {task['status']}, not open")
 
@@ -145,8 +147,8 @@ def _timestamp(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
-def _public_task(task: dict) -> dict[str, Any]:
-    blockers = claim_blockers(task)
+def _public_task(task: dict, agent_id: str | None = None) -> dict[str, Any]:
+    blockers = claim_blockers(task, agent_id)
     return {
         "id": task["id"],
         "title": task["title"],
@@ -154,6 +156,7 @@ def _public_task(task: dict) -> dict[str, Any]:
         "status": task["status"],
         "version": task["version"],
         "progress": task["progress"],
+        "assignedAgentId": task.get("assigned_agent_id"),
         "claimedByAgentId": task["claimed_by_agent_id"],
         "claimedAt": _timestamp(task["claimed_at"]),
         "updatedAt": _timestamp(task["updated_at"]),
@@ -274,7 +277,7 @@ def list_tasks(identity: dict, project_id: UUID, status: str | None = None) -> d
                                ORDER BY t.created_at, t.id LIMIT %s""",
             (project_id, status, status, TASK_LIMIT),
         ).fetchall()
-    return {"project": project, "tasks": [_public_task(task) for task in tasks]}
+    return {"project": project, "tasks": [_public_task(task, identity["agentId"]) for task in tasks]}
 
 
 def get_task(identity: dict, project_id: UUID, task_id: UUID) -> dict[str, Any]:
@@ -289,7 +292,7 @@ def get_task(identity: dict, project_id: UUID, task_id: UUID) -> dict[str, Any]:
                ORDER BY sequence DESC LIMIT %s""",
             (project_id, task_id, MESSAGE_LIMIT),
         ).fetchall()
-    return {**_public_task(task), "messages": [
+    return {**_public_task(task, identity["agentId"]), "messages": [
         {"id": message["id"], "sequence": message["sequence"],
          "sender": message["sender_name"], "senderAgentId": message["sender_agent_id"],
          "type": message["type"], "body": message["body"],
@@ -310,7 +313,7 @@ def claim_task(identity: dict, project_id: UUID, task_id: UUID,
             )
         # The project lock also serializes reviews and status changes, so these
         # conditions cannot change between this check and the update below.
-        blockers = claim_blockers(task)
+        blockers = claim_blockers(task, identity["agentId"])
         if blockers:
             raise AgentClaimBlocked("Task cannot be claimed: " + "; ".join(blockers))
         updated = connection.execute(
@@ -410,3 +413,20 @@ def post_message(identity: dict, project_id: UUID, task_id: UUID, message_type: 
     return _run_operation(identity, project_id, "agent_post_message", operation_id,
                           {"taskId": str(task_id), "type": message_type, "body": body,
                            "replyTo": reply_to}, apply)
+
+
+def get_assignments(identity: dict, project_id: UUID) -> dict:
+    """Read this agent's unfinished assignments without claiming or starting work."""
+    with _transaction() as connection:
+        role = _current_role(connection, identity, project_id)
+        if role not in WRITE_ROLES:
+            raise AgentAccessDenied("The agent's owner cannot execute assignments")
+        tasks = connection.execute(
+            _TASK_SELECT + """ WHERE t.project_id=%s AND t.assigned_agent_id=%s
+                               AND t.status NOT IN ('approved', 'merged', 'cancelled')
+                               ORDER BY t.created_at, t.id LIMIT %s""",
+            (project_id, identity["agentId"], TASK_LIMIT + 1),
+        ).fetchall()
+    return {"projectId": str(project_id), "agentId": identity["agentId"],
+            "tasks": [_public_task(task, identity["agentId"]) for task in tasks[:TASK_LIMIT]],
+            "truncated": len(tasks) > TASK_LIMIT}
