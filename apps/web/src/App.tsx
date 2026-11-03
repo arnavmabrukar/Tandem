@@ -7,6 +7,7 @@ import { AppLayout } from './components/AppLayout';
 import { Empty, ErrorNotice } from './components/common';
 import { Button } from './components/ui/button';
 import { SignInPage } from './pages/SignInPage';
+import { LandingPage } from './landing/LandingPage';
 import { ApiError } from './api/client';
 import { safeReturnTo } from './config';
 
@@ -128,7 +129,7 @@ function Dashboard() {
             {query.data && !accessDenied ? (
               <>
                 <Route
-                  path="/"
+                  path="/dashboard"
                   element={
                     <Navigate
                       to={
@@ -192,14 +193,14 @@ function Dashboard() {
                   path="*"
                   element={
                     <Empty title="Page not found">
-                      <Link to="/">Return to your project</Link>.
+                      <Link to="/dashboard">Return to your project</Link>.
                     </Empty>
                   }
                 />
               </>
             ) : (
               <>
-                <Route path="/" element={<Navigate to="/invitations" replace />} />
+                <Route path="/dashboard" element={<Navigate to="/invitations" replace />} />
                 <Route
                   path="*"
                   element={
@@ -222,17 +223,23 @@ export default function App() {
   const { user, loading, authenticated, error } = useSession();
   const location = useLocation();
   const returnTo = safeReturnTo(location.state?.returnTo);
-  if (loading)
+  // The landing page is public. It never waits for the session, except while Auth0 finishes a
+  // sign-in redirect that lands on the site root, so the callback isn't hidden behind it.
+  const onLanding = location.pathname === '/';
+  const finishingSignIn = /[?&]code=/.test(window.location.search) && /[?&]state=/.test(window.location.search);
+  if (loading && (!onLanding || finishingSignIn))
     return (
       <main className="loading" role="status">
         <span className="spinner" />
         Checking your session…
       </main>
     );
-  if (!user && (authenticated || error) && !location.pathname.startsWith("/mcp/")) return <SignInPage />;
+  if (!onLanding && !user && (authenticated || error) && !location.pathname.startsWith("/mcp/"))
+    return <SignInPage />;
   return (
     <ErrorBoundary>
       <Routes>
+        <Route path="/" element={<LandingPage />} />
         <Route
           path="/signin"
           element={user ? <Navigate to={returnTo} replace /> : <SignInPage />}
