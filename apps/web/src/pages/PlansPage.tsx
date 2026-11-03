@@ -66,8 +66,7 @@ export function PlansPage({ project }: { project: Project }) {
   }
   return <>
     <PageHeader title="Plans" description="Break a goal into tasks and review the scope before work begins."
-      action={<Button disabled={!writable || !!editor} onClick={() => open()}>New plan</Button>} />
-    <p className="notice">Review a draft to create its tasks. Task contracts are reviewed separately before agents can claim work.</p>
+      action={<Button variant="outline" disabled={!writable || !!editor} onClick={() => open()}>Write a plan manually</Button>} />
     {writable && <PlanChat key={`${user!.id}:${project.id}`} project={project} disabled={!!editor} />}
     {notice && <p role="status">{notice}</p>}
     <ErrorNotice error={plans.error} retry={() => void plans.refetch()} />
@@ -134,7 +133,7 @@ export function PlansPage({ project }: { project: Project }) {
     </section>}
     {plans.isPending && <p role="status">Loading plans…</p>}
     {!plans.isError && plans.data && <>
-      <p className="muted">Latest revisions of the 100 most recently created plans.</p>
+      <h2 className="saved-plans-heading">Saved plans</h2>
       {plans.data.length === 0 && <Empty title="No plans yet">Create a draft to outline your next goal.</Empty>}
       {plans.data.map(plan => <section className="panel" key={plan.planId}>
         <div className="row between"><h2>{plan.proposal.goal}</h2><span>{plan.approvedPlanVersion ? 'Approved' : 'Draft'} · revision {plan.planVersion}</span></div>

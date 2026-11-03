@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { ArrowUp, Sparkles, Plus, MessageSquare, ListChecks, Compass } from 'lucide-react';
 import { useSession } from '../auth/session';
 import { ApiError } from '../api/client';
 import type { Project } from '../types/domain';
 import { planProposalSchema, planRevisionSchema, type PlanProposal, type PlanRevision, type SavePlanRequest } from '../types/plans';
 import { Button } from './ui/button';
-import { ErrorNotice, Field } from './common';
+import { ErrorNotice } from './common';
 import { PlanApproval } from './PlanApproval';
 
 type Message = { role: 'user' | 'assistant'; content: string; proposal?: PlanProposal; saved?: PlanRevision; approved?: boolean };
@@ -33,7 +34,7 @@ function DraftCard({ proposal, project, disabled, message, onUpdate }: { proposa
       if (error instanceof ApiError && !error.outcomeUnknown) pending.current = null;
     }, retry: false,
   });
-  return <section className="panel">
+  return <section className="panel chat-draft">
     <h3>{proposal.goal}</h3><p>{proposal.summary}</p>
     {proposal.tasks.map(task => <details key={task.key}>
       <summary>{task.title}</summary><p>{task.description}</p><p>Scope: {task.contractSummary}</p>
@@ -64,6 +65,14 @@ export function PlanChat({ project, disabled }: { project: Project; disabled: bo
   });
   const [input, setInput] = useState('');
   const request = useRef<Message[]>([]);
+  const transcript = useRef<HTMLDivElement>(null);
+  const composer = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (composer.current) {
+      composer.current.style.height = 'auto';
+      composer.current.style.height = `${Math.min(composer.current.scrollHeight, 180)}px`;
+    }
+  }, [input]);
   const chat = useMutation({
     mutationFn: () => {
       const context = request.current.map(({ role, content, proposal }) => ({ role,
@@ -82,37 +91,70 @@ export function PlanChat({ project, disabled }: { project: Project; disabled: bo
     // Keep this tab's conversation across refreshes, scoped to its user and project.
     try { sessionStorage.setItem(storageKey, JSON.stringify(messages)); } catch { /* Storage may be disabled. */ }
   }, [messages, storageKey]);
+  useEffect(() => {
+    const area = transcript.current;
+    if (area) area.scrollTop = area.scrollHeight;
+  }, [messages, chat.isPending]);
   function send() {
     if (disabled || chat.isPending || !input.trim()) return;
     // Include structured drafts in context so follow-up edits preserve their task keys.
     request.current = [...messages.slice(-8), { role: 'user', content: input.trim() }];
     chat.mutate();
   }
-  return <section className="panel">
-    <div className="row between"><h2>Plan with Meta</h2>
-      <Button variant="outline" disabled={chat.isPending} onClick={() => { setMessages([]); chat.reset(); setInput(''); }}>New chat</Button></div>
-    <p>Ask about Tandem, talk through an idea, or ask for a plan you can approve.</p>
-    <p className="muted">Chat is saved in this browser tab. Messages and project details are sent to the configured Meta model. Repository files are not read.</p>
-    <nav className="row" aria-label="Planning shortcuts">
-      <Link to={`/projects/${project.id}/tasks`}>Tasks</Link>
-      <Link to={`/projects/${project.id}/agents`}>Agents</Link>
-      <Link to={`/projects/${project.id}/approvals`}>Approvals</Link>
-    </nav>
-    <div aria-live="polite">
-      {messages.map((message, index) => <article key={index}>
-        <h3>{message.role === 'user' ? 'You' : 'Meta'}</h3>
-        <p style={{ whiteSpace: 'pre-wrap' }}>{message.content}</p>
-        {message.proposal && <DraftCard proposal={message.proposal} project={project} disabled={disabled || chat.isPending} message={message}
-          onUpdate={patch => setMessages(current => current.map((item, i) => i === index ? { ...item, ...patch } : item))} />}
-      </article>)}
-      {chat.isPending && <p role="status">Meta is thinking…</p>}
+  const suggestions = [
+    { icon: ListChecks, title: 'Plan a feature', prompt: 'Help me break our next feature into a clear plan with tasks.' },
+    { icon: MessageSquare, title: 'Explore an idea', prompt: 'I have an idea for this project. Help me think through the approach.' },
+    { icon: Compass, title: 'Find my way around', prompt: 'Guide me through Tandem and how to get my agents working on tasks.' },
+  ];
+  return <section className="plan-chat" aria-label="Plan with Meta">
+    <header className="chat-header">
+      <div className="row"><span className="chat-avatar"><Sparkles size={18} /></span>
+        <div><h2>Meta</h2><span className="chat-caption">Your planning partner</span></div></div>
+      <Button variant="ghost" size="sm" disabled={chat.isPending} onClick={() => {
+        setMessages([]); chat.reset(); setInput(''); composer.current?.focus();
+      }}><Plus size={16} />New chat</Button>
+    </header>
+    <div ref={transcript} className="chat-transcript" role="log" aria-label="Conversation" aria-live="polite" aria-busy={chat.isPending}>
+      {messages.length === 0 && !chat.isPending && <div className="chat-welcome">
+        <span className="chat-welcome-icon"><Sparkles size={28} /></span>
+        <span className="chat-eyebrow">LET’S BUILD SOMETHING</span>
+        <h2>What’s the plan?</h2>
+        <p>Talk through an idea. Turn it into tasks.<br />Decide what happens next.</p>
+        <div className="chat-suggestions">{suggestions.map(({ icon: Icon, title, prompt }) =>
+          <button key={title} type="button" disabled={disabled} onClick={() => { setInput(prompt); composer.current?.focus(); }}>
+            <Icon size={18} /><span>{title}</span><span aria-hidden="true">↗</span>
+          </button>)}</div>
+      </div>}
+      <div className="chat-messages">
+        {messages.map((message, index) => <article key={index} className={`chat-message chat-message-${message.role}`}>
+          <span className="chat-speaker">{message.role === 'user' ? 'You' : <><Sparkles size={14} /> Meta</>}</span>
+          <div className="chat-bubble">{message.content}</div>
+          {message.proposal && <DraftCard proposal={message.proposal} project={project} disabled={disabled || chat.isPending} message={message}
+            onUpdate={patch => setMessages(current => current.map((item, i) => i === index ? { ...item, ...patch } : item))} />}
+        </article>)}
+        {chat.isPending && <>
+          <article className="chat-message chat-message-user"><span className="chat-speaker">You</span><div className="chat-bubble">{input}</div></article>
+          <div className="chat-thinking" role="status"><Sparkles size={16} /><span>Thinking through your idea</span><span className="chat-dots" aria-hidden="true">•••</span></div>
+        </>}
+      </div>
     </div>
-    <form onSubmit={event => { event.preventDefault(); send(); }}>
-      <Field label="Message Meta"><textarea value={input} maxLength={10000} required disabled={disabled || chat.isPending}
-        placeholder="Help me plan our next feature…" onChange={event => setInput(event.target.value)} /></Field>
+    <div className="chat-bottom">
       <ErrorNotice error={chat.error} />
-      {chat.error && <p>Your message is preserved. Sending again makes a new model request.</p>}
-      <Button type="submit" disabled={disabled || chat.isPending || !input.trim()}>Send</Button>
-    </form>
+      {chat.error && <p className="chat-caption">Your message is preserved. Try sending it again.</p>}
+      <form className="chat-composer" onSubmit={event => { event.preventDefault(); send(); }}>
+        <label className="sr-only" htmlFor="meta-message">Message Meta</label>
+        <textarea id="meta-message" ref={composer} rows={1} value={input} maxLength={10000} required disabled={disabled || chat.isPending}
+          placeholder="Ask Meta to help you plan…" onChange={event => setInput(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); }
+          }} />
+        <div className="chat-composer-actions"><span>Shift + Enter for a new line</span>
+          <Button className="chat-send" type="submit" aria-label="Send message" disabled={disabled || chat.isPending || !input.trim()}><ArrowUp size={20} /></Button>
+        </div>
+      </form>
+      <div className="chat-footnote"><span>Review and approve plans before work begins.</span>
+        <details><summary>About this chat</summary><p>Saved in this browser tab. Messages and project details are sent to Meta. Repository files are not read.</p></details>
+      </div>
+    </div>
   </section>;
 }
