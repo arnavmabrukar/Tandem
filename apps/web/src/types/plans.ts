@@ -53,5 +53,5 @@ export type SavePlanRequest = {
   operationId: string; expectedVersion: number; proposal: PlanProposal;
   expectedPlanVersion?: number;
 };
-export type ApprovePlanRequest = { operationId: string; expectedVersion: number; expectedPlanVersion: number; note: string };
+export type ApprovePlanRequest = { operationId: string; expectedVersion: number; expectedPlanVersion: number; note: string; startNow?: boolean };
 export const approvedPlanSchema = savedPlanSchema.extend({ taskIds: z.record(z.string(), z.string().uuid()) });

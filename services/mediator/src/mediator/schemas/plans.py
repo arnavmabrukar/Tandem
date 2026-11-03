@@ -144,6 +144,9 @@ class ApprovePlanRequest(BaseModel):
     expectedVersion: int = Field(ge=1, strict=True)
     expectedPlanVersion: int = Field(ge=1, strict=True)
     note: str = Field(min_length=1, max_length=2000)
+    # Also approve every task's contract and turn on automatic delegation. The
+    # reviewer has just read those contracts, so this needs no second review.
+    startNow: bool = False
 
     @field_validator("note")
     @classmethod

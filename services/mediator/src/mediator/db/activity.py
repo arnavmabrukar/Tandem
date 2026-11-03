@@ -10,7 +10,8 @@ def record_task_activity(
     project_id: UUID,
     task_id: UUID,
     actor_id: UUID,
-    kind: Literal["task_created", "task_cancelled", "task_assigned"],
+    kind: Literal["task_created", "task_cancelled", "task_assigned", "task_accepted",
+                  "task_changes_requested", "task_released"],
     text: str,
 ) -> None:
     """Record a task event inside the caller's existing transaction."""
@@ -21,7 +22,8 @@ def record_task_activity(
         raise RuntimeError("Activity recording requires a transaction")
 
     # Type hints help editors, but Python does not enforce them at runtime.
-    if kind not in ("task_created", "task_cancelled", "task_assigned"):
+    if kind not in ("task_created", "task_cancelled", "task_assigned", "task_accepted",
+                    "task_changes_requested", "task_released"):
         raise ValueError("Unsupported task activity kind")
 
     if not text.strip():

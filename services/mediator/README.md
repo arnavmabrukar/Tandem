@@ -83,6 +83,29 @@ No schema or records were migrated during this setup.
 See [MCP_OAUTH.md](MCP_OAUTH.md) for migration 011, local and Render settings,
 browser consent, credential lifetimes, disconnecting clients, and verification.
 
+## Autonomous flow
+
+1. A project owner reviews a plan and clicks **Approve and run**. That creates its tasks,
+   approves their contracts with the owner's note, and turns on automatic delegation.
+2. Every 15 seconds the dispatcher assigns ready tasks to online agents, picking the one
+   with the fewest unfinished tasks. A task is ready once its contract is approved and its
+   dependencies are `approved` or `merged`.
+3. An [agent runner](../../agent-integrations/runner/README.md) claims the task, runs a
+   headless coding agent, pushes a branch, opens a pull request, and moves the task to
+   `in_review`. If that fails, the task moves to `blocked` and says why.
+4. A person merges the pull request and clicks **Accept work**, which unlocks dependent
+   tasks, or clicks **Request changes** to send a note back to the agent.
+
+An automatic assignment that hasn't started returns to the queue after its agent has been
+offline for 15 minutes. Claimed work never moves on its own, because that agent may have
+work in progress: use **Release task** instead. Neither Tandem nor the agent merges
+anything, and **Accept work** doesn't check that the pull request was merged.
+
+Apply `migrations/versions/019_autonomous_flow.sql` before deploying this code.
+`tests/integration/test_autonomous_flow.py` runs the whole chain with a stand-in coding
+agent. Set `TANDEM_FLOW_TEST_DATABASE_URL` to a **new empty disposable database**, then run
+the file directly.
+
 ## Agent tools and presence
 
 Apply `migrations/versions/012_agent_task_actions.sql` **before** deploying this code:

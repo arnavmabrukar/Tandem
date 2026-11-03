@@ -60,8 +60,11 @@ def assign_task(actor_id: UUID, project_id: UUID, task_id: UUID,
                      AND m.user_id=agent.owner_user_id
                    WHERE g.project_id=%s AND g.status='active'
                      AND agent.grant_status='active' AND m.role IN ('owner','reviewer')
+                     -- Background delegation must not strand work on an offline agent.
+                     -- Uses the same 2-minute window as the dashboard's Online badge.
+                     AND (NOT %s OR agent.last_seen_at > now() - interval '2 minutes')
                    ORDER BY agent.id FOR SHARE OF agent, g, m""",
-                (project_id,),
+                (project_id, automatic),
             ).fetchall()
             if not candidates:
                 raise agent_tasks.AgentTaskConflict("No eligible agents; connect an agent with project write access first")
@@ -116,9 +119,10 @@ def assign_task(actor_id: UUID, project_id: UUID, task_id: UUID,
         if task["assigned_agent_id"] == selected_agent:
             raise agent_tasks.AgentTaskConflict("Task already has this assignment")
         updated = connection.execute(
-            """UPDATE public.tasks SET assigned_agent_id=%s, updated_at=clock_timestamp()
+            """UPDATE public.tasks SET assigned_agent_id=%s, auto_assigned=%s,
+                   updated_at=clock_timestamp()
                WHERE project_id=%s AND id=%s RETURNING version""",
-            (selected_agent, project_id, task_id),
+            (selected_agent, automatic or request.autoSelect, project_id, task_id),
         ).fetchone()
         # Assignment metadata uses the project CAS above. It does not change the
         # task/contract review snapshot or invalidate an outstanding human review.

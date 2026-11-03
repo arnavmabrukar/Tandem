@@ -2,8 +2,9 @@
 
 Project owners can open **Plans**, enter a goal, and click **Generate with Meta**.
 The result opens in the existing plan editor. Review/edit and Save draft, then use
-normal plan approval and task contract approval. Generation alone never saves a
-plan, assigns work, creates tasks, or approves a contract. Saved drafts use the
+plan approval: **Approve and create tasks** keeps per-task contract review, while
+**Approve and run** approves the contracts too and starts delegation. Generation
+alone never saves a plan, assigns work, creates tasks, or approves a contract. Saved drafts use the
 existing human-authored draft flow; provider provenance is not persisted yet.
 
 Add these to the root `.env.local` for local development and to the Render

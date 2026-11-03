@@ -160,8 +160,13 @@ class AgentToolIntegrationTests(unittest.TestCase):
             AutoDelegateRequest(operationId=operation or uuid4(),
                                 expectedVersion=version or self.project_version(), enabled=enabled))
 
+    def agents_online(self):
+        # Automatic delegation only assigns work to agents that have checked in.
+        self.execute("UPDATE public.agents SET last_seen_at = now()")
+
     def test_dispatch_opt_in_readiness_and_repeat_safety(self):
         from mediator.db.dispatch import dispatch_once
+        self.agents_online()
         ready = self.make_task()
         self.make_task(review='pending')
         prerequisite = self.make_task(status='in_progress')
@@ -197,6 +202,7 @@ class AgentToolIntegrationTests(unittest.TestCase):
     def test_concurrent_dispatch_assigns_each_task_once(self):
         from mediator.db.dispatch import dispatch_once
         self.make_agent(self.owner, self.project, f'Dispatch {uuid4()}')
+        self.agents_online()
         tasks = [self.make_task() for _ in range(4)]
         self.policy(True)
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -210,6 +216,7 @@ class AgentToolIntegrationTests(unittest.TestCase):
         self.assertEqual(self.execute("SELECT count(*) FROM public.project_activity WHERE project_id=%s AND kind='task_assigned'", (self.project,))[0][0], 4)
 
     def test_dispatch_inflight_checks_disabled_policy(self):
+        self.agents_online()
         from mediator.db.assignments import assign_task
         from mediator.db.projects import ProjectAccessDenied
         from mediator.schemas.assignments import AssignTaskRequest

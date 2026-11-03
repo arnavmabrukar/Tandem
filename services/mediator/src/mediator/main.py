@@ -8,6 +8,8 @@ from mediator.schemas.assignments import AutoDelegateRequest
 from mediator.db.assignments import assign_task as save_assignment
 from mediator.schemas.assignments import AssignTaskRequest
 from mediator.db import agent_tasks
+from mediator.db.task_review import release_task as save_task_release, review_task as save_task_review
+from mediator.schemas.task_review import ReleaseTaskRequest, ReviewTaskRequest, TaskDecisionResponse
 # class used to create web app
 # Parse UUIDs and read the Idempotency-Key request header.
 from uuid import UUID
@@ -746,6 +748,8 @@ def approve_plan(project_id: UUID, plan_id: UUID, request: ApprovePlanRequest,
                  user: dict[str, str] = Depends(get_current_user)):
     if idempotency_key != request.operationId:
         raise HTTPException(400, "Idempotency-Key must match operationId")
+    if request.startNow and not settings.dispatch_enabled:
+        raise HTTPException(503, "Automatic delegation is disabled on this backend")
     with plan_api_errors():
         return approve_saved_plan(actor_id=UUID(user["id"]), project_id=project_id,
                                   plan_id=plan_id, request=request)
@@ -852,6 +856,45 @@ def create_task(
             status_code=503,
             detail="Task database unavailable",
         ) from None
+
+@contextmanager
+def task_decision_errors():
+    try:
+        yield
+    except ProjectAccessDenied:
+        raise HTTPException(403, "Project owner or reviewer access is required") from None
+    except agent_tasks.AgentTaskNotFound:
+        raise HTTPException(404, "Task not found in this project") from None
+    except OperationConflict:
+        raise HTTPException(409, "Operation ID was already used for another request") from None
+    except ProjectVersionConflict:
+        raise HTTPException(409, "Project changed; reload before deciding") from None
+    except agent_tasks.AgentTaskConflict as error:
+        raise HTTPException(409, str(error)) from None
+    except (DatabaseError, RuntimeError):
+        raise HTTPException(503, "Task database unavailable") from None
+
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/review", response_model=TaskDecisionResponse)
+def review_task(project_id: UUID, task_id: UUID, request: ReviewTaskRequest,
+                idempotency_key: UUID = Header(alias="Idempotency-Key"),
+                user: dict[str, str] = Depends(get_current_user)):
+    # Accepting is what unlocks tasks that depend on this one.
+    if idempotency_key != request.operationId:
+        raise HTTPException(400, "Idempotency-Key must match operationId")
+    with task_decision_errors():
+        return save_task_review(UUID(user["id"]), project_id, task_id, request)
+
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/release", response_model=TaskDecisionResponse)
+def release_task(project_id: UUID, task_id: UUID, request: ReleaseTaskRequest,
+                 idempotency_key: UUID = Header(alias="Idempotency-Key"),
+                 user: dict[str, str] = Depends(get_current_user)):
+    if idempotency_key != request.operationId:
+        raise HTTPException(400, "Idempotency-Key must match operationId")
+    with task_decision_errors():
+        return save_task_release(UUID(user["id"]), project_id, task_id, request)
+
 
 @app.post("/api/projects/{project_id}/auto-delegate")
 def configure_auto_delegate(project_id: UUID, request: AutoDelegateRequest,

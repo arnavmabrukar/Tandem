@@ -18,10 +18,10 @@ export function PlanApproval({ plan, projectVersion, disabled }: {
   const [confirmed, setConfirmed] = useState(false);
   const pending = useRef<ApprovePlanRequest | null>(null);
   const action = useMutation({
-    mutationFn: () => {
+    mutationFn: (startNow: boolean) => {
       if (!target) throw new Error('Open a plan to review first.');
       pending.current ??= { operationId: crypto.randomUUID(), expectedVersion: target.projectVersion,
-        expectedPlanVersion: target.plan.planVersion, note };
+        expectedPlanVersion: target.plan.planVersion, note, startNow };
       return api.approvePlan(target.plan.projectId, target.plan.planId, pending.current);
     },
     onSuccess: () => {
@@ -42,7 +42,7 @@ export function PlanApproval({ plan, projectVersion, disabled }: {
       setTarget({ plan: structuredClone(plan), projectVersion });
     }}>Review and create tasks</Button>
     <Modal open={!!target} onOpenChange={open => { if (!open && !locked) setTarget(null); }}
-      title="Approve this plan" description="Creates the tasks below once. Each task still needs contract approval before an agent can claim it.">
+      title="Approve this plan" description="Approve and run also approves every contract below and starts assigning ready tasks to online agents. You still accept each finished task.">
       {target && <>
         <h3>{target.plan.proposal.goal} · revision {target.plan.planVersion}</h3>
         <p>{target.plan.proposal.summary}</p>
@@ -54,13 +54,15 @@ export function PlanApproval({ plan, projectVersion, disabled }: {
         </section>)}
         <Field label="Review note"><textarea disabled={locked} maxLength={2000} value={note} onChange={e => setNote(e.target.value)} /></Field>
         <label className="row"><input type="checkbox" checked={confirmed} disabled={locked} onChange={e => setConfirmed(e.target.checked)} />
-          I reviewed this revision and want to create these tasks.</label>
-        <ErrorNotice error={action.error} retry={uncertain && !action.isPending ? () => action.mutate() : undefined} />
+          I reviewed this revision, including each task's contract.</label>
+        <ErrorNotice error={action.error} retry={uncertain && !action.isPending ? () => action.mutate(pending.current?.startNow ?? false) : undefined} />
         {conflict && <p>Close this review, refresh the dashboard, and review the latest plan before approving again.</p>}
         <div className="row end">
           <Button variant="outline" disabled={locked} onClick={() => setTarget(null)}>Cancel</Button>
-          <Button disabled={disabled || locked || conflict || !confirmed || !note.trim()} onClick={() => action.mutate()}>
-            {action.isPending ? 'Creating tasks…' : 'Approve and create tasks'}</Button>
+          <Button variant="outline" disabled={disabled || locked || conflict || !confirmed || !note.trim()} onClick={() => action.mutate(false)}>
+            Approve and create tasks</Button>
+          <Button disabled={disabled || locked || conflict || !confirmed || !note.trim()} onClick={() => action.mutate(true)}>
+            {action.isPending ? 'Saving…' : 'Approve and run'}</Button>
         </div>
       </>}
     </Modal>
