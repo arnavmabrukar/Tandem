@@ -108,6 +108,14 @@ the file directly.
 
 ## Accounts with more than one sign-in
 
+Dashboard requests validate the JWT on every call. Successful Auth0 `/userinfo`
+profiles are cached per token for at most five minutes (and never past token expiry)
+in each API process, so room polling does not consume an Auth0 request each time.
+Concurrent lookups for the same token share one request. A 429 starts a bounded
+cooldown using Auth0's rate-limit headers; it never grants access using a stale
+profile. Names and verified-email changes can take up to five minutes to refresh.
+Project roles and memberships are still checked in the database on every request.
+
 Apply `migrations/versions/021_account_identities.sql` **before** deploying this code. It
 only adds to the schema and makes three foreign keys deferrable, so earlier code keeps
 working.
