@@ -218,9 +218,9 @@ def update_project(
             "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
         )
 
-        original = connection.execute("SELECT repository FROM public.projects WHERE id=%s", (project_id,)).fetchone()
-        if original is None or original["repository"] != request.repository:
-            raise ProjectAccessDenied("Repository cannot be changed; disconnect and import another repository")
+        original = connection.execute("SELECT name, repository FROM public.projects WHERE id=%s", (project_id,)).fetchone()
+        if original is None or original["repository"] != request.repository or original["name"] != request.name:
+            raise ProjectAccessDenied("Project name and repository cannot be changed after import")
 
         # Reserve the operation before making changes.
         # An identical concurrent operation waits for its outcome.
@@ -291,16 +291,12 @@ def update_project(
                 """
                 UPDATE public.projects
                 SET
-                    name = %s,
-                    repository = %s,
                     description = %s,
                     version = version + 1
                 WHERE id = %s AND version = %s
                 RETURNING id, version
                 """,
                 (
-                    request.name,
-                    request.repository,
                     request.description,
                     project_id,
                     request.expectedVersion,

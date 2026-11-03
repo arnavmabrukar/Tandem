@@ -71,7 +71,8 @@ class UpdateProjectRequest(BaseModel):
     # strict=True rejects strings and booleans masquerading as integers.
     expectedVersion: int = Field(ge=1, strict=True)
 
-    # The frontend sends all three editable fields when saving.
+    # Identity fields are sent for compatibility, but must match the saved project.
+    # Only the description is editable after import.
     name: str = Field(min_length=1, max_length=80)
 
     # Require owner/repository format.

@@ -27,6 +27,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
   const [role, setRole] = useState<Role>('reviewer');
   const [saved, setSaved] = useState(false);
   const changed = !!project && project.version !== formVersion;
+  const SettingsContainer = project ? 'div' : 'details';
   function loadLatest() {
     if (project) {
       setName(project.name);
@@ -45,10 +46,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
       />
       <section className="panel narrow-panel">
         <h2>{project ? 'Project details' : 'Choose your repository'}</h2>
-        <p className="muted">
-          Link the project to its GitHub repository. The mediator manages access and coordination;
-          source changes stay in your own worktrees.
-        </p>
+        <p className="muted">{project ? 'Manage your project description and access.' : 'Select a repository to create your Tandem project.'}</p>
         {changed && (
           <div className="notice">
             <div>
@@ -69,7 +67,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
             try {
               if (!project && !selection) return;
               const result = await save.mutateAsync(project ? {
-                type: 'update-project', name, repository: repo, description,
+                type: 'update-project', name: project.name, repository: project.repository, description,
               } : {
                 type: 'create-project', name, repository: repo, description,
                 githubRepositoryId: selection!.repositoryId,
@@ -91,11 +89,21 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
               setRepo(repository?.fullName ?? ''); setName(repository?.name.slice(0, 80) ?? '');
               setBranch(repository?.defaultBranch ?? ''); setDescription(repository?.description.slice(0, 1000) ?? '');
             }} />}
-            {project && <Field label="Project name"><input required maxLength={80} value={name} onChange={e => {setName(e.target.value); setSaved(false);}} /></Field>}
-            <Field label="GitHub repository"><input readOnly value={repo} placeholder="Select a GitHub repository above" /></Field>
-            <Field label="Branch to track" hint={project ? 'The branch selected when importing this repository.' : 'Defaults to the repository’s default branch. The backend checks that this branch exists.'}>
-              <input required={!project} maxLength={255} readOnly={!!project} value={branch} onChange={e => setBranch(e.target.value)} />
-            </Field>
+            {project ? <>
+              <dl>
+                <dt>Project name</dt><dd>{project.name}</dd>
+                <dt>GitHub repository</dt><dd>{project.repository}</dd>
+                <dt>Tracked branch</dt><dd>{project.trackedBranch || 'Not recorded'}</dd>
+              </dl>
+              <p className="muted">These details are fixed when you import a repository. To track a different repository, disconnect this project and import another.</p>
+            </> : null}
+            <SettingsContainer>
+            {!project && <summary>Optional settings</summary>}
+            {!project &&
+              <Field label="Branch to track" hint="Defaults to the repository’s default branch. The backend checks that this branch exists.">
+                <input required maxLength={255} value={branch} onChange={e => setBranch(e.target.value)} />
+              </Field>
+            }
             <Field label="Description">
               <textarea
                 maxLength={1000}
@@ -106,8 +114,9 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
                 }}
               />
             </Field>
+            </SettingsContainer>
             <Button type="submit" disabled={changed || (!project && (!selection || !branch))}>
-              {save.isPending ? 'Saving…' : project ? 'Save project' : 'Create project'}
+              {save.isPending ? 'Saving…' : project ? 'Save project' : 'Import repository'}
             </Button>
           </fieldset>
           {!owner && <p className="muted">Only the project owner can edit setup.</p>}
