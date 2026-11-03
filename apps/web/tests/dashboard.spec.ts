@@ -26,6 +26,61 @@ async function connect(page: Page) {
 }
 const thread = '/#/projects/project-1/tasks/task-1';
 
+test('delayed session restoration preserves the task route across reload', async ({ page }) => {
+  const state = await connect(page);
+  await page.goto('/?test-auth=delayed#/projects/project-1/tasks/task-1');
+  await expect(page.getByRole('button', { name: 'Sign in with Auth0' })).toHaveCount(0);
+  expect(state.reads).toBe(0);
+  await expect(page.getByRole('heading', { name: 'Task returned by test API', exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Sign in with Auth0' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Task returned by test API', exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/#\/projects\/project-1\/tasks\/task-1$/);
+});
+
+test('project edits persist after reload and stale tabs cannot overwrite them', async ({ page, context }) => {
+  const state = await connect(page);
+  const second = await context.newPage();
+  const secondState = await connect(second);
+  // Share the server record, while keeping each tab's form version independent.
+  secondState.project = state.project;
+  const writes: Request[] = [];
+  for (const tab of [page, second]) {
+    await tab.route('**/api/projects/project-1', async (route) => {
+      const body = route.request().postDataJSON();
+      writes.push(route.request());
+      if (body.expectedVersion !== state.project.version) {
+        await route.fulfill({ status: 409, json: { detail: 'Project version changed' } });
+        return;
+      }
+      state.project.description = body.description;
+      state.project.version++;
+      await route.fulfill({ json: {
+        projectId: state.project.id, entityId: state.project.id,
+        projectVersion: state.project.version,
+      } });
+    });
+    await tab.goto('/#/projects/project-1/setup');
+    await expect(tab.getByRole('button', { name: 'Save project', exact: true })).toBeEnabled();
+  }
+  await second.getByLabel('Description', { exact: true }).fill('Stale tab draft');
+  await page.getByLabel('Description', { exact: true }).fill('Saved owner description');
+  await page.getByRole('button', { name: 'Save project', exact: true }).click();
+  await expect(page.getByText('Project saved by the backend.')).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel('Description', { exact: true })).toHaveValue('Saved owner description');
+  // Refresh exercises the same workspace update that polling delivers.
+  await second.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(second.getByText('Newer project data is available.')).toBeVisible();
+  await expect(second.getByRole('button', { name: 'Save project', exact: true })).toBeDisabled();
+  await expect(second.getByLabel('Description', { exact: true })).toHaveValue('Stale tab draft');
+  await second.getByRole('button', { name: 'Reload details', exact: true }).click();
+  await expect(second.getByLabel('Description', { exact: true })).toHaveValue('Saved owner description');
+  expect(writes).toHaveLength(1);
+  expect(state.project.version).toBe(5);
+  await second.close();
+});
+
 test('missing configuration shows setup, with no network or fabricated workspace', async ({
   page,
 }) => {

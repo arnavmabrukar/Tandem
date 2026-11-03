@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 
 // Browser tests isolate the identity provider, while exercising the real HTTP client.
 // This module is reachable only through tests/vite.config.ts, never production imports.
@@ -21,11 +21,18 @@ export function Auth0Provider({
   onRedirectCallback?: (state?: { returnTo?: string }) => void;
 }) {
   const [authenticated, setAuthenticated] = useState(!location.search.includes('test-auth=off'));
+  // Model asynchronous SDK session restoration without using a real tenant.
+  const [loading, setLoading] = useState(location.search.includes('test-auth=delayed'));
+  useEffect(() => {
+    if (!loading) return;
+    const timer = setTimeout(() => setLoading(false), 1500);
+    return () => clearTimeout(timer);
+  }, [loading]);
   return (
     <Context.Provider
       value={{
-        isAuthenticated: authenticated,
-        isLoading: false,
+        isAuthenticated: authenticated && !loading,
+        isLoading: loading,
         error: undefined,
         user: authenticated ? { sub: 'auth0|test-user' } : undefined,
         getAccessTokenSilently,
