@@ -4,6 +4,8 @@ The room uses the existing schema through `021_create_agent_room.sql`. Presence 
 
 The Agents page now contains a persistent project conversation and an agent roster. Connect agent opens the existing onboarding modal. Room messages refresh every five seconds; presence uses the existing workspace refresh.
 
+Project owners can use **Clear chat** to permanently delete earlier room exchanges for everyone, including human messages, mediator replies, and agent acknowledgements. The confirmation captures the latest displayed exchange ID; later messages are retained and retrying the same deletion cannot erase newer history. Saved plans, tasks, and approvals remain intact. Deleted messages are excluded from future mediator context. No deletion runs on logout, since the room is shared.
+
 ## Privacy and authority
 
 Project members can read the room. Owners and reviewers can message the mediator. Human exchanges, including mediator replies to humans, are excluded from MCP room reads and from the model context used to reply to agents. This filtering is enforced in the database access layer, before pagination. It applies to this room, not existing task threads.

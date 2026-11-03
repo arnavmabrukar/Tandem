@@ -14,13 +14,10 @@ import { safeReturnTo } from './config';
 const ActivityPage = lazy(() =>
   import('./pages/ActivityPage').then((m) => ({ default: m.ActivityPage })),
 );
-const TasksPage = lazy(() => import('./pages/TasksPage').then((m) => ({ default: m.TasksPage })));
-const PlansPage = lazy(() => import('./pages/PlansPage').then((m) => ({ default: m.PlansPage })));
+const WorkflowPage = lazy(() => import('./pages/WorkflowPage').then((m) => ({ default: m.WorkflowPage })));
+const WorkflowRedirect = lazy(() => import('./pages/WorkflowPage').then((m) => ({ default: m.WorkflowRedirect })));
 const ThreadPage = lazy(() =>
   import('./pages/ThreadPage').then((m) => ({ default: m.ThreadPage })),
-);
-const ApprovalsPage = lazy(() =>
-  import('./pages/ApprovalsPage').then((m) => ({ default: m.ApprovalsPage })),
 );
 const ConnectAgentPage = lazy(() =>
   import('./pages/ConnectAgentPage').then((m) => ({ default: m.ConnectAgentPage })),
@@ -156,12 +153,12 @@ function Dashboard() {
                     project ? <ActivityPage key={project.id} project={project} /> : notFound
                   }
                 />
-                <Route
-                  path="/projects/:projectId/tasks"
-                  element={project ? <TasksPage key={project.id} project={project} /> : notFound}
-                />
+                <Route path="/projects/:projectId/workflow"
+                  element={project ? <WorkflowPage key={`${user.id}:${project.id}`} project={project} /> : notFound} />
+                <Route path="/projects/:projectId/tasks"
+                  element={project ? <WorkflowRedirect project={project} stage="execute" /> : notFound} />
                 <Route path="/projects/:projectId/plans"
-                  element={project ? <PlansPage key={`${user.id}:${project.id}`} project={project} /> : notFound} />
+                  element={project ? <WorkflowRedirect project={project} stage="plan" /> : notFound} />
                 <Route
                   path="/projects/:projectId/tasks/:taskId"
                   element={project ? <ThreadPage key={project.id} project={project} /> : notFound}
@@ -175,7 +172,7 @@ function Dashboard() {
                 <Route
                   path="/projects/:projectId/approvals"
                   element={
-                    project ? <ApprovalsPage key={project.id} project={project} /> : notFound
+                    project ? <WorkflowRedirect project={project} stage="approvals" /> : notFound
                   }
                 />
                 <Route

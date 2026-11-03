@@ -8,9 +8,10 @@ from mediator.schemas.plans import PlanChatRequest
 from mediator.schemas.room import RoomMessageRequest, RoomReply
 
 
-def _authorize(conn, project_id, *, user_id=None, identity=None, write=False):
+def _authorize(conn, project_id, *, user_id=None, identity=None, write=False, lock_project=True):
     # Also serialize final publication with project disconnection.
-    project = conn.execute("SELECT name, repository, version FROM public.projects WHERE id=%s AND disconnected_at IS NULL FOR SHARE", (project_id,)).fetchone()
+    project = conn.execute("SELECT name, repository, version FROM public.projects WHERE id=%s AND disconnected_at IS NULL"
+                           + (' FOR SHARE' if lock_project else ''), (project_id,)).fetchone()
     if not project:
         raise AgentAccessDenied("Project is unavailable")
     if identity is not None:
@@ -100,6 +101,29 @@ def read_room(project_id: UUID, *, user_id=None, identity=None):
             if saved:
                 saved['approvedPlanVersion'] = approvals.get(saved['planId'])
         return {'exchanges': [_public(row) for row in rows], 'mediatorModel': settings.meta_model}
+
+
+def clear_room(project_id: UUID, through_id: UUID, user_id: UUID):
+    """Delete shared history through the captured boundary; retain later messages."""
+    with _transaction() as conn:
+        # Deletion publishes nothing and does not update the project. Avoid a
+        # project lock while waiting for room rows: saving a draft locks its room
+        # row before updating the project. The membership lock still protects authority.
+        _, role, _ = _authorize(conn, project_id, user_id=user_id, lock_project=False)
+        if role != 'owner':
+            raise AgentAccessDenied('Only the project owner can clear the room')
+        # Use the same ordering as history. A retry whose boundary was already
+        # deleted is a no-op, never a request to delete newly arrived messages.
+        conn.execute("""WITH boundary AS (
+                SELECT created_at, id FROM public.agent_room_exchanges
+                WHERE project_id=%s AND id=%s
+            )
+            DELETE FROM public.agent_room_exchanges
+            WHERE project_id=%s AND (created_at, id) <= (SELECT created_at, id FROM boundary)""",
+            (project_id, through_id, project_id))
+        # Saved plans, tasks and their approval records are independent of room
+        # rows and remain intact. Pending model replies cannot recreate a row.
+        return {'cleared': True}
 
 
 def _context(conn, project_id, project, role, agent):

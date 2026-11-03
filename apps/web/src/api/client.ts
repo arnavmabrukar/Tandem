@@ -255,6 +255,8 @@ export function createApiClient({
     saveRoomDraft: (projectId, exchangeId) => request(`${endpoints.projects}/${segment(projectId)}/room/${segment(exchangeId)}/draft`, planRevisionSchema, { method: 'POST' }),
     readRoom: (projectId, signal) => request(`/api/projects/${segment(projectId)}/room`,
       roomSchema, {signal}),
+    clearRoom: (projectId, throughId) => request(`/api/projects/${segment(projectId)}/room`,
+      z.object({ cleared: z.boolean() }), { method: 'DELETE', body: { throughId } }),
     postRoom: (projectId, body) => request(`/api/projects/${segment(projectId)}/room`,
       roomExchangeSchema, {method: 'POST', body, operationId: body.operationId, timeoutMs: 135000}),
     chatPlan: (projectId, messages) => request(
