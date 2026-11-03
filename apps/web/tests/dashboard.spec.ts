@@ -112,11 +112,81 @@ test('sign-in gates API requests and restores the requested task', async ({ page
   await expect(page.getByText('Connected', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);
   await page.screenshot({ path: test.info().outputPath('connected.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menuitem', { name: 'Log out' }).click();
   await expect(page.getByRole('button', { name: 'Sign in with Auth0' })).toBeVisible();
   await expect(
     page.getByRole('heading', { name: 'Task returned by test API', exact: true }),
   ).toHaveCount(0);
+});
+
+test('the account menu stays reachable on a short screen and only opens on click', async ({
+  page,
+}) => {
+  await connect(page);
+  await page.setViewportSize({ width: 1280, height: 480 });
+  await page.goto('/#/projects/project-1/activity');
+  const account = page.getByRole('button', { name: 'Account menu' });
+  await expect(account).toBeInViewport({ ratio: 1 });
+  await expect(account).toContainText('TO');
+  await expect(page.getByRole('menuitem', { name: 'Log out' })).toHaveCount(0);
+  await account.click();
+  await expect(page.getByRole('menuitem', { name: 'Log out' })).toBeInViewport({ ratio: 1 });
+  await expect(page.getByRole('menuitem', { name: 'Settings' })).toBeInViewport({ ratio: 1 });
+});
+
+test('settings saves a display name through the API and shows how you sign in', async ({
+  page,
+}) => {
+  const user = {
+    id: 'user-1',
+    name: 'Test owner',
+    email: 'test@example.com',
+    emailVerified: false,
+    signIns: [{ method: 'Email and password', current: true }],
+  };
+  await connect(page);
+  const patches: unknown[] = [];
+  await page.route('https://api.tandem.test/api/me', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      patches.push(route.request().postDataJSON());
+      user.name = 'Renamed Person';
+      await route.fulfill({ json: { id: user.id, name: user.name } });
+      return;
+    }
+    await route.fulfill({ json: user });
+  });
+  await page.goto('/#/projects/project-1/activity');
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menuitem', { name: 'Settings' }).click();
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  await expect(page.getByText('test@example.com')).toBeVisible();
+  await expect(page.getByText('Not verified')).toBeVisible();
+  await expect(page.getByText('Email and password')).toBeVisible();
+
+  const save = page.getByRole('button', { name: 'Save name' });
+  await expect(save).toBeDisabled();
+  await page.getByLabel('Display name').fill('   ');
+  await expect(save).toBeDisabled();
+  await page.getByLabel('Display name').fill('  Renamed Person ');
+  await save.click();
+  await expect(page.getByRole('status').filter({ hasText: 'Name saved' })).toBeVisible();
+  expect(patches).toEqual([{ name: 'Renamed Person' }]);
+  await expect(page.getByRole('button', { name: 'Account menu' })).toContainText('RP');
+});
+
+test('a failed name change keeps the draft and says so', async ({ page }) => {
+  await connect(page);
+  await page.route('https://api.tandem.test/api/me', async (route) => {
+    if (route.request().method() === 'PATCH') await route.fulfill({ status: 503 });
+    else await route.fulfill({ json: { id: 'user-1', name: 'Test owner' } });
+  });
+  await page.goto('/#/settings');
+  await page.getByLabel('Display name').fill('Unsaved Name');
+  await page.getByRole('button', { name: 'Save name' }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByLabel('Display name')).toHaveValue('Unsaved Name');
+  await expect(page.getByRole('button', { name: 'Account menu' })).toContainText('TO');
 });
 
 test('a missing or offline API shows failure without sample records', async ({ page }) => {

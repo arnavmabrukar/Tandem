@@ -1,19 +1,22 @@
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   Activity,
   Bot,
   CheckCheck,
+  ChevronsUpDown,
   ClipboardList,
   FolderCog,
   Layers2,
   LogOut,
   RefreshCw,
   CircleHelp,
+  Settings,
 } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useSession } from '../auth/session';
 import { configuration } from '../config';
-import { roleFor, type Project } from '../types/domain';
+import { initials, label, roleFor, type Project } from '../types/domain';
 import { Button } from './ui/button';
 import { BrandMark } from './BrandMark';
 import { Badge, Timestamp } from './common';
@@ -112,14 +115,44 @@ export function AppLayout({
             Coordinated work.
           </p>
           <div className="user-row">
-            <span className="avatar">{user!.name[0]}</span>
-            <div>
-              <strong>{user!.name}</strong>
-              <small>{project ? roleFor(project, user!.id) : 'Signed in'}</small>
-            </div>
-            <Button variant="ghost" size="sm" aria-label="Sign out" onClick={() => void signOut()}>
-              <LogOut size={17} />
-            </Button>
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger className="account-trigger" aria-label="Account menu">
+                <span className="avatar" aria-hidden="true">
+                  {initials(user!.name)}
+                </span>
+                <span className="account-name">
+                  <strong>{user!.name}</strong>
+                  <small>
+                    {project ? label(roleFor(project, user!.id) ?? 'member') : 'Signed in'}
+                  </small>
+                </span>
+                <ChevronsUpDown size={15} aria-hidden="true" />
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="account-menu"
+                  side="top"
+                  align="start"
+                  sideOffset={6}
+                >
+                  <DropdownMenu.Item
+                    className="account-menu-item"
+                    onSelect={() => navigate('/settings')}
+                  >
+                    <Settings size={16} aria-hidden="true" />
+                    Settings
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Separator className="account-menu-separator" />
+                  <DropdownMenu.Item
+                    className="account-menu-item account-menu-danger"
+                    onSelect={() => void signOut()}
+                  >
+                    <LogOut size={16} aria-hidden="true" />
+                    Log out
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
           </div>
         </div>
       </aside>

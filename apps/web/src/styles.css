@@ -161,6 +161,7 @@ fieldset {
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -197,9 +198,14 @@ fieldset {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* The list scrolls on short screens, so the account menu below always stays visible. */
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 .sidebar nav a {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 11px;
   border-radius: 7px;
@@ -210,6 +216,10 @@ fieldset {
 }
 .sidebar nav a:hover {
   background: #f8fafc;
+}
+.sidebar nav a:focus-visible {
+  /* Inside the outline, because the scrolling list would clip it. */
+  outline-offset: -3px;
 }
 .sidebar nav a.active {
   color: #115e59;
@@ -224,27 +234,84 @@ fieldset {
 }
 .sidebar-bottom {
   margin-top: auto;
-  padding: 25px 7px 0;
+  flex-shrink: 0;
+  padding: 25px 0 0;
 }
 .sidebar-bottom > p {
   color: #94a3b8;
   font-size: 12px;
-  padding-bottom: 22px;
+  padding: 0 7px 22px;
 }
 .user-row {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 10px;
+}
+.account-trigger {
   display: flex;
   align-items: center;
   gap: 9px;
-  border-top: 1px solid #e2e8f0;
-  padding-top: 17px;
-}
-.user-row small {
-  display: block;
+  width: 100%;
+  padding: 7px;
+  border-radius: 7px;
   color: #64748b;
-  text-transform: capitalize;
+  text-align: left;
 }
-.user-row .button {
-  margin-left: auto;
+.account-trigger:hover,
+.account-trigger[data-state='open'] {
+  background: #f1f5f9;
+}
+.account-trigger svg {
+  flex-shrink: 0;
+}
+.account-name {
+  flex: 1;
+  min-width: 0;
+  color: #1e293b;
+}
+.account-name strong,
+.account-name small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-name small {
+  color: #64748b;
+}
+.account-menu {
+  z-index: 60;
+  width: var(--radix-dropdown-menu-trigger-width);
+  min-width: 170px;
+  padding: 4px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px #0f172a1f;
+}
+.account-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border-radius: 5px;
+  color: #334155;
+  cursor: pointer;
+  outline: none;
+}
+.account-menu-item[data-highlighted] {
+  background: #f1f5f9;
+}
+.account-menu-danger {
+  color: #b91c1c;
+  font-weight: 550;
+}
+.account-menu-danger[data-highlighted] {
+  background: #fcebea;
+}
+.account-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: #e2e8f0;
 }
 .avatar {
   display: inline-flex;
@@ -253,7 +320,9 @@ fieldset {
   flex: 0 0 32px;
   height: 32px;
   border-radius: 50%;
-  background: #f1f5f9;
+  background: #edf7f5;
+  color: #115e59;
+  font-size: 12px;
   font-weight: 650;
 }
 .workspace {
@@ -761,6 +830,10 @@ td:first-child {
   color: #64748b;
   margin: 3px 0;
 }
+.settings-saved {
+  color: #116149;
+  font-size: 13px;
+}
 .success-text {
   color: #116149;
   margin-top: 14px;
@@ -962,6 +1035,31 @@ td:first-child {
 .skip-link:focus {
   top: 12px;
 }
+/* Short laptop screens and zoomed-in browsers: give the space to the navigation. */
+@media (max-height: 760px) and (min-width: 651px) {
+  .sidebar {
+    padding-top: 18px;
+    padding-bottom: 10px;
+  }
+  .brand {
+    padding-bottom: 14px;
+  }
+  .new-project {
+    margin-bottom: 8px;
+  }
+  .sidebar nav {
+    gap: 2px;
+  }
+  .sidebar nav a {
+    padding: 8px 12px;
+  }
+  .sidebar-bottom {
+    padding-top: 8px;
+  }
+  .sidebar-bottom > p {
+    display: none;
+  }
+}
 @media (max-width: 1150px) {
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1028,6 +1126,7 @@ td:first-child {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 3px;
+    overflow: visible;
   }
   .sidebar nav a {
     padding: 10px 7px;
@@ -1049,12 +1148,7 @@ td:first-child {
     display: none;
   }
   .user-row {
-    padding-top: 10px;
     font-size: 12px;
-  }
-  .user-row small {
-    display: inline;
-    margin-left: 8px;
   }
   .avatar {
     width: 26px;

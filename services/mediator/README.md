@@ -106,6 +106,28 @@ Apply `migrations/versions/019_autonomous_flow.sql` before deploying this code.
 agent. Set `TANDEM_FLOW_TEST_DATABASE_URL` to a **new empty disposable database**, then run
 the file directly.
 
+## Accounts with more than one sign-in
+
+Apply `migrations/versions/021_account_identities.sql` **before** deploying this code. It
+only adds to the schema and makes three foreign keys deferrable, so earlier code keeps
+working.
+
+Auth0 gives a password sign-in and a Google sign-in different subjects, so
+`public.user_identities` maps each one to a Tandem user. At sign-in, identities with the
+same **verified** email become one user. If both already hold data, they are merged into
+the older account in one transaction, recorded in `public.user_merges`, and the higher
+role wins in a shared project. A merge that fails rolls back, logs the two user IDs and
+leaves the accounts separate, without blocking sign-in. It retries at the next sign-in.
+
+An unverified email never joins anything, because anyone can register an address they
+don't control. So the Auth0 tenant must send verification emails for password sign-ups, or
+those accounts will stay separate. Accounts from before this migration have no stored
+email, so duplicates merge once each sign-in has logged in again.
+
+`tests/integration/test_account_linking.py` covers this. Set
+`TANDEM_ACCOUNTS_TEST_DATABASE_URL` to a **new empty disposable database**, then run the
+file directly.
+
 ## Agent tools and presence
 
 Apply `migrations/versions/012_agent_task_actions.sql` **before** deploying this code:

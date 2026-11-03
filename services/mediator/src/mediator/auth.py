@@ -199,6 +199,10 @@ def require_user_profile(
 
     email = profile.get("email")
 
+    # Shown to the person in settings. It proves nothing unless verified below.
+    if isinstance(email, str) and email.strip():
+        result["email"] = email.strip()
+
     # Only accept the actual boolean True from Auth0.
     # A string such as "false" must never count as verification.
     if profile.get("email_verified") is True and isinstance(email, str):

@@ -279,6 +279,11 @@ export function createApiClient({
           entityId: z.string().min(1), token: z.string().min(1) }),
         { method: 'POST', operationId, body: { operationId, expectedVersion } }),
     getCurrentUser: (signal) => request(endpoints.me, userSchema, { signal }),
+    updateProfile: (name) =>
+      request(endpoints.me, z.object({ id: z.string().min(1), name: z.string().min(1) }), {
+        method: 'PATCH',
+        body: { name },
+      }),
     load: (signal) => request(endpoints.workspace, workspaceSchema, { signal }),
         // The server determines the recipient from the bearer token.
     // No email address is supplied by the browser.

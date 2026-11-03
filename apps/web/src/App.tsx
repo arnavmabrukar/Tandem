@@ -31,6 +31,9 @@ const ProjectSetupPage = lazy(() =>
 const ConnectionsPage = lazy(() =>
   import('./pages/ConnectionsPage').then((m) => ({ default: m.ConnectionsPage })),
 );
+const SettingsPage = lazy(() =>
+  import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+);
 // Load the invitation screen when the user opens it.
 const InvitationsPage = lazy(() =>
   import('./pages/InvitationsPage').then((m) => ({
@@ -120,6 +123,7 @@ function Dashboard() {
               path="/invitations"
               element={<InvitationsPage key={user.id} />}
             />
+            <Route path="/settings" element={<SettingsPage key={user.id} />} />
             <Route path="/projects/new" element={<ProjectSetupPage key="new" project={null} />} />
             {query.data && !accessDenied ? (
               <>
