@@ -288,8 +288,11 @@ describe('connection configuration', () => {
   });
   it('restores only internal project routes after sign-in', () => {
     expect(safeReturnTo('/projects/p/tasks/t')).toBe('/projects/p/tasks/t');
-    expect(safeReturnTo('//outside.example')).toBe('/');
-    expect(safeReturnTo('https://outside.example')).toBe('/');
+    expect(safeReturnTo('/dashboard')).toBe('/dashboard');
+    expect(safeReturnTo('//outside.example')).toBe('/dashboard');
+    expect(safeReturnTo('https://outside.example')).toBe('/dashboard');
+    // The site root is the public landing page, never a sign-in destination.
+    expect(safeReturnTo('/')).toBe('/dashboard');
   });
 });
 

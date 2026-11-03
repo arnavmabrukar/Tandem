@@ -153,7 +153,7 @@ export function McpOAuthPage() {
       </div>
     </> : !error && <p role="status">Loading authorization request…</p>}
     {(error || sessionError) && <p role="alert">{error || sessionError?.message}</p>}
-    <Link to="/">Return to dashboard</Link>
+    <Link to="/dashboard">Return to dashboard</Link>
   </main>;
 }
 
@@ -185,6 +185,6 @@ export function McpConnectionsPage() {
       {!connections.length && !error && <p>No active OAuth connections.</p>}
     </>}
     {(error || sessionError) && <p role="alert">{error || sessionError?.message}</p>}
-    <Link to="/">Return to dashboard</Link>
+    <Link to="/dashboard">Return to dashboard</Link>
   </main>;
 }
