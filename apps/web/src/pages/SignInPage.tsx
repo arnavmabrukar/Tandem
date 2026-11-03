@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Layers2, ArrowRight } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { useSession } from '../auth/session';
 import { safeReturnTo } from '../config';
 import { Button } from '../components/ui/button';
+import { BrandMark } from '../components/BrandMark';
 import { ErrorNotice } from '../components/common';
 
 export function SignInPage() {
@@ -13,16 +14,10 @@ export function SignInPage() {
   const returnTo = safeReturnTo(location.state?.returnTo ?? location.pathname + location.search);
   return (
     <main className="sign-in">
-      <section className="sign-in-card">
-        <span className="brand-mark">
-          <Layers2 size={28} />
-        </span>
-        <p className="eyebrow">TANDEM / HUMAN DASHBOARD</p>
+      <section className="sign-in-card sign-in-card-simple">
+        <BrandMark />
         <h1>{authenticated ? 'Connect to your workspace.' : 'Sign in to Tandem.'}</h1>
-        <p className="muted">
-          Coordinate independent coding agents using the shared mediator. Your projects and
-          permissions come from the backend.
-        </p>
+        <p className="muted">Independent agents. Coordinated work.</p>
         <ErrorNotice error={error} retry={authenticated ? refresh : undefined} />
         <div className="sign-in-actions">
           <Button
@@ -42,10 +37,6 @@ export function SignInPage() {
             </Button>
           )}
         </div>
-        <p className="small muted">
-          The API must implement <code>GET /api/me</code> and <code>GET /api/workspace</code>. See{' '}
-          <code>apps/web/API.md</code> for the complete backend contract.
-        </p>
       </section>
     </main>
   );

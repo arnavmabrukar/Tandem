@@ -1201,8 +1201,8 @@ if settings.mcp_oauth_enabled:
 
 # GitHub integration uses the human's authenticated Tandem account.
 from mediator import github
-from mediator.schemas.projects import DisconnectProjectRequest
-from mediator.db.projects import disconnect_project
+from mediator.schemas.projects import DeleteProjectRequest
+from mediator.db.project_deletion import delete_project as delete_saved_project
 from pydantic import BaseModel, Field, ConfigDict
 from fastapi.responses import RedirectResponse
 from urllib.parse import urlencode
@@ -1249,14 +1249,14 @@ def github_repositories(installation_id: int, page: int = Query(default=1, ge=1,
         return github.repositories(UUID(user["id"]), installation_id, page)
 
 
-@app.post("/api/projects/{project_id}/disconnect")
-def disconnect_repository(project_id: UUID, request: DisconnectProjectRequest,
+@app.post("/api/projects/{project_id}/delete")
+def delete_project(project_id: UUID, request: DeleteProjectRequest,
                           idempotency_key: UUID = Header(alias="Idempotency-Key"),
                           user: dict = Depends(get_current_user)):
     if idempotency_key != request.operationId:
         raise HTTPException(400, "Idempotency-Key must match operationId")
     with plan_api_errors():
-        return disconnect_project(UUID(user["id"]), project_id, request)
+        return delete_saved_project(UUID(user["id"]), project_id, request)
 
 # Human room endpoints use dashboard authentication, never agent credentials.
 from mediator.db import room as project_room

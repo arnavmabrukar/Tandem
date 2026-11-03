@@ -103,7 +103,7 @@ class UpdateProjectResponse(BaseModel):
     # The affected entity is the project itself.
     entityId: UUID
 
-class DisconnectProjectRequest(BaseModel):
+class DeleteProjectRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operationId: UUID
     expectedVersion: int = Field(ge=1, strict=True)

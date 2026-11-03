@@ -1,12 +1,10 @@
-import { Layers2 } from 'lucide-react';
+import { BrandMark } from '../components/BrandMark';
 
 export function ConfigurationPage({ errors }: { errors: string[] }) {
   return (
     <main className="sign-in">
       <section className="sign-in-card">
-        <span className="brand-mark">
-          <Layers2 size={28} />
-        </span>
+        <BrandMark />
         <p className="eyebrow">TANDEM / SETUP</p>
         <h1>Connect your backend</h1>
         <p>The dashboard needs an API origin and Auth0 settings before it can load your data.</p>

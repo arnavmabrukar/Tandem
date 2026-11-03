@@ -9,7 +9,7 @@ credentials remain encrypted in the backend database.
 
 1. Apply `migrations/versions/018_github_projects.sql` to the Neon branch used by
    the backend's `DATABASE_URL`, before deploying this code. Existing projects
-   remain accessible; they can be disconnected without a GitHub connection.
+   remain accessible; they can be deleted without a GitHub connection.
 2. In GitHub Settings → Developer settings → GitHub Apps, create a GitHub App.
    Use your dashboard URL as its homepage. Request **Contents: Read-only**;
    Metadata read access is included. No write permissions are needed. Disable
@@ -59,29 +59,36 @@ access requires reconnecting. Automatic refresh-token rotation is not implemente
 The selected branch is stored and verified on import; webhook-driven GitHub change
 tracking is not part of this change.
 
-## Disconnect behavior
+## Deleting a project
 
-An owner opens Project setup, types the repository name and chooses Disconnect
-repository. This archives the Tandem project and removes it from active workspaces.
-It disables automatic delegation, revokes pending invitations and removes all
-memberships, project agent grants and their MCP OAuth sessions. An access snapshot
-and coordination history remain in the database. Already-running IDE work continues.
-The GitHub repository, branches, pull requests and App installation are untouched.
+An owner opens Project setup, types the repository name and chooses Delete project.
+This permanently deletes the Tandem project for every member, with its tasks, plans,
+messages, activity, invitations, agents, OAuth sessions and retry records. It's a real
+database deletion and can't be undone, though Neon's point-in-time restore history may
+keep older data until its retention window passes. GitHub is never contacted, so the
+repository, branches and pull requests are unaffected. Text already sent to Meta can't
+be recalled. Already-running IDE work continues, but its agent loses access at once.
+Only the delete's own retry receipt remains, holding IDs and a version number.
 
-Reimporting creates a new project. Restoring archived projects is not yet exposed
-in the UI. A repository already imported by the same creator cannot be imported
-again until disconnected. Other users can independently import repositories they
-can access; joining an existing project continues to use invitations.
+Projects archived by the earlier Disconnect repository feature still hold their data.
+`scripts/purge_archived_projects.py` deletes them; it previews unless given `--confirm`.
+
+Agent names are unique within a project, not across Tandem. Registering in another
+project creates a separate agent with its own token and presence. Deploy this code
+before applying `migrations/versions/020_agent_names_per_project.sql`.
+
+A repository already imported by the same creator cannot be imported again until its
+project is deleted. Other users can independently import repositories they can access;
+joining an existing project continues to use invitations.
 
 ## Verification
 
 Automated tests cover state/PKCE, repository/installation validation, encrypted
 credential reads, duplicate import/retry behavior, ownership and version checks,
-archival preservation, membership rejection after disconnect, and OAuth-session
-revocation. GitHub API calls are mocked in automated tests.
+project deletion, and OAuth-session revocation. GitHub API calls are mocked in automated tests.
 
 After configuring the real App, verify with a test repository: import it, confirm
-its branch, try a duplicate import, disconnect it, and confirm it disappears from
+its branch, try a duplicate import, delete it, and confirm it disappears from
 Tandem while GitHub remains unchanged. Test using a second member/IDE to confirm
 revoked project access. Live GitHub authorization requires these external setup steps.
 
