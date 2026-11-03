@@ -140,6 +140,40 @@ class AgentToolIntegrationTests(unittest.TestCase):
         projects = workspace["projects"] if isinstance(workspace, dict) else workspace
         return next(project for project in projects if project["id"] == self.project)
 
+    def test_plan_submission_is_attributed_and_idempotent(self):
+        proposal = {"goal": "Ship feature", "summary": "Implement and verify", "tasks": [
+            {"key": "build", "title": "Build", "contractSummary": "Implement feature",
+             "criteria": ["Tests pass"]}]}
+        args = {"operationId": str(uuid4()), "proposal": proposal}
+        first = self.ok("tandem_propose_plan", **args)
+        self.assertEqual(first, self.ok("tandem_propose_plan", **args))
+        self.assertEqual(first["status"], "draft")
+        row = self.execute("SELECT source,submitted_by_agent_id,created_by::text FROM public.plan_proposal_revisions WHERE plan_id=%s", (first["planId"],))[0]
+        self.assertEqual(row, ("agent", self.agent, self.owner))
+        self.assertEqual(self.execute("SELECT count(*) FROM public.tasks WHERE project_id=%s", (self.project,))[0][0], 0)
+        self.refused("already used", "tandem_propose_plan", **(args | {"proposal": proposal | {"goal": "Changed"}}))
+        # A revoked grant must not retrieve a previously successful operation.
+        self.execute("UPDATE public.agent_project_grants SET status='revoked' WHERE agent_id=%s", (self.agent,))
+        from mediator.db.agent_plans import propose_plan
+        from mediator.db.agent_tasks import AgentAccessDenied
+        from mediator.schemas.plans import PlanProposal
+        from uuid import UUID
+        # Also exercise the transaction's live check without transport filtering.
+        with self.assertRaises(AgentAccessDenied):
+            propose_plan({"agentId": self.agent, "ownerId": self.owner},
+                         UUID(self.project), UUID(args["operationId"]), PlanProposal.model_validate(proposal))
+
+    def test_plan_submission_rejects_cycles_and_viewers(self):
+        proposal = {"goal": "Ship", "summary": "Scope", "tasks": [
+            {"key": "build", "title": "Build", "contractSummary": "Scope",
+             "criteria": ["Works"], "dependencies": ["build"]}]}
+        result = self.call("tandem_propose_plan", operationId=str(uuid4()), proposal=proposal)
+        self.assertTrue(result.get("isError"), result)
+        proposal["tasks"][0]["dependencies"] = []
+        self.execute("UPDATE public.project_memberships SET role='viewer' WHERE project_id=%s AND user_id=%s", (self.project, self.owner))
+        self.refused("cannot change", "tandem_propose_plan", operationId=str(uuid4()), proposal=proposal)
+        self.assertEqual(self.execute("SELECT count(*) FROM public.plan_proposals WHERE project_id=%s", (self.project,))[0][0], 0)
+
     def test_full_work_cycle_appears_on_the_dashboard(self):
         task = self.make_task("Build it")
         listed = self.ok("tandem_list_tasks")

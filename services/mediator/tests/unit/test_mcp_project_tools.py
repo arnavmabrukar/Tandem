@@ -81,6 +81,21 @@ class ProjectScopeTests(ToolTestCase):
                 database.assert_not_called()
 
 
+class PlanToolTests(ToolTestCase):
+    def test_plan_tool_registration_identity_and_project_scope(self):
+        names = {tool["name"] for tool in self.request("tools/list").json()["result"]["tools"]}
+        self.assertIn("tandem_propose_plan", names)
+        arguments = {"operationId": str(uuid4()), "proposal": {
+            "goal": "Build", "summary": "Scope", "tasks": [{"key": "build", "title": "Build",
+            "contractSummary": "Scope", "criteria": ["Works"]}]}}
+        with patch("mediator.db.agent_plans.propose_plan", return_value={"status": "draft"}) as database:
+            self.assert_refused(self.call("tandem_propose_plan", projectId=OTHER_PROJECT_ID, **arguments))
+            database.assert_not_called()
+            result = self.call("tandem_propose_plan", projectId=PROJECT_ID, **arguments)
+            self.assertFalse(result.get("isError"), result)
+            self.assertEqual(database.call_args.args[0], IDENTITY)
+
+
 class HumanOnlyActionTests(ToolTestCase):
     def test_agents_cannot_request_human_only_statuses(self):
         for status in ("approved", "merged", "cancelled", "open", "claimed"):

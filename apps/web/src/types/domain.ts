@@ -194,6 +194,10 @@ export const mutationResultSchema = z.object({
   entityId: z.string().optional(),
 });
 export interface DashboardApi {
+  approvePlan(projectId: string, planId: string, body: import('./plans').ApprovePlanRequest): Promise<import('zod').infer<typeof import('./plans').approvedPlanSchema>>;
+  listPlans(projectId: string, signal?: AbortSignal): Promise<import('./plans').PlanRevision[]>;
+  savePlan(projectId: string, planId: string | null, body: import('./plans').SavePlanRequest):
+    Promise<{ projectId: string; projectVersion: number; planId: string; planVersion: number }>;
   issueAgentToken(projectId: string, agentId: string, operationId: string,
     expectedVersion: number): Promise<{ projectId: string; projectVersion: number; entityId: string; token: string }>;
   getCurrentUser(signal?: AbortSignal): Promise<User>;

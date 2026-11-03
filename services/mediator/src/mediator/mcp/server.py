@@ -8,7 +8,8 @@ import psycopg
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver.exceptions import ToolError
 
-from mediator.db import agent_tasks
+from mediator.db import agent_tasks, agent_plans
+from mediator.schemas.plans import PlanProposal
 from mediator.schemas.agent_tasks import (
     AgentMessageType,
     AgentTaskStatus,
@@ -133,6 +134,20 @@ def tandem_post_message(projectId: UUID, taskId: UUID, type: AgentMessageType, b
     identity = _project_identity(projectId)
     return _run(lambda: agent_tasks.post_message(
         identity, projectId, taskId, type, body, operationId, replyTo))
+
+
+@mcp.tool()
+def tandem_propose_plan(projectId: UUID, operationId: UUID,
+                        proposal: PlanProposal) -> dict[str, Any]:
+    """Submit a draft plan for a project owner to review in Tandem's Plans page.
+
+    Get projectId from tandem_whoami. Provide tasks with unique keys, scope,
+    acceptance criteria and dependencies referencing those keys. Cycles are
+    rejected. This creates no tasks and grants no approval or task claims.
+    Use a new operationId UUID for each proposal and reuse it for exact retries.
+    """
+    identity = _project_identity(projectId)
+    return _run(lambda: agent_plans.propose_plan(identity, projectId, operationId, proposal))
 
 
 # Start the server only when this module is executed directly.

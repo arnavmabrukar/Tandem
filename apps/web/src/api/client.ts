@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { planRevisionSchema, savedPlanSchema, approvedPlanSchema } from '../types/plans';
 import {
   mutationResultSchema,
   userSchema,
@@ -229,6 +230,14 @@ export function createApiClient({
     }
   }
   return {
+    approvePlan: (projectId, planId, body) => request(
+      `${endpoints.projects}/${segment(projectId)}/plans/${segment(planId)}/approve`,
+      approvedPlanSchema, { method: 'POST', operationId: body.operationId, body }),
+    listPlans: (projectId, signal) => request(`${endpoints.projects}/${segment(projectId)}/plans`,
+      z.array(planRevisionSchema), { signal }),
+    savePlan: (projectId, planId, body) => request(
+      `${endpoints.projects}/${segment(projectId)}/plans${planId ? `/${segment(planId)}/revisions` : ''}`,
+      savedPlanSchema, { method: 'POST', operationId: body.operationId, body }),
     // Keep credential responses out of the generic mutation/query cache.
     issueAgentToken: (projectId, agentId, operationId, expectedVersion) =>
       request(`${endpoints.projects}/${segment(projectId)}/agents/${segment(agentId)}/token`,

@@ -13,6 +13,7 @@ const ActivityPage = lazy(() =>
   import('./pages/ActivityPage').then((m) => ({ default: m.ActivityPage })),
 );
 const TasksPage = lazy(() => import('./pages/TasksPage').then((m) => ({ default: m.TasksPage })));
+const PlansPage = lazy(() => import('./pages/PlansPage').then((m) => ({ default: m.PlansPage })));
 const ThreadPage = lazy(() =>
   import('./pages/ThreadPage').then((m) => ({ default: m.ThreadPage })),
 );
@@ -153,6 +154,8 @@ function Dashboard() {
                   path="/projects/:projectId/tasks"
                   element={project ? <TasksPage key={project.id} project={project} /> : notFound}
                 />
+                <Route path="/projects/:projectId/plans"
+                  element={project ? <PlansPage key={`${user.id}:${project.id}`} project={project} /> : notFound} />
                 <Route
                   path="/projects/:projectId/tasks/:taskId"
                   element={project ? <ThreadPage key={project.id} project={project} /> : notFound}

@@ -41,6 +41,7 @@ export function AppLayout({
   const nav = [
     { to: 'activity', text: 'Activity', icon: Activity },
     { to: 'tasks', text: 'Tasks', icon: ClipboardList },
+    { to: 'plans', text: 'Plans', icon: Layers2 },
     { to: 'agents', text: 'Agents', icon: Bot },
     { to: 'approvals', text: 'Approvals', icon: CheckCheck },
     { to: 'setup', text: 'Project setup', icon: FolderCog },

@@ -70,7 +70,20 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
         signal, credentials: 'omit', cache: 'no-store', redirect: 'error',
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!response.ok) throw new Error('Could not check authorization. Sign in again or retry.');
+      if (!response.ok) {
+        // Only authentication failures call for another sign-in. Storage and
+        // deployment failures need a backend fix, not repeated login attempts.
+        const explanation = response.status === 401
+          ? 'Your dashboard sign-in expired. Sign out and sign in again.'
+          : response.status === 403
+            ? 'Your account cannot check these connections.'
+            : response.status === 404
+              ? 'This backend does not expose OAuth connections. Check its deployment and OAuth setting.'
+              : response.status === 503
+                ? 'OAuth storage is unavailable. Check the backend database connection and migration 011.'
+                : 'The backend could not check connections. Check its logs and retry.';
+        throw new Error(`${explanation} (HTTP ${response.status})`);
+      }
       const sessions = z.array(z.object({ id: z.string(), agentId: z.string(), projectId: z.string() }))
         .parse(await response.json()).filter((c) => c.projectId === project.id);
       if (agent) return sessions.some((c) => c.agentId === agent.id);

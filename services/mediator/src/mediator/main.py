@@ -5,7 +5,14 @@ from mediator.db.approvals import decide_contract, ApprovalNotFound, ApprovalCon
 from mediator.schemas.approvals import DecideContractRequest, DecideContractResponse
 from mediator.db.agents import register_agent as save_agent, AgentNameConflict
 from mediator.schemas.agents import RegisterAgentRequest, RegisterAgentResponse
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, Query
+from mediator.db.plans import (
+    create_plan as save_plan, revise_plan as save_plan_revision,
+    get_plan as load_plan, list_plans as load_plans, approve_plan as approve_saved_plan, PlanNotFound, PlanVersionConflict,
+)
+from mediator.schemas.plans import (
+    CreatePlanRequest, RevisePlanRequest, SavePlanResponse, PlanRevisionResponse, ApprovePlanRequest, ApprovePlanResponse,
+)
 from mediator.db.agents import issue_agent_token, AgentNotFound, AgentTokenConflict
 from mediator.schemas.agents import IssueAgentTokenRequest, IssueAgentTokenResponse
 
@@ -13,7 +20,7 @@ from mediator.schemas.agents import IssueAgentTokenRequest, IssueAgentTokenRespo
 from mcp.server.transport_security import TransportSecuritySettings
 
 # Used to manage startup and shutdown of the MCP server.
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from collections.abc import AsyncIterator
 
 # Import the server containing our registered MCP tools.
@@ -656,6 +663,86 @@ def accept_invitation(
             status_code=503,
             detail="Invitation database unavailable",
         ) from None
+
+
+@contextmanager
+def plan_api_errors():
+    """Translate storage failures without exposing SQL or credentials."""
+    try:
+        yield
+    except ProjectAccessDenied:
+        raise HTTPException(403, "Insufficient project access for this action") from None
+    except PlanNotFound:
+        raise HTTPException(404, "Plan revision not found in this project") from None
+    except OperationConflict:
+        raise HTTPException(409, "Operation ID was already used for another request") from None
+    except ProjectVersionConflict:
+        raise HTTPException(409, "Project changed; reload before saving") from None
+    except PlanVersionConflict:
+        raise HTTPException(409, "Plan changed; reload before saving") from None
+    except DatabaseError:
+        raise HTTPException(503, "Plan database unavailable") from None
+
+
+@app.post("/api/projects/{project_id}/plans", response_model=SavePlanResponse, status_code=201)
+def create_plan(
+    project_id: UUID,
+    request: CreatePlanRequest,
+    idempotency_key: UUID = Header(alias="Idempotency-Key"),
+    user: dict[str, str] = Depends(get_current_user),
+) -> SavePlanResponse:
+    # Owners can save drafts. This does not approve or start agent work.
+    if idempotency_key != request.operationId:
+        raise HTTPException(400, "Idempotency-Key must match operationId")
+    with plan_api_errors():
+        return save_plan(actor_id=UUID(user["id"]), project_id=project_id, request=request)
+
+
+@app.get("/api/projects/{project_id}/plans", response_model=list[PlanRevisionResponse])
+def list_plans(project_id: UUID, user: dict[str, str] = Depends(get_current_user)):
+    with plan_api_errors():
+        return load_plans(actor_id=UUID(user["id"]), project_id=project_id)
+
+
+@app.post("/api/projects/{project_id}/plans/{plan_id}/approve", response_model=ApprovePlanResponse)
+def approve_plan(project_id: UUID, plan_id: UUID, request: ApprovePlanRequest,
+                 idempotency_key: UUID = Header(alias="Idempotency-Key"),
+                 user: dict[str, str] = Depends(get_current_user)):
+    if idempotency_key != request.operationId:
+        raise HTTPException(400, "Idempotency-Key must match operationId")
+    with plan_api_errors():
+        return approve_saved_plan(actor_id=UUID(user["id"]), project_id=project_id,
+                                  plan_id=plan_id, request=request)
+
+
+@app.post("/api/projects/{project_id}/plans/{plan_id}/revisions",
+          response_model=SavePlanResponse, status_code=201)
+def revise_plan(
+    project_id: UUID,
+    plan_id: UUID,
+    request: RevisePlanRequest,
+    idempotency_key: UUID = Header(alias="Idempotency-Key"),
+    user: dict[str, str] = Depends(get_current_user),
+) -> SavePlanResponse:
+    # Both project and plan versions are checked inside the transaction.
+    if idempotency_key != request.operationId:
+        raise HTTPException(400, "Idempotency-Key must match operationId")
+    with plan_api_errors():
+        return save_plan_revision(actor_id=UUID(user["id"]), project_id=project_id,
+                                  plan_id=plan_id, request=request)
+
+
+@app.get("/api/projects/{project_id}/plans/{plan_id}", response_model=PlanRevisionResponse)
+def get_plan(
+    project_id: UUID,
+    plan_id: UUID,
+    version: int | None = Query(default=None, ge=1),
+    user: dict[str, str] = Depends(get_current_user),
+) -> PlanRevisionResponse:
+    # Members can read. Omit version for latest; use ?version=1 for history.
+    with plan_api_errors():
+        return load_plan(actor_id=UUID(user["id"]), project_id=project_id,
+                         plan_id=plan_id, version=version)
 
 
 # TASK CREATION
