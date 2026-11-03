@@ -315,8 +315,8 @@ def load_workspace(issuer: str, subject: str) -> dict:
                 ON membership.project_id = p.id
 
             -- Resolve their internal user from the verified identity.
-            JOIN public.users AS caller
-                ON caller.id = membership.user_id
+            JOIN public.user_identities AS caller
+                ON caller.user_id = membership.user_id
 
             -- This filter enforces which projects the caller can see.
             WHERE caller.auth_issuer = %s

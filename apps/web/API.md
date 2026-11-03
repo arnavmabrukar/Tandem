@@ -14,7 +14,8 @@ Configure CORS for the actual dashboard origin, with `GET`, `POST`, `PATCH`, `OP
 
 | Method / path        | Required successful JSON                                                                |
 | -------------------- | --------------------------------------------------------------------------------------- |
-| `GET /api/me`        | `{ "id": "internal-user-id", "name": "Display name" }` — both strings must be nonempty. |
+| `GET /api/me`        | `{ "id", "name", "email", "emailVerified", "signIns": [{ "method", "current" }] }`. `id` and `name` are nonempty strings; `email` may be null. Sign-ins that share a verified email resolve to one `id`. |
+| `PATCH /api/me`      | Body `{ "name" }` (1 to 80 printable characters after trimming). Returns `{ "id", "name" }`. The name is then kept across sign-ins. |
 | `GET /api/workspace` | `{ "schemaVersion": 1, "projects": [...] }` matching `workspaceSchema`.                 |
 
 Return only projects the caller may access. An authenticated user with no projects receives `projects: []`. Do not return an empty workspace to disguise a dependency failure or missing implementation. Return a non-2xx error instead.

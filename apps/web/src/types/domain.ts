@@ -137,7 +137,13 @@ export type Agent = z.infer<typeof agentSchema>;
 export type Approval = z.infer<typeof approvalSchema>;
 export type Message = z.infer<typeof messageSchema>;
 export type Role = (typeof roles)[number];
-export const userSchema = z.object({ id: z.string().min(1), name: z.string().min(1) });
+export const userSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  email: z.string().nullish(),
+  emailVerified: z.boolean().optional(),
+  signIns: z.array(z.object({ method: z.string().min(1), current: z.boolean() })).optional(),
+});
 export type User = z.infer<typeof userSchema>;
 
 export type Command =
@@ -216,6 +222,7 @@ export interface DashboardApi {
   issueAgentToken(projectId: string, agentId: string, operationId: string,
     expectedVersion: number): Promise<{ projectId: string; projectVersion: number; entityId: string; token: string }>;
   getCurrentUser(signal?: AbortSignal): Promise<User>;
+  updateProfile(name: string): Promise<{ id: string; name: string }>;
   load(signal?: AbortSignal): Promise<Workspace>;
   execute(request: MutationRequest): Promise<MutationResult>;
 
@@ -230,6 +237,14 @@ export interface DashboardApi {
     operationId: string,
   ): Promise<AcceptInvitationResult>;
 }
+/** Up to two letters for an avatar: "Eashan Patel" is EP, and an email uses its first part. */
+export const initials = (name: string) => {
+  const words = name.split('@')[0].split(/[\s._-]+/).filter(Boolean);
+  if (!words.length) return '?';
+  const letter = (word: string) => Array.from(word)[0];
+  const last = words.length > 1 ? letter(words[words.length - 1]) : '';
+  return (letter(words[0]) + last).toUpperCase();
+};
 export const label = (value: string) =>
   value.replaceAll('_', ' ').replace(/^./, (c) => c.toUpperCase());
 export const roleFor = (project: Project, userId: string) =>

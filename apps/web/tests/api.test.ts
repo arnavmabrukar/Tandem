@@ -1,7 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 import { commandEndpoint, createApiClient } from '../src/api/client';
 import { readConfig, safeReturnTo } from '../src/config';
-import type { Command, MutationRequest } from '../src/types/domain';
+import { initials, type Command, type MutationRequest } from '../src/types/domain';
+
+describe('initials', () => {
+  it.each([
+    ['Eashan Patel', 'EP'],
+    ['  eashan   patel ', 'EP'],
+    ['Mary Ann Smith', 'MS'],
+    ['Eashan', 'E'],
+    ['eashan.patel@gmail.com', 'EP'],
+    ['eashanpatel@gmail.com', 'E'],
+    ['Élodie Ñuñez', 'ÉÑ'],
+    ['@', '?'],
+  ])('%s becomes %s', (name, expected) => {
+    expect(initials(name)).toBe(expected);
+  });
+});
 
 const request = (command: Command): MutationRequest => ({
   projectId: command.type === 'create-project' ? null : 'project-1',

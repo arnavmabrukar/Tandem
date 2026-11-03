@@ -129,7 +129,8 @@ from mediator.auth import require_access_token, require_user_profile
 from mediator.db.workspace import load_workspace
 
 # database function that saves or retrieves the Tandem user
-from mediator.db.users import get_or_create_user
+from mediator.db.users import get_or_create_user, update_display_name
+from mediator.schemas.users import UpdateProfileRequest
 
 
 
@@ -234,13 +235,15 @@ def get_current_user(
     # FastAPI resolves this dependency before running the route.
     # It verifies the token and retrieves the matching Auth0 profile.
     profile: dict[str, str] = Depends(require_user_profile),
-) -> dict[str, str]:
+) -> dict:
     try:
         # Create or update the database row, then return its internal ID.
         return get_or_create_user(
             issuer=profile["issuer"],
             subject=profile["subject"],
             name=profile["name"],
+            email=profile.get("email"),
+            verified_email=profile.get("verified_email"),
         )
     except DatabaseError:
         # Keep database connection details and SQL errors private.
@@ -248,6 +251,27 @@ def get_current_user(
             status_code=503,
             detail="User database unavailable",
         ) from None
+
+@app.patch("/api/me")
+def update_current_user(
+    request: UpdateProfileRequest,
+    # The person being changed comes from the verified token, never the request.
+    claims: dict = Depends(require_access_token),
+) -> dict[str, str]:
+    try:
+        user = update_display_name(
+            issuer=claims["iss"],
+            subject=claims["sub"],
+            name=request.name,
+        )
+    except DatabaseError:
+        raise HTTPException(
+            status_code=503,
+            detail="User database unavailable",
+        ) from None
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
 
 @app.get("/api/workspace", dependencies=[Depends(require_access_token)])
 def get_workspace(
@@ -642,6 +666,8 @@ def accept_invitation(
             issuer=profile["issuer"],
             subject=profile["subject"],
             name=profile["name"],
+            email=profile.get("email"),
+            verified_email=profile["verified_email"],
         )
 
         # Identity and recipient email both come from Auth0.
