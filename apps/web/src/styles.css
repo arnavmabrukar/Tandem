@@ -181,14 +181,10 @@ fieldset {
   color: #64748b;
 }
 .brand-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
+  flex-shrink: 0;
   width: 43px;
   height: 43px;
-  border-radius: 11px;
-  background: #134e4a;
-  color: white;
 }
 .project-switcher {
   padding: 0 7px;
@@ -890,15 +886,37 @@ td:first-child {
   display: grid;
   place-items: center;
   padding: 32px 18px;
-  background: #f0f5f3;
+  background: #f6f8f9;
 }
 .sign-in-card {
   max-width: 510px;
   width: 100%;
   background: white;
   padding: 40px;
-  border: 1px solid #dbe6e1;
+  border: 1px solid #e2e8f0;
   border-radius: 14px;
+}
+.sign-in-card-simple {
+  max-width: 400px;
+}
+.sign-in-card-simple .brand-mark {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 28px;
+}
+.sign-in-card.sign-in-card-simple h1 {
+  font-size: 28px;
+  margin-bottom: 6px;
+}
+.sign-in-card-simple .sign-in-actions {
+  flex-direction: column;
+  gap: 10px;
+  margin: 28px 0 0;
+}
+.sign-in-card-simple .sign-in-actions .button {
+  width: 100%;
+  height: 44px;
+  font-weight: 600;
 }
 .sign-in-card .eyebrow {
   margin: 25px 0 13px;

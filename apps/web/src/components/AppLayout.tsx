@@ -15,6 +15,7 @@ import { useSession } from '../auth/session';
 import { configuration } from '../config';
 import { roleFor, type Project } from '../types/domain';
 import { Button } from './ui/button';
+import { BrandMark } from './BrandMark';
 import { Badge, Timestamp } from './common';
 
 export function AppLayout({
@@ -61,9 +62,7 @@ export function AppLayout({
       </a>
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">
-            <Layers2 size={23} />
-          </span>
+          <BrandMark />
           <span>
             Tandem<small>Human dashboard</small>
           </span>
