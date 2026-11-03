@@ -85,6 +85,45 @@ class AgentToolIntegrationTests(unittest.TestCase):
         )
         self.agent, self.token = self.make_agent(self.owner, self.project, f"Agent {uuid4()}")
 
+    def test_room_privacy_replay_and_agent_authority(self):
+        from unittest.mock import patch
+        from uuid import UUID
+        from mediator.db.room import post_message, read_room, save_draft
+        from mediator.schemas.room import RoomMessageRequest, RoomReply
+        proposal = {"goal": "New direction", "summary": "Replace the open work", "tasks": [
+            {"key": "one", "title": "Replacement", "contractSummary": "Small change", "criteria": ["Works"]}]}
+        task = self.make_task()
+        request = RoomMessageRequest(operationId=uuid4(), body="PRIVATE HUMAN INSTRUCTION")
+        with patch("mediator.db.room.generate_plan", return_value=RoomReply(reply="PRIVATE REPLY", proposal=proposal, cancelTaskIds=[task])) as model:
+            human = post_message(UUID(self.project), request, user_id=UUID(self.owner))
+            replay = post_message(UUID(self.project), request, user_id=UUID(self.owner))
+            self.assertEqual(human['id'], replay['id'])
+            self.assertEqual(model.call_count, 1)
+        # A suggestion has no task side effects.
+        self.assertEqual(self.execute("SELECT status FROM tasks WHERE id=%s", (task,))[0][0], 'open')
+        first = save_draft(UUID(self.project), UUID(human['id']), UUID(self.owner))
+        second = save_draft(UUID(self.project), UUID(human['id']), UUID(self.owner))
+        self.assertEqual(first.planId, second.planId)
+        with patch("mediator.db.room.generate_plan", return_value=RoomReply(reply="Public agent reply", proposal=proposal, cancelTaskIds=[task])) as model:
+            public = self.ok('tandem_talk_to_mediator', operationId=str(uuid4()), body='What next?')
+            self.assertIsNone(public['response']['proposal'])
+            self.assertEqual(public['response']['cancelTaskIds'], [])
+            self.assertNotIn('PRIVATE', str(model.call_args))
+        visible = self.ok('tandem_read_room')
+        self.assertEqual(len(visible['exchanges']), 1)
+        self.assertNotIn('PRIVATE', str(visible))
+        self.assertEqual(len(read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges']), 2)
+
+    def test_room_revocation_during_reply(self):
+        from unittest.mock import patch
+        from mediator.schemas.room import RoomReply
+        def revoke(*args, **kwargs):
+            self.execute("UPDATE agent_project_grants SET status='revoked' WHERE agent_id=%s", (self.agent,))
+            return RoomReply(reply='Must not publish', proposal=None)
+        with patch('mediator.db.room.generate_plan', side_effect=revoke):
+            self.refused('access', 'tandem_talk_to_mediator', operationId=str(uuid4()), body='Hello')
+        self.assertEqual(self.execute("SELECT state FROM agent_room_exchanges WHERE project_id=%s", (self.project,))[0][0], 'failed')
+
     def make_task(self, title="Task", review="approved", status="open", depends_on=()):
         task = str(uuid4())
         self.execute(
