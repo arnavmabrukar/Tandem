@@ -13,8 +13,8 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
   const owner = !project || roleFor(project, user!.id) === 'owner';
   const [selection, setSelection] = useState<{repositoryId: number; installationId: number} | null>(null);
   const [branch, setBranch] = useState(project?.trackedBranch ?? '');
-  const [disconnectConfirmation, setDisconnectConfirmation] = useState('');
-  const disconnect = useAction(project);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const removal = useAction(project);
   const [name, setName] = useState(project?.name ?? '');
   const [repo, setRepo] = useState(project?.repository ?? '');
   const [description, setDescription] = useState(project?.description ?? '');
@@ -95,7 +95,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
                 <dt>GitHub repository</dt><dd>{project.repository}</dd>
                 <dt>Tracked branch</dt><dd>{project.trackedBranch || 'Not recorded'}</dd>
               </dl>
-              <p className="muted">These details are fixed when you import a repository. To track a different repository, disconnect this project and import another.</p>
+              <p className="muted">These details are fixed when you import a repository. To track a different repository, delete this project and import another. Your GitHub repository isn't affected.</p>
             </> : null}
             <SettingsContainer>
             {!project && <summary>Optional settings</summary>}
@@ -129,15 +129,16 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
         </form>
       </section>
       {project && owner && <section className="panel narrow-panel">
-        <h2>Disconnect repository</h2>
-        <p>Archive this Tandem project and remove access for all members and agents. Tasks, plans and discussion history remain stored. GitHub code, branches and pull requests stay untouched.</p>
-        <p>Already-running work in an IDE continues, but the agent loses access to this project. Reimporting creates a new project; archive restoration is not available yet.</p>
-        <Field label={`Type ${project.repository} to confirm`}><input value={disconnectConfirmation} onChange={e => setDisconnectConfirmation(e.target.value)} /></Field>
-        <Button variant="outline" disabled={disconnect.isPending || disconnectConfirmation !== project.repository}
-          onClick={async () => {try {await disconnect.mutateAsync({type: 'disconnect-project'}); navigate('/projects/new');} catch { /* Display the API error. */ }}}>
-          {disconnect.isPending ? 'Disconnecting…' : 'Disconnect repository'}
+        <h2>Delete project</h2>
+        <p>Permanently deletes this Tandem project for all {project.members.length} members, including its {project.tasks.length} tasks, plans, messages and activity. This can't be undone.</p>
+        <p><strong>Your GitHub repository, branches and pull requests aren't affected.</strong></p>
+        <p className="muted">Agents lose access immediately, but work already running on someone's machine keeps going. Text already sent to Meta for planning can't be recalled. You can import the repository again as a new, empty project.</p>
+        <Field label={`Type ${project.repository} to confirm`}><input value={deleteConfirmation} onChange={e => setDeleteConfirmation(e.target.value)} /></Field>
+        <Button variant="outline" disabled={removal.isPending || deleteConfirmation !== project.repository}
+          onClick={async () => {try {await removal.mutateAsync({type: 'delete-project'}); navigate('/projects/new');} catch { /* Display the API error. */ }}}>
+          {removal.isPending ? 'Deleting…' : 'Delete project'}
         </Button>
-        <ErrorNotice error={disconnect.error} />
+        <ErrorNotice error={removal.error} />
       </section>}
       {project && (
         <section className="panel narrow-panel">

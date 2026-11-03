@@ -581,41 +581,6 @@ class AgentToolIntegrationTests(unittest.TestCase):
         self.ok("tandem_status")
         self.assertGreater(last_seen(), first)
 
-    def test_disconnect_preserves_history_and_revokes_access(self):
-        from uuid import UUID
-        from mediator.db.projects import disconnect_project
-        from mediator.schemas.projects import DisconnectProjectRequest
-        from psycopg.errors import CheckViolation
-        task = self.make_task()
-        self.policy(True)
-        client = str(uuid4())
-        self.execute("INSERT INTO mcp_oauth_clients(id,metadata) VALUES (%s,'{}')", (client,))
-        self.execute("""INSERT INTO mcp_oauth_sessions(client_id,owner_id,project_id,agent_id,resource)
-            VALUES (%s,%s,%s,%s,'https://example.com/mcp/')""",
-            (client,self.owner,self.project,self.agent))
-        req = DisconnectProjectRequest(operationId=uuid4(), expectedVersion=self.project_version())
-        result = disconnect_project(UUID(self.owner), UUID(self.project), req)
-        self.assertEqual(result, disconnect_project(UUID(self.owner), UUID(self.project), req))
-        self.assertEqual(self.execute("SELECT title FROM tasks WHERE id=%s", (task,))[0][0], 'Task')
-        for table in ('project_memberships','agent_project_grants','mcp_oauth_sessions'):
-            self.assertEqual(self.execute(f"SELECT count(*) FROM {table} WHERE project_id=%s", (self.project,))[0][0],0)
-        row = self.execute("SELECT auto_delegate,archived_access,disconnected_at FROM projects WHERE id=%s",(self.project,))[0]
-        self.assertFalse(row[0])
-        self.assertEqual(row[1]['members'][0]['user_id'],self.owner)
-        self.assertIsNotNone(row[2])
-        with self.assertRaises(CheckViolation):
-            self.execute("INSERT INTO project_memberships(project_id,user_id,role) VALUES (%s,%s,'owner')",(self.project,self.owner))
-
-    def test_disconnect_owner_and_version_checks(self):
-        from uuid import UUID
-        from mediator.db.projects import disconnect_project, ProjectAccessDenied, ProjectVersionConflict
-        from mediator.schemas.projects import DisconnectProjectRequest
-        with self.assertRaises(ProjectAccessDenied):
-            disconnect_project(UUID(self.owner),uuid4(),DisconnectProjectRequest(operationId=uuid4(),expectedVersion=1))
-        with self.assertRaises(ProjectVersionConflict):
-            disconnect_project(UUID(self.owner),UUID(self.project),DisconnectProjectRequest(operationId=uuid4(),expectedVersion=999))
-        self.assertEqual(self.execute("SELECT count(*) FROM agent_project_grants WHERE project_id=%s",(self.project,))[0][0],1)
-
     def test_repository_import_identity_duplicate_and_replay(self):
         from uuid import UUID
         from unittest.mock import patch

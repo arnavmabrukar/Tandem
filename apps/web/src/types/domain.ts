@@ -143,7 +143,7 @@ export type User = z.infer<typeof userSchema>;
 export type Command =
   | { type: 'auto-delegate'; enabled: boolean }
   | { type: 'create-project'; name: string; repository: string; description: string; githubRepositoryId: number; githubInstallationId: number; trackedBranch: string }
-  | { type: 'disconnect-project' }
+  | { type: 'delete-project' }
   | { type: 'update-project'; name: string; repository: string; description: string }
   | { type: 'invite'; email: string; role: Role }
   | { type: 'revoke-invite'; invitationId: string }

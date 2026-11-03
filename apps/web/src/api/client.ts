@@ -44,8 +44,8 @@ export function commandEndpoint(request: MutationRequest): {
   if (type === 'create-project') return { method: 'POST', path: endpoints.projects, payload };
   const base = `${endpoints.projects}/${segment(request.projectId)}`;
   switch (command.type) {
-    case 'disconnect-project':
-      return { method: 'POST', path: `${base}/disconnect`, payload: {} };
+    case 'delete-project':
+      return { method: 'POST', path: `${base}/delete`, payload: {} };
     case 'auto-delegate':
       return { method: 'POST', path: `${base}/auto-delegate`, payload: { enabled: command.enabled } };
     case 'update-project':
@@ -191,10 +191,14 @@ export function createApiClient({
                   : [400, 422].includes(response.status)
                     ? 'invalid'
                     : 'http_error';
+          // Conflict details are written by the backend to be shown to people.
+          const detail = response.status === 409
+            ? await response.clone().json().then((value: { detail?: unknown }) => value?.detail, () => undefined)
+            : undefined;
           throw new ApiError(
             code,
-            statusMessages[response.status] ??
-              `The API could not complete the request (HTTP ${response.status}).`,
+            (typeof detail === 'string' && detail) || (statusMessages[response.status] ??
+              `The API could not complete the request (HTTP ${response.status}).`),
             response.status,
             mutation && response.status >= 500,
           );

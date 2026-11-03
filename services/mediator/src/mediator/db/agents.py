@@ -19,7 +19,7 @@ from mediator.schemas.agents import IssueAgentTokenRequest, IssueAgentTokenRespo
 
 
 class AgentNameConflict(Exception):
-    """The existing database requires agent names to be globally unique."""
+    """Another active agent in this project already uses this name."""
 
 
 class AgentNotFound(Exception):
@@ -101,29 +101,40 @@ def register_agent(
             if project is None:
                 raise ProjectVersionConflict("Project changed; reload before registering")
 
+            # The version update above locks the project row, so two simultaneous
+            # registrations can't both pass this check. Names stay unique per project
+            # because duplicates would be indistinguishable when assigning work.
+            if connection.execute(
+                """SELECT 1 FROM public.agent_project_grants AS project_grant
+                   JOIN public.agents AS existing ON existing.id = project_grant.agent_id
+                   WHERE project_grant.project_id = %s AND project_grant.status <> 'revoked'
+                     AND existing.grant_status <> 'revoked'
+                     AND lower(btrim(existing.name)) = lower(btrim(%s))""",
+                (project_id, request.name),
+            ).fetchone() is not None:
+                raise AgentNameConflict("This project already has an agent with that name")
+
             agent_id = str(uuid4())
             # The legacy token_hash column is NOT NULL. This marker is not a
             # credential hash: no token is generated, stored, or returned yet.
             # Future authentication must reject pending agents AND this marker.
             unissued_token = f"unissued:{agent_id}"
-            agent = connection.execute(
-                """INSERT INTO public.agents
-                       (id, name, client, token_hash, owner, owner_user_id,
-                        machine, capabilities, grant_status, presence)
-                   SELECT %s, %s, %s, %s, person.name, person.id,
-                          %s, %s, 'pending', 'offline'
-                   FROM public.users AS person WHERE person.id = %s
-                   ON CONFLICT (name) DO NOTHING
-                   RETURNING id""",
-                (
-                    agent_id, request.name, request.client, unissued_token,
-                    request.machine, request.capabilities, actor_id,
-                ),
-            ).fetchone()
-            if agent is None:
-                # The locked membership guarantees the user exists. Therefore
-                # no returned row means the globally unique name is taken.
-                raise AgentNameConflict("Agent name is already in use")
+            try:
+                connection.execute(
+                    """INSERT INTO public.agents
+                           (id, name, client, token_hash, owner, owner_user_id,
+                            machine, capabilities, grant_status, presence)
+                       SELECT %s, %s, %s, %s, person.name, person.id,
+                              %s, %s, 'pending', 'offline'
+                       FROM public.users AS person WHERE person.id = %s""",
+                    (
+                        agent_id, request.name, request.client, unissued_token,
+                        request.machine, request.capabilities, actor_id,
+                    ),
+                )
+            except psycopg.errors.UniqueViolation:
+                # Only reachable until migration 020 removes the old global index.
+                raise AgentNameConflict("That agent name is already in use") from None
 
             # The owner and grant issuer are the verified caller. The submitted
             # request.owner label is never used to establish identity.
