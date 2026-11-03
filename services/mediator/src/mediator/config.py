@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     model_api_key: SecretStr | None = Field(default=None, validation_alias="MODEL_API_KEY")
     meta_model: str = "muse-spark-1.3-contributor"
 
+    # GitHub App OAuth: backend-only credentials and a Fernet encryption key.
+    github_client_id: str = ""
+    github_client_secret: SecretStr | None = None
+    github_token_key: SecretStr | None = None
+    github_app_slug: str = Field(default="", pattern=r"^[a-zA-Z0-9-]*$")
+    github_callback_origin: str = "https://tandem-jr3e.onrender.com"
+    github_dashboard_origin: str = "https://agentictandem.vercel.app"
+
     # Neon supplies DATABASE_URL, without our usual TANDEM_ prefix.
     # SecretStr hides the password if the settings object is printed.
     database_url: SecretStr | None = Field(default=None, validation_alias="DATABASE_URL")
@@ -43,7 +51,7 @@ class Settings(BaseSettings):
     mcp_oauth_issuer: str = "https://tandem-jr3e.onrender.com"
     mcp_oauth_dashboard: str = "https://agentictandem.vercel.app"
 
-    @field_validator("mcp_oauth_issuer", "mcp_oauth_dashboard")
+    @field_validator("mcp_oauth_issuer", "mcp_oauth_dashboard", "github_callback_origin", "github_dashboard_origin")
     @classmethod
     def validate_oauth_origin(cls, value: str) -> str:
         from urllib.parse import urlsplit

@@ -18,13 +18,17 @@ class CreateProjectRequest(BaseModel):
     # The frontend must explicitly send "expectedVersion": null.
     expectedVersion: None
 
+    githubRepositoryId: int = Field(gt=0, strict=True)
+    githubInstallationId: int = Field(gt=0, strict=True)
+    trackedBranch: str = Field(min_length=1, max_length=255)
+
     # Require a name between 1 and 80 characters.
     name: str = Field(min_length=1, max_length=80)
 
     # Require owner/repository format, matching the frontend.
     # This validates the format, not whether the repository exists.
     repository: str = Field(
-        pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.\-]*/[a-zA-Z0-9][a-zA-Z0-9_.\-]*$",
+        pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.\-]*/[a-zA-Z0-9_.\-]+$",
     )
 
     # An empty description is valid, but the field is required.
@@ -72,7 +76,7 @@ class UpdateProjectRequest(BaseModel):
 
     # Require owner/repository format.
     repository: str = Field(
-        pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.\-]*/[a-zA-Z0-9][a-zA-Z0-9_.\-]*$",
+        pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.\-]*/[a-zA-Z0-9_.\-]+$",
     )
 
     # Empty descriptions are allowed.
@@ -97,3 +101,8 @@ class UpdateProjectResponse(BaseModel):
 
     # The affected entity is the project itself.
     entityId: UUID
+
+class DisconnectProjectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operationId: UUID
+    expectedVersion: int = Field(ge=1, strict=True)

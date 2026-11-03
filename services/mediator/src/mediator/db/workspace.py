@@ -27,6 +27,7 @@ def load_workspace(issuer: str, subject: str) -> dict:
                 p.id::text AS id,
                 p.name,
                 p.repository,
+                p.tracked_branch AS "trackedBranch",
                 p.description,
                 p.version,
                 p.auto_delegate AS "autoDelegate",

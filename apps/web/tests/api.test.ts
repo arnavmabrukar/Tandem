@@ -48,10 +48,11 @@ describe('real HTTP client contract', () => {
   });
   it('maps every supported command to an explicit REST route', () => {
     const cases: [Command, string, string][] = [
+      [{ type: 'disconnect-project' }, 'POST', '/api/projects/project-1/disconnect'],
       [{ type: 'auto-delegate', enabled: true }, 'POST', '/api/projects/project-1/auto-delegate'],
       [{ type: 'assign-task', taskId: 't-1', agentId: 'a-1' }, 'POST', '/api/projects/project-1/tasks/t-1/assignment'],
       [
-        { type: 'create-project', name: 'P', repository: 'owner/repo', description: '' },
+        { type: 'create-project', name: 'P', repository: 'owner/repo', description: '', githubRepositoryId: 1, githubInstallationId: 2, trackedBranch: 'main' },
         'POST',
         '/api/projects',
       ],

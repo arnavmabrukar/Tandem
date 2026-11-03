@@ -44,6 +44,8 @@ export function commandEndpoint(request: MutationRequest): {
   if (type === 'create-project') return { method: 'POST', path: endpoints.projects, payload };
   const base = `${endpoints.projects}/${segment(request.projectId)}`;
   switch (command.type) {
+    case 'disconnect-project':
+      return { method: 'POST', path: `${base}/disconnect`, payload: {} };
     case 'auto-delegate':
       return { method: 'POST', path: `${base}/auto-delegate`, payload: { enabled: command.enabled } };
     case 'update-project':
@@ -235,6 +237,10 @@ export function createApiClient({
     }
   }
   return {
+    connectGitHub: () => request('/api/github/connect', z.object({url: z.string().url()}), {method: 'POST', body: {}}),
+    completeGitHub: (code, state) => request('/api/github/complete', z.object({login: z.string()}), {method: 'POST', body: {code, state}}),
+    githubInstallations: (page) => request(`/api/github/installations?page=${page}`, z.object({items: z.array(z.object({id: z.number(), name: z.string()})), hasMore: z.boolean(), installUrl: z.string().url()})),
+    githubRepositories: (id, page) => request(`/api/github/installations/${id}/repositories?page=${page}`, z.object({items: z.array(z.object({id: z.number(), name: z.string(), fullName: z.string(), defaultBranch: z.string(), description: z.string()})), hasMore: z.boolean()})),
     generatePlan: (projectId, goal) => request(
       `${endpoints.projects}/${segment(projectId)}/plans/generate`, planProposalSchema,
       { method: 'POST', body: { goal }, timeoutMs: 135_000 }),

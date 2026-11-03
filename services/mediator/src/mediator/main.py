@@ -295,11 +295,11 @@ def create_project(
             request=request,
         )
 
-    except OperationConflict:
+    except OperationConflict as error:
         # The operation ID already belongs to different request data.
         raise HTTPException(
             status_code=409,
-            detail="Operation ID was already used for another request",
+            detail=str(error),
         ) from None
 
     except ProjectAccessDenied:
@@ -1137,3 +1137,62 @@ if settings.mcp_oauth_enabled:
             oauth_store.disconnect(user["id"],session_id)
         except DatabaseError:
             raise HTTPException(503,"OAuth storage unavailable") from None
+
+# GitHub integration uses the human's authenticated Tandem account.
+from mediator import github
+from mediator.schemas.projects import DisconnectProjectRequest
+from mediator.db.projects import disconnect_project
+from pydantic import BaseModel, Field, ConfigDict
+from fastapi.responses import RedirectResponse
+from urllib.parse import urlencode
+
+
+class GitHubCallbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str = Field(min_length=1, max_length=1024)
+    state: str = Field(min_length=1, max_length=256)
+
+
+@app.post("/api/github/connect")
+def github_connect(user: dict = Depends(get_current_user)):
+    with plan_api_errors():
+        return github.start(UUID(user["id"]))
+
+
+@app.get("/api/github/callback")
+def github_callback(code: str = Query(default="", max_length=1024), state: str = Query(default="", max_length=256)):
+    # The browser finishes under its Auth0 session, binding GitHub authorization
+    # to the same Tandem user who started it. No token appears in a redirect.
+    return RedirectResponse(settings.github_dashboard_origin + "/#/projects/new?" +
+                            urlencode({"github_code": code, "github_state": state}),
+                            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
+@app.post("/api/github/complete")
+def github_complete(request: GitHubCallbackRequest, user: dict = Depends(get_current_user)):
+    with plan_api_errors():
+        return github.finish(UUID(user["id"]), request.code, request.state)
+
+
+@app.get("/api/github/installations")
+def github_installations(page: int = Query(default=1, ge=1, le=1000), user: dict = Depends(get_current_user)):
+    with plan_api_errors():
+        return github.installations(UUID(user["id"]), page)
+
+
+@app.get("/api/github/installations/{installation_id}/repositories")
+def github_repositories(installation_id: int, page: int = Query(default=1, ge=1, le=10000), user: dict = Depends(get_current_user)):
+    if installation_id <= 0:
+        raise HTTPException(422, "Invalid installation")
+    with plan_api_errors():
+        return github.repositories(UUID(user["id"]), installation_id, page)
+
+
+@app.post("/api/projects/{project_id}/disconnect")
+def disconnect_repository(project_id: UUID, request: DisconnectProjectRequest,
+                          idempotency_key: UUID = Header(alias="Idempotency-Key"),
+                          user: dict = Depends(get_current_user)):
+    if idempotency_key != request.operationId:
+        raise HTTPException(400, "Idempotency-Key must match operationId")
+    with plan_api_errors():
+        return disconnect_project(UUID(user["id"]), project_id, request)

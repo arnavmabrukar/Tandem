@@ -58,7 +58,7 @@ In the table, `:p`, `:i`, `:a`, `:t`, `:r` represent the project, invitation, ag
 
 | Method / path                                  | Additional JSON fields                                                                     | UI authority                                                                    |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
-| `POST /api/projects`                           | `name`, `repository`, `description`                                                        | Signed-in human; backend applies creation policy and grants creator membership. |
+| `POST /api/projects`                           | `name`, `repository`, `description`, `githubRepositoryId`, `githubInstallationId`, `trackedBranch`                                                        | Signed-in human; backend applies creation policy and grants creator membership. |
 | `PATCH /api/projects/:p`                       | `name`, `repository`, `description`                                                        | Owner                                                                           |
 | `POST /api/projects/:p/invitations`            | `email`, `role`                                                                            | Owner                                                                           |
 | `POST /api/projects/:p/invitations/:i/revoke`  | None                                                                                       | Owner                                                                           |
@@ -185,3 +185,29 @@ are sent to Meta. The request does not save/approve a plan or create tasks.
 The editor saves reviewed content through the existing plans endpoint.
 No automatic retries; a manual retry can incur another provider charge.
 See `services/mediator/META_PLANNER.md` for backend environment configuration.
+
+
+## GitHub repository import and disconnect
+
+New projects require a GitHub App user connection. The backend verifies the numeric
+repository ID, installation access and selected branch using GitHub before insertion.
+`name` must match GitHub's repository name (truncated to 80 characters), and
+`repository` must match its canonical `owner/name`. Duplicate active imports by the
+same creator return 409. Existing projects may update name/description, but not repository.
+`trackedBranch` is optional/nullable in workspace responses for legacy projects.
+
+Authenticated GitHub routes (no operation envelope):
+- `POST /api/github/connect` returns `{url}` to begin authorization.
+- `GET /api/github/callback` redirects to the configured dashboard; never accepts a user-provided redirect destination.
+- `POST /api/github/complete` accepts `{code,state}` and returns `{login}`.
+- `GET /api/github/installations?page=1` returns `{items:[{id,name}],hasMore,installUrl}`.
+- `GET /api/github/installations/:id/repositories?page=1` returns `{items:[{id,name,fullName,defaultBranch,description}],hasMore}`.
+
+Owner-only `POST /api/projects/:p/disconnect` uses the standard `operationId`,
+`expectedVersion` and `Idempotency-Key`. It archives the project, disables delegation,
+revokes pending invitations, and removes memberships (cascading agent grants and
+OAuth sessions). Tasks, messages, plans, approvals and activity remain stored.
+Identical retries by the disconnecting owner return the saved result. No GitHub
+resources are modified. Archived projects are excluded from active workspaces.
+
+See `services/mediator/GITHUB_PROJECTS.md` for configuration and rollout.

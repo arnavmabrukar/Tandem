@@ -87,6 +87,7 @@ export const projectSchema = z.object({
   id: z.string(),
   name: z.string(),
   repository: z.string(),
+  trackedBranch: z.string().nullable().optional(),
   description: z.string(),
   version: z.number().int(),
   members: z.array(z.object({ id: z.string(), name: z.string(), role: z.enum(roles) })),
@@ -141,7 +142,8 @@ export type User = z.infer<typeof userSchema>;
 
 export type Command =
   | { type: 'auto-delegate'; enabled: boolean }
-  | { type: 'create-project'; name: string; repository: string; description: string }
+  | { type: 'create-project'; name: string; repository: string; description: string; githubRepositoryId: number; githubInstallationId: number; trackedBranch: string }
+  | { type: 'disconnect-project' }
   | { type: 'update-project'; name: string; repository: string; description: string }
   | { type: 'invite'; email: string; role: Role }
   | { type: 'revoke-invite'; invitationId: string }
@@ -197,7 +199,12 @@ export const mutationResultSchema = z.object({
   projectVersion: z.number().int().positive(),
   entityId: z.string().optional(),
 });
+export interface GitHubRepository { id: number; name: string; fullName: string; defaultBranch: string; description: string }
 export interface DashboardApi {
+  connectGitHub(): Promise<{url: string}>;
+  completeGitHub(code: string, state: string): Promise<{login: string}>;
+  githubInstallations(page: number): Promise<{items: {id: number; name: string}[]; hasMore: boolean; installUrl: string}>;
+  githubRepositories(installationId: number, page: number): Promise<{items: GitHubRepository[]; hasMore: boolean}>;
   generatePlan(projectId: string, goal: string): Promise<import('./plans').PlanProposal>;
   approvePlan(projectId: string, planId: string, body: import('./plans').ApprovePlanRequest): Promise<import('zod').infer<typeof import('./plans').approvedPlanSchema>>;
   listPlans(projectId: string, signal?: AbortSignal): Promise<import('./plans').PlanRevision[]>;

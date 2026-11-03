@@ -30,6 +30,13 @@ def create_project(
 ) -> CreateProjectResponse:
     """Save a project, its owner membership, and its operation atomically."""
 
+    from mediator.github import verify_repository
+    repo = verify_repository(actor_id, request.githubInstallationId,
+                             request.githubRepositoryId, request.trackedBranch)
+    # The selected GitHub record is authoritative, not editable browser text.
+    if request.repository != repo["full_name"] or request.name != repo["name"][:80]:
+        raise ProjectAccessDenied("Repository selection changed; select it again")
+
     # actor_id must come from the authenticated user's database record.
     # Never take it from the request body.
     if settings.database_url is None:
@@ -125,20 +132,23 @@ def create_project(
             project = connection.execute(
                 """
                 INSERT INTO public.projects (
-                    name, repository, description
+                    name, repository, description, github_repository_id, github_installation_id, tracked_branch, connected_by
                 )
-                VALUES (%s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (connected_by, github_repository_id)
+                    WHERE disconnected_at IS NULL AND github_repository_id IS NOT NULL
+                    DO NOTHING
                 RETURNING id, version
                 """,
                 (
                     request.name,
                     request.repository,
-                    request.description,
+                    request.description, request.githubRepositoryId, request.githubInstallationId, request.trackedBranch, actor_id,
                 ),
             ).fetchone()
 
             if project is None:
-                raise RuntimeError("Project creation returned no row")
+                raise OperationConflict("This repository is already connected to a project")
 
             # Make the authenticated creator the project's owner.
             connection.execute(
@@ -207,6 +217,10 @@ def update_project(
         connection.execute(
             "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
         )
+
+        original = connection.execute("SELECT repository FROM public.projects WHERE id=%s", (project_id,)).fetchone()
+        if original is None or original["repository"] != request.repository:
+            raise ProjectAccessDenied("Repository cannot be changed; disconnect and import another repository")
 
         # Reserve the operation before making changes.
         # An identical concurrent operation waits for its outcome.
@@ -320,4 +334,47 @@ def update_project(
             )
 
     # Return only after the transaction commits successfully.
+    return result
+
+def disconnect_project(actor_id: UUID, project_id: UUID, request) -> dict:
+    """Archive coordination data and remove live access. Never call GitHub writes."""
+    from mediator.db.agent_tasks import _transaction
+    payload = {"projectId": str(project_id), **request.model_dump(mode="json")}
+    with _transaction() as db:
+        reserved = db.execute("""INSERT INTO public.operations(actor_id,operation_id,operation_type,request_payload)
+            VALUES (%s,%s,'disconnect_project',%s) ON CONFLICT DO NOTHING RETURNING operation_id""",
+            (actor_id, request.operationId, Jsonb(payload))).fetchone()
+        if reserved is None:
+            old = db.execute("SELECT * FROM public.operations WHERE actor_id=%s AND operation_id=%s",
+                             (actor_id, request.operationId)).fetchone()
+            if old["operation_type"] != "disconnect_project" or old["request_payload"] != payload:
+                raise OperationConflict("Operation ID was already used for another request")
+            # Replay is authorized only for the human who performed the disconnect.
+            archived = db.execute("SELECT disconnected_by FROM public.projects WHERE id=%s", (project_id,)).fetchone()
+            if archived is None or archived["disconnected_by"] != actor_id:
+                raise ProjectAccessDenied("Project owner access is required")
+            return old["response_payload"]
+        # Match existing writers' membership-before-project lock order.
+        members = db.execute("SELECT user_id,role FROM public.project_memberships WHERE project_id=%s ORDER BY user_id FOR UPDATE",
+                             (project_id,)).fetchall()
+        if not any(m["user_id"] == actor_id and m["role"] == "owner" for m in members):
+            raise ProjectAccessDenied("Only project owners can disconnect repositories")
+        project = db.execute("SELECT version,disconnected_at FROM public.projects WHERE id=%s FOR UPDATE", (project_id,)).fetchone()
+        if project["version"] != request.expectedVersion or project["disconnected_at"] is not None:
+            raise ProjectVersionConflict("Project changed; refresh before disconnecting")
+        # Keep an audit snapshot of access before its live rows and OAuth sessions are removed.
+        db.execute("""UPDATE public.projects SET disconnected_at=now(),disconnected_by=%s,
+            auto_delegate=false,auto_delegate_by=NULL,version=version+1,
+            archived_access=jsonb_build_object(
+                'members',(SELECT jsonb_agg(to_jsonb(m)) FROM public.project_memberships m WHERE m.project_id=%s),
+                'grants',(SELECT jsonb_agg(to_jsonb(g)) FROM public.agent_project_grants g WHERE g.project_id=%s))
+            WHERE id=%s""", (actor_id, project_id, project_id, project_id))
+        db.execute("""UPDATE public.project_invitations SET status='revoked',revoked_at=now()
+            WHERE project_id=%s AND status='pending'""", (project_id,))
+        # Foreign keys cascade grants, OAuth sessions/codes/tokens. Tasks, messages,
+        # plans, approvals and activity are retained, and no local agent is stopped.
+        db.execute("DELETE FROM public.project_memberships WHERE project_id=%s", (project_id,))
+        result = {"projectId": str(project_id), "entityId": str(project_id), "projectVersion": project["version"] + 1}
+        db.execute("UPDATE public.operations SET response_payload=%s WHERE actor_id=%s AND operation_id=%s",
+                   (Jsonb(result), actor_id, request.operationId))
     return result

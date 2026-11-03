@@ -1,3 +1,4 @@
+import { GitHubRepositoryPicker } from '../components/GitHubRepositoryPicker';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSession } from '../auth/session';
@@ -10,6 +11,10 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
   const { user } = useSession();
   const navigate = useNavigate();
   const owner = !project || roleFor(project, user!.id) === 'owner';
+  const [selection, setSelection] = useState<{repositoryId: number; installationId: number} | null>(null);
+  const [branch, setBranch] = useState(project?.trackedBranch ?? '');
+  const [disconnectConfirmation, setDisconnectConfirmation] = useState('');
+  const disconnect = useAction(project);
   const [name, setName] = useState(project?.name ?? '');
   const [repo, setRepo] = useState(project?.repository ?? '');
   const [description, setDescription] = useState(project?.description ?? '');
@@ -35,11 +40,11 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
   return (
     <>
       <PageHeader
-        title={project ? 'Project setup' : 'Create a project'}
+        title={project ? 'Project setup' : 'Import GitHub repository'}
         description="Project details, human membership and invitations."
       />
       <section className="panel narrow-panel">
-        <h2>{project ? 'Project details' : 'Create a shared project'}</h2>
+        <h2>{project ? 'Project details' : 'Choose your repository'}</h2>
         <p className="muted">
           Link the project to its GitHub repository. The mediator manages access and coordination;
           source changes stay in your own worktrees.
@@ -62,11 +67,13 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
           onSubmit={async (e) => {
             e.preventDefault();
             try {
-              const result = await save.mutateAsync({
-                type: project ? 'update-project' : 'create-project',
-                name,
-                repository: repo,
-                description,
+              if (!project && !selection) return;
+              const result = await save.mutateAsync(project ? {
+                type: 'update-project', name, repository: repo, description,
+              } : {
+                type: 'create-project', name, repository: repo, description,
+                githubRepositoryId: selection!.repositoryId,
+                githubInstallationId: selection!.installationId, trackedBranch: branch,
               });
               if (!project) navigate(`/projects/${result.projectId}/activity`);
               else {
@@ -79,31 +86,15 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
           }}
         >
           <fieldset disabled={!owner || save.isPending}>
-            <Field label="Project name">
-              <input
-                required
-                maxLength={80}
-                value={name}
-                onChange={(e) => {
-                  setName(e.target.value);
-                  setSaved(false);
-                }}
-              />
-            </Field>
-            <Field
-              label="GitHub repository"
-              hint="Use owner/repository, for example arnavmabrukar/Tandem."
-            >
-              <input
-                required
-                pattern="[a-zA-Z0-9][a-zA-Z0-9_.\-]*/[a-zA-Z0-9][a-zA-Z0-9_.\-]*"
-                value={repo}
-                onChange={(e) => {
-                  setRepo(e.target.value);
-                  setSaved(false);
-                }}
-                placeholder="owner/repository"
-              />
+            {!project && <GitHubRepositoryPicker onSelect={(repository, installationId) => {
+              setSelection(repository ? {repositoryId: repository.id, installationId} : null);
+              setRepo(repository?.fullName ?? ''); setName(repository?.name.slice(0, 80) ?? '');
+              setBranch(repository?.defaultBranch ?? ''); setDescription(repository?.description.slice(0, 1000) ?? '');
+            }} />}
+            {project && <Field label="Project name"><input required maxLength={80} value={name} onChange={e => {setName(e.target.value); setSaved(false);}} /></Field>}
+            <Field label="GitHub repository"><input readOnly value={repo} placeholder="Select a GitHub repository above" /></Field>
+            <Field label="Branch to track" hint={project ? 'The branch selected when importing this repository.' : 'Defaults to the repository’s default branch. The backend checks that this branch exists.'}>
+              <input required={!project} maxLength={255} readOnly={!!project} value={branch} onChange={e => setBranch(e.target.value)} />
             </Field>
             <Field label="Description">
               <textarea
@@ -115,7 +106,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
                 }}
               />
             </Field>
-            <Button type="submit" disabled={changed}>
+            <Button type="submit" disabled={changed || (!project && (!selection || !branch))}>
               {save.isPending ? 'Saving…' : project ? 'Save project' : 'Create project'}
             </Button>
           </fieldset>
@@ -128,6 +119,17 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
           )}
         </form>
       </section>
+      {project && owner && <section className="panel narrow-panel">
+        <h2>Disconnect repository</h2>
+        <p>Archive this Tandem project and remove access for all members and agents. Tasks, plans and discussion history remain stored. GitHub code, branches and pull requests stay untouched.</p>
+        <p>Already-running work in an IDE continues, but the agent loses access to this project. Reimporting creates a new project; archive restoration is not available yet.</p>
+        <Field label={`Type ${project.repository} to confirm`}><input value={disconnectConfirmation} onChange={e => setDisconnectConfirmation(e.target.value)} /></Field>
+        <Button variant="outline" disabled={disconnect.isPending || disconnectConfirmation !== project.repository}
+          onClick={async () => {try {await disconnect.mutateAsync({type: 'disconnect-project'}); navigate('/projects/new');} catch { /* Display the API error. */ }}}>
+          {disconnect.isPending ? 'Disconnecting…' : 'Disconnect repository'}
+        </Button>
+        <ErrorNotice error={disconnect.error} />
+      </section>}
       {project && (
         <section className="panel narrow-panel">
           <h2>Auto-delegate</h2>
