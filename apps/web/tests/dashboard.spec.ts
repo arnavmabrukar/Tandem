@@ -277,7 +277,7 @@ test('a failed name change keeps the draft and says so', async ({ page }) => {
 test('a missing or offline API shows failure without sample records', async ({ page }) => {
   const state = await connect(page);
   state.readStatus = 404;
-  await page.goto('/');
+  await page.goto('/#/dashboard');
   // Multiple sections may report the same backend outage at once. Target the
   // shared 404 message instead of assuming that the page renders one alert.
   await expect(
@@ -585,4 +585,27 @@ test('agent room sends private human messages and opens connection onboarding', 
   await page.getByText('Automatic room replies while idle', { exact: true }).click();
   await expect(page.getByRole('dialog').locator('pre').filter({ hasText: '--presence-only' })).toContainText('--project');
   await expect(page.getByRole('button', { name: 'Copy listener command', exact: true })).toBeVisible();
+});
+
+test('the site root is the public landing page and never waits for the session', async ({ page }) => {
+  const state = await connect(page);
+  await page.goto('/?test-auth=delayed');
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('no collisions');
+  await expect(page.getByText('Checking your session')).toHaveCount(0);
+  expect(state.reads).toBe(0);
+});
+
+test('Open dashboard goes to the dashboard when a session is already cached', async ({ page }) => {
+  await connect(page);
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Open dashboard' }).first().click();
+  await expect(page).toHaveURL(/#\/projects\/project-1\/activity$/);
+});
+
+test('Open dashboard goes to sign-in when there is no session', async ({ page }) => {
+  await connect(page);
+  await page.goto('/?test-auth=off');
+  await page.getByRole('link', { name: 'Open dashboard' }).first().click();
+  await expect(page).toHaveURL(/#\/signin$/);
+  await expect(page.getByRole('button', { name: 'Sign in with Auth0' })).toBeVisible();
 });

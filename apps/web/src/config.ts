@@ -60,8 +60,9 @@ export const configuration = readConfig({
 export const appBaseUrl = () => `${window.location.origin}${window.location.pathname}`;
 export function safeReturnTo(value: unknown) {
   // Accept only known internal destinations.
+  // After sign-in the fallback is the dashboard. The site root is the public landing page.
   if (typeof value !== 'string' || /[\\\r\n]/.test(value)) {
-    return '/';
+    return '/dashboard';
   }
 
   // Preserve an opaque OAuth request through Auth0's browser round trip.
@@ -70,10 +71,10 @@ export function safeReturnTo(value: unknown) {
   }
 
   // Allow returning to invitations after authentication.
-  if (value === '/invitations') {
+  if (value === '/invitations' || value === '/dashboard') {
     return value;
   }
 
   // Preserve the existing project-route behavior.
-  return /^\/projects(?:\/|$)/.test(value) ? value : '/';
+  return /^\/projects(?:\/|$)/.test(value) ? value : '/dashboard';
 }
