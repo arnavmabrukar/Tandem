@@ -1,3 +1,4 @@
+import { PlanChat } from '../components/PlanChat';
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from '../auth/session';
@@ -22,16 +23,6 @@ export function PlansPage({ project }: { project: Project }) {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [validation, setValidation] = useState<Error | null>(null);
   const [notice, setNotice] = useState('');
-  const [goal, setGoal] = useState('');
-  const generate = useMutation({
-    mutationFn: () => api.generatePlan(project.id, goal.trim()),
-    onSuccess: proposal => {
-      save.reset(); setValidation(null);
-      setEditor({ planId: null, projectVersion: project.version, proposal });
-      setNotice('Meta draft generated. Review and edit it, then save. Nothing has been approved.');
-    },
-    retry: false,
-  });
   // Preserve the exact request on uncertain outcomes, including its versions.
   const pending = useRef<{ planId: string | null; body: SavePlanRequest } | null>(null);
   const plans = useQuery({
@@ -75,22 +66,9 @@ export function PlansPage({ project }: { project: Project }) {
   }
   return <>
     <PageHeader title="Plans" description="Break a goal into tasks and review the scope before work begins."
-      action={<Button disabled={!writable || !!editor || generate.isPending} onClick={() => open()}>New plan</Button>} />
+      action={<Button disabled={!writable || !!editor} onClick={() => open()}>New plan</Button>} />
     <p className="notice">Review a draft to create its tasks. Task contracts are reviewed separately before agents can claim work.</p>
-    {writable && !editor && <section className="panel">
-      <h2>Plan with Meta</h2>
-      <p>Describe your goal. Meta receives the goal and this project's name, repository name, and description. Repository files are not read.</p>
-      <p className="muted">The configured Contributor model may use submitted content for training. Each generation uses your backend's model API account.</p>
-      <form onSubmit={event => { event.preventDefault(); if (!generate.isPending && goal.trim()) generate.mutate(); }}>
-        <Field label="What do you want to build?"><textarea required maxLength={10000} value={goal}
-          disabled={generate.isPending} onChange={event => setGoal(event.target.value)} /></Field>
-        <ErrorNotice error={generate.error} />
-        {generate.error && <p>No draft was saved. Trying again makes a new model request.</p>}
-        <Button type="submit" disabled={generate.isPending || !goal.trim()}>
-          {generate.isPending ? 'Generating plan…' : 'Generate with Meta'}
-        </Button>
-      </form>
-    </section>}
+    {writable && <PlanChat key={`${user!.id}:${project.id}`} project={project} disabled={!!editor} />}
     {notice && <p role="status">{notice}</p>}
     <ErrorNotice error={plans.error} retry={() => void plans.refetch()} />
     {editor && <section className="panel">
@@ -169,8 +147,8 @@ export function PlansPage({ project }: { project: Project }) {
           <p><strong>Depends on:</strong> {task.dependencies.map(key => plan.proposal.tasks.find(t => t.key === key)?.title ?? key).join(', ') || 'None'}</p>
         </details>)}
         {plan.approvedPlanVersion ? <p>Tasks created. <Link to={`/projects/${project.id}/tasks`}>View tasks</Link> · <Link to={`/projects/${project.id}/approvals`}>Review contracts</Link></p> : <div className="row">
-          <Button variant="outline" disabled={!writable || !!editor || generate.isPending} onClick={() => open(plan)}>Edit draft</Button>
-          <PlanApproval plan={plan} projectVersion={project.version} disabled={!writable || !!editor || generate.isPending} />
+          <Button variant="outline" disabled={!writable || !!editor} onClick={() => open(plan)}>Edit draft</Button>
+          <PlanApproval plan={plan} projectVersion={project.version} disabled={!writable || !!editor} />
         </div>}
       </section>)}
     </>}

@@ -3,7 +3,7 @@
 Validation makes a proposal structurally valid; it does not authorize work.
 The service must check project membership and obtain human approval separately.
 """
-from typing import Annotated, Self
+from typing import Annotated, Self, Literal
 from datetime import datetime
 from uuid import UUID
 
@@ -167,3 +167,28 @@ class GeneratePlanRequest(BaseModel):
     @classmethod
     def valid_goal(cls, value: str) -> str:
         return PlanProposal.meaningful_text(value)
+
+
+class PlanChatMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=12000)
+
+
+class PlanChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    messages: list[PlanChatMessage] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def ends_with_user(self) -> Self:
+        if self.messages[-1].role != "user":
+            raise ValueError("The last message must be from the user")
+        if sum(len(message.content) for message in self.messages) > 40000:
+            raise ValueError("Conversation is too long; start a new chat")
+        return self
+
+
+class PlanChatResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reply: str = Field(min_length=1, max_length=12000)
+    proposal: PlanProposal | None = None

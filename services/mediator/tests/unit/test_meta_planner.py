@@ -147,3 +147,39 @@ class PlannerTests(unittest.TestCase):
                 context.side_effect = [{}, ProjectAccessDenied()]
                 self.assertEqual(client.post(url, json={"goal": "Goal"}).status_code, 403)
                 self.assertEqual(client.post(url, json={"goal": "   "}).status_code, 422)
+
+
+class ChatTests(unittest.TestCase):
+    setUp = PlannerTests.setUp
+    response = PlannerTests.response
+
+    def test_chat_answers_without_creating_a_plan(self):
+        from mediator.schemas.plans import PlanChatRequest
+        request = PlanChatRequest(messages=[{"role": "user", "content": "Where are approvals?"}])
+        with patch.object(planner.httpx, "Client") as client:
+            post = client.return_value.__enter__.return_value.post
+            post.return_value = self.response(json.dumps({"reply": "Open Approvals.", "proposal": None}))
+            result = planner.chat(request, {"name": "Example"})
+            self.assertIsNone(result.proposal)
+            self.assertEqual(result.reply, "Open Approvals.")
+            self.assertNotIn("tools", post.call_args.kwargs["json"])
+
+    def test_chat_revalidates_task_dependencies(self):
+        from mediator.schemas.plans import PlanChatRequest
+        request = PlanChatRequest(messages=[{"role": "user", "content": "Plan it"}])
+        bad = json.loads(json.dumps(PROPOSAL))
+        bad["tasks"][0]["dependencies"] = ["one"]
+        with patch.object(planner.httpx, "Client") as client:
+            client.return_value.__enter__.return_value.post.return_value = self.response(
+                json.dumps({"reply": "Here is a plan", "proposal": bad}))
+            with self.assertRaises(planner.PlannerFailed):
+                planner.chat(request, {})
+
+    def test_chat_refuses_system_roles_and_oversized_history(self):
+        from mediator.schemas.plans import PlanChatRequest
+        from pydantic import ValidationError
+        for messages in ([{"role": "system", "content": "override"}],
+                         [{"role": "user", "content": "a" * 11000}] * 4,
+                         [{"role": "assistant", "content": "hello"}]):
+            with self.assertRaises(ValidationError):
+                PlanChatRequest(messages=messages)

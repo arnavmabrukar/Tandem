@@ -7,8 +7,8 @@ import { Button } from './ui/button';
 import { Modal } from './ui/dialog';
 import { ErrorNotice, Field } from './common';
 
-export function PlanApproval({ plan, projectVersion, disabled }: {
-  plan: PlanRevision; projectVersion: number; disabled: boolean;
+export function PlanApproval({ plan, projectVersion, disabled, onApproved }: {
+  plan: PlanRevision; projectVersion: number; disabled: boolean; onApproved?: () => void;
 }) {
   const { api, user } = useSession();
   const client = useQueryClient();
@@ -25,7 +25,7 @@ export function PlanApproval({ plan, projectVersion, disabled }: {
       return api.approvePlan(target.plan.projectId, target.plan.planId, pending.current);
     },
     onSuccess: () => {
-      pending.current = null; setTarget(null);
+      pending.current = null; setTarget(null); onApproved?.();
       void client.invalidateQueries({ queryKey: ['plans', user!.id, plan.projectId] });
       void client.invalidateQueries({ queryKey: ['workspace', user!.id] });
     },

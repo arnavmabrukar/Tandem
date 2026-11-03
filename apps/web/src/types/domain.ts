@@ -207,6 +207,7 @@ export interface DashboardApi {
   completeGitHub(code: string, state: string): Promise<{login: string}>;
   githubInstallations(page: number): Promise<{items: {id: number; name: string}[]; hasMore: boolean; installUrl: string}>;
   githubRepositories(installationId: number, page: number): Promise<{items: GitHubRepository[]; hasMore: boolean}>;
+  chatPlan(projectId: string, messages: { role: 'user' | 'assistant'; content: string }[]): Promise<{ reply: string; proposal: import('./plans').PlanProposal | null }>;
   generatePlan(projectId: string, goal: string): Promise<import('./plans').PlanProposal>;
   approvePlan(projectId: string, planId: string, body: import('./plans').ApprovePlanRequest): Promise<import('zod').infer<typeof import('./plans').approvedPlanSchema>>;
   listPlans(projectId: string, signal?: AbortSignal): Promise<import('./plans').PlanRevision[]>;

@@ -57,3 +57,20 @@ no live tasks exist until a human approves the saved plan.
 References:
 - https://dev.meta.ai/docs/protocols/responses
 - https://dev.meta.ai/docs/models
+
+## Conversational planning
+
+The Plans page now calls `POST /api/projects/{project_id}/plans/chat` with a bounded
+conversation. The backend verifies owner access before and after the model request.
+Meta can answer interface questions or return a validated proposal; it has no execution
+tools and no live GitHub file context. Model output cannot authorize work.
+
+Chat history is scoped to the signed-in user and project in browser tab session storage
+(not synchronized across machines). Saved proposals use the existing database-backed
+plan flow. The chat card offers Save for approval, followed by the existing exact-revision
+review, including Approve and run. That action enables assignment; the separate runner
+must already be running to execute assigned work. See `agent-integrations/runner/README.md`.
+
+GitHub webhook monitoring and shared, server-persisted chat are not implemented by this
+change. No new migration or environment variable is required. The existing MODEL_API_KEY
+is used only on the backend.

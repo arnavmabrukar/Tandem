@@ -247,6 +247,10 @@ export function createApiClient({
     completeGitHub: (code, state) => request('/api/github/complete', z.object({login: z.string()}), {method: 'POST', body: {code, state}}),
     githubInstallations: (page) => request(`/api/github/installations?page=${page}`, z.object({items: z.array(z.object({id: z.number(), name: z.string()})), hasMore: z.boolean(), installUrl: z.string().url()})),
     githubRepositories: (id, page) => request(`/api/github/installations/${id}/repositories?page=${page}`, z.object({items: z.array(z.object({id: z.number(), name: z.string(), fullName: z.string(), defaultBranch: z.string(), description: z.string()})), hasMore: z.boolean()})),
+    chatPlan: (projectId, messages) => request(
+      `${endpoints.projects}/${segment(projectId)}/plans/chat`,
+      z.object({ reply: z.string(), proposal: planProposalSchema.nullable() }),
+      { method: 'POST', body: { messages }, timeoutMs: 135_000 }),
     generatePlan: (projectId, goal) => request(
       `${endpoints.projects}/${segment(projectId)}/plans/generate`, planProposalSchema,
       { method: 'POST', body: { goal }, timeoutMs: 135_000 }),

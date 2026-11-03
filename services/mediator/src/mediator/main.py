@@ -1,3 +1,5 @@
+from mediator.meta_planner import chat as chat_with_meta
+from mediator.schemas.plans import PlanChatRequest, PlanChatResponse
 from mediator.meta_planner import generate_plan as generate_meta_plan, PlannerFailed, PlannerUnavailable
 from mediator.db.plans import generation_context
 from mediator.schemas.plans import GeneratePlanRequest, PlanProposal
@@ -704,6 +706,22 @@ def plan_api_errors():
 
 
 # A preview never creates tasks, approvals, or operations.
+
+
+@app.post("/api/projects/{project_id}/plans/chat", response_model=PlanChatResponse)
+def plan_chat(project_id: UUID, request: PlanChatRequest,
+              user: dict[str, str] = Depends(get_current_user)):
+    with plan_api_errors():
+        context = generation_context(UUID(user["id"]), project_id)
+        try:
+            result = chat_with_meta(request, context)
+        except PlannerUnavailable:
+            raise HTTPException(503, "Meta planning is not configured") from None
+        except PlannerFailed:
+            raise HTTPException(502, "Meta could not reply; please try again") from None
+        # Recheck access after waiting for the external model.
+        generation_context(UUID(user["id"]), project_id)
+        return result
 
 
 @app.post("/api/projects/{project_id}/plans/generate", response_model=PlanProposal)
