@@ -83,6 +83,35 @@ class ProjectScopeTests(ToolTestCase):
 
 
 class PresenceToolTests(ToolTestCase):
+    def test_ordinary_tool_delivers_challenge_without_synthesizing_a_reply(self):
+        challenge = {'id': str(uuid4()), 'message': "Who's online?"}
+        with patch('mediator.mcp.presence.pending_presence', return_value={'presenceRequests': [challenge]}) as pending, \
+             patch('mediator.db.room.acknowledge_presence') as acknowledge:
+            result = self.call('tandem_whoami')
+            self.assertEqual(result['structuredContent'], IDENTITY)
+            message = result['content'][-1]['text']
+            self.assertIn('tandem_acknowledge_presence', message)
+            self.assertIn(challenge['id'], message)
+            self.assertIn(PROJECT_ID, message)
+            self.assertEqual(pending.call_count, 1)
+            acknowledge.assert_not_called()
+
+    def test_presence_delivery_failure_does_not_fail_a_successful_tool(self):
+        with patch('mediator.mcp.presence.pending_presence', side_effect=OperationalError('private details')):
+            result = self.call('tandem_whoami')
+            self.assertFalse(result.get('isError'), result)
+            self.assertEqual(result['structuredContent'], IDENTITY)
+            self.assertNotIn('private details', str(result))
+
+    def test_project_tool_delivery_is_scoped_to_requested_project(self):
+        identity = {**IDENTITY, 'projects': [*IDENTITY['projects'], {'projectId': OTHER_PROJECT_ID}]}
+        self.verify.return_value = identity
+        with patch('mediator.db.agent_tasks.list_tasks', return_value={'tasks': []}), \
+             patch('mediator.mcp.presence.pending_presence', return_value={'presenceRequests': []}) as pending:
+            self.call('tandem_list_tasks', projectId=PROJECT_ID)
+            self.assertEqual(str(pending.call_args.args[0]), PROJECT_ID)
+            pending.assert_called_once()
+
     def test_identity_is_derived_from_auth_and_other_projects_are_refused(self):
         for tool, function, arguments in (
             ('tandem_get_presence_requests', 'pending_presence', {}),

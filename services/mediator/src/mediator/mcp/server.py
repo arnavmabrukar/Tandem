@@ -9,6 +9,7 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver.exceptions import ToolError
 
 from mediator.db import agent_tasks, agent_plans
+from mediator.mcp.presence import deliver_presence_requests
 from mediator.schemas.plans import PlanProposal
 from mediator.schemas.agent_tasks import (
     AgentMessageType,
@@ -22,7 +23,11 @@ from mediator.schemas.agent_tasks import (
 logger = logging.getLogger(__name__)
 
 # This name identifies our server to MCP clients.
-mcp = MCPServer("Tandem")
+mcp = MCPServer("Tandem", instructions=(
+    "When a tool result includes a mediator presence request, call tandem_acknowledge_presence "
+    "with its projectId/checkId to reply in the project room. To participate while idle, "
+    "poll tandem_get_presence_requests periodically. Human room exchanges remain private."
+), middleware=[deliver_presence_requests])
 
 
 def _identity() -> dict[str, Any]:

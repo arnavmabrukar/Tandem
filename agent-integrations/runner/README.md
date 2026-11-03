@@ -15,6 +15,24 @@ also keeps the agent showing Online, including during long runs.
 
 ## Setup
 
+### Room presence only
+
+To reply “I'm online.” automatically in the project chat without executing tasks,
+set `TANDEM_AGENT_TOKEN` to that agent's manual token and run from this repository:
+
+```sh
+python3 agent-integrations/runner/tandem_runner.py --presence-only --project <project-id>
+```
+
+This mode needs only Python 3.11+. It uses no repository clone, coding CLI, or GitHub
+CLI, and never claims tasks, edits files, or pushes code. Keep it running on the agent's
+machine; Ctrl+C stops it. It receives pending checks and explicitly acknowledges each
+one using the same authenticated agent identity. The room refreshes every five seconds
+and the listener polls every 20 seconds by default. An OAuth connection by itself does
+not launch this listener. Existing task runners already handle presence checks.
+
+### Task execution
+
 You need Python 3.11+, git, the agent's CLI signed in (Claude Code by default), and the
 GitHub CLI signed in (`gh auth login`) to open pull requests.
 

@@ -58,7 +58,7 @@ export function ConnectAgentPage({ project }: { project: Project }) {
             </section>;
           })}
           {owner && <details className="agent-advanced"><summary>Advanced</summary><Button variant="ghost" size="sm" onClick={() => { add.reset(); setOpen(true); }}>Add agent manually</Button></details>}
-          <p className="small muted">Agents talk to the mediator through MCP. An online status does not mean an agent is working.</p>
+          <p className="small muted">Online means recent agent activity. Presence replies appear in this chat after the agent receives the check. Open Connect for room participation and automatic replies.</p>
         </aside>
       </div>
       {connectOpen && <AgentOAuthSetup project={project} onClose={() => setConnectOpen(false)} />}

@@ -85,6 +85,43 @@ class AgentToolIntegrationTests(unittest.TestCase):
         )
         self.agent, self.token = self.make_agent(self.owner, self.project, f"Agent {uuid4()}")
 
+    def test_presence_only_listener_posts_in_the_same_room(self):
+        import importlib.util
+        import io
+        from unittest.mock import patch
+        from uuid import UUID
+        from mediator.db.room import post_message, read_room
+        from mediator.schemas.room import RoomMessageRequest, RoomReply
+        spec = importlib.util.spec_from_file_location('presence_runner',
+            Path(__file__).resolve().parents[4] / 'agent-integrations/runner/tandem_runner.py')
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        with patch('mediator.db.room.generate_plan', return_value=RoomReply(
+                reply='Asking agents to reply here.', proposal=None, requestPresence=True)):
+            post_message(UUID(self.project), RoomMessageRequest(operationId=uuid4(), body='PRIVATE ping'),
+                         user_id=UUID(self.owner))
+
+        def transport(request, timeout):
+            # Keep the real runner JSON, bearer auth, MCP handlers and database;
+            # replace only the socket with the application's in-process transport.
+            response = self.http.post('/mcp/', headers=dict(request.header_items()), content=request.data)
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn('PRIVATE', response.text)
+            return io.BytesIO(response.content)
+
+        with patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': self.token}), \
+             patch.object(runner.urllib.request, 'urlopen', side_effect=transport), \
+             patch.object(runner, 'Repo') as repo:
+            for _ in range(2):
+                self.assertEqual(runner.main(['--presence-only', '--project', self.project, '--once',
+                                              '--url', 'http://127.0.0.1:8000/mcp/']), 0)
+            repo.assert_not_called()
+        room = read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges']
+        self.assertEqual(len(room), 2)
+        self.assertEqual(room[-1]['senderAgentId'], self.agent)
+        self.assertEqual(room[-1]['body'], "I'm online.")
+        self.assertIsNone(room[-1]['response'])
+
     def test_presence_requires_explicit_ack_and_keeps_human_exchange_private(self):
         from unittest.mock import patch
         from uuid import UUID
@@ -103,6 +140,13 @@ class AgentToolIntegrationTests(unittest.TestCase):
         self.assertEqual(visible['presenceRequests'], [{'id': check_id, 'message': "Who's online?"}])
         self.assertNotIn('PRIVATE', str(visible))
         self.assertNotIn(human['id'], str(visible))
+        # Ordinary task traffic also delivers the challenge, even if the IDE
+        # never calls the new room tools. It still must explicitly acknowledge.
+        task_result = self.call('tandem_list_tasks')
+        self.assertIn(check_id, str(task_result['content']))
+        self.assertIn('tandem_acknowledge_presence', str(task_result['content']))
+        self.assertNotIn('PRIVATE', str(task_result))
+        self.assertNotIn(human['id'], str(task_result))
         self.assertEqual(len(read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges']), 1)
         with ThreadPoolExecutor(max_workers=4) as pool:
             replies = list(pool.map(lambda _: self.ok('tandem_acknowledge_presence', checkId=check_id), range(4)))

@@ -93,6 +93,10 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
     },
   });
   const url = discovery.data;
+  const roomPrompt = `Use Tandem to reply to the mediator's presence check in project ${project.id}: call tandem_get_presence_requests, then call tandem_acknowledge_presence for every returned ID. This posts "I'm online." under your identity in the project chat. Refresh Tandem's MCP tools if either tool is missing. Check for new presence requests while you work.`;
+  // URLs and project IDs are server data; quote them as shell arguments even in copied examples.
+  const shellQuote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
+  const presenceCommand = url && `python3 agent-integrations/runner/tandem_runner.py --presence-only --project ${shellQuote(project.id)} --url ${shellQuote(url)}`;
   const snippet = url && (client === 'Claude Code'
     ? JSON.stringify({ mcpServers: { 'tandem-oauth': { type: 'http', url } } }, null, 2)
     : `# Tandem remote MCP connection. Authentication happens in your browser.\n[mcp_servers.tandem-oauth]\nurl = ${JSON.stringify(url)}`);
@@ -103,10 +107,10 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
     <ErrorNotice error={discovery.error} retry={() => void discovery.refetch()} />
     {url && (connections.data ? <>
       <p>Your IDE has permission to access this project.</p>
-      <p>Ask your agent to check the connection:</p>
-      <pre className="oauth-code">Call tandem_whoami from tandem-oauth.</pre>
-      <CopyButton text="Call tandem_whoami from tandem-oauth." label="Copy test prompt" />
-      <p className="small muted">This confirms access. Agent activity appears separately.</p>
+      <p>Ask your agent to join the room and reply to pending presence checks:</p>
+      <pre className="oauth-code">{roomPrompt}</pre>
+      <CopyButton text={roomPrompt} label="Copy room prompt" />
+      <p className="small muted">Replies appear in the project chat under the agent’s name.</p>
     </> : step === 1 ? <>
       <Field label="Your IDE agent">
         <select value={client} onChange={(e) => setClient(e.target.value)}>
@@ -140,6 +144,14 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
       <ErrorNotice error={connections.error} retry={() => void connections.refetch()} />
       <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
     </>)}
+    {url && <details className="agent-advanced">
+      <summary>Automatic room replies while idle</summary>
+      <p>A remote MCP connection alone does not run an idle IDE. Run this presence listener on the agent’s machine to receive checks and reply in the chat automatically.</p>
+      <p>From the Tandem repository, set <code>TANDEM_AGENT_TOKEN</code> to this agent’s manual token, then run:</p>
+      <pre className="oauth-code">{presenceCommand}</pre>
+      <CopyButton text={presenceCommand!} label="Copy listener command" />
+      <p className="small muted">Use the agent’s Manual token control in the roster. The listener checks every 20 seconds and only replies to presence checks; it does not claim tasks or edit code. Stop it with Ctrl+C.</p>
+    </details>}
     <div className="row between wrap oauth-step">
       <Link to="/mcp/connections" onClick={onClose}>Manage connections</Link>
       <Button variant="outline" onClick={() => { void queries.invalidateQueries({ queryKey: ['workspace'] }); onClose(); }}>Done</Button>

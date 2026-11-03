@@ -382,6 +382,10 @@ test('agent room renders standalone acknowledgements and groups presence counts'
 
 test('agent room sends private human messages and opens connection onboarding', async ({ page }) => {
   await connect(page);
+  await page.route('**/.well-known/oauth-protected-resource/mcp/', route => route.fulfill({
+    json: { resource: 'https://api.tandem.test/mcp/' },
+  }));
+  await page.route('**/api/mcp/oauth/connections', route => route.fulfill({ json: [] }));
   const exchanges: Record<string, unknown>[] = [];
   await page.route('**/api/projects/project-1/room', async route => {
     if (route.request().method() === 'POST') {
@@ -404,4 +408,7 @@ test('agent room sends private human messages and opens connection onboarding', 
   await page.screenshot({ path: '/tmp/tandem-agent-room-' + page.viewportSize()!.width + '.png', fullPage: true });
   await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByText('Automatic room replies while idle', { exact: true }).click();
+  await expect(page.getByRole('dialog').locator('pre').filter({ hasText: '--presence-only' })).toContainText('--project');
+  await expect(page.getByRole('button', { name: 'Copy listener command', exact: true })).toBeVisible();
 });

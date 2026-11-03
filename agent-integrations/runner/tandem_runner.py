@@ -9,6 +9,7 @@ unlocks the next task. See README.md in this folder.
 import argparse
 import json
 import logging
+import math
 import os
 import re
 import shlex
@@ -228,6 +229,18 @@ def _pull_request(repo: Repo, branch: str, base: str, task: dict, summary: str) 
     return created.stdout.strip().splitlines()[-1]
 
 
+def acknowledge_presence(tandem: Tandem):
+    """The client must receive each challenge before sending an explicit reply."""
+    pending = tandem.project_call('tandem_get_presence_requests')
+    for request in pending['presenceRequests']:
+        try:
+            tandem.project_call('tandem_acknowledge_presence', checkId=request['id'])
+        except ToolRefused:
+            # A check can expire between polling and replying. Continue to newer
+            # challenges; revoked credentials still stop the loop via TokenRejected.
+            log.info('Presence check no longer available')
+
+
 class Runner:
     def __init__(self, tandem: Tandem, repo: Repo, command: list[str], timeout: float,
                  open_pull_requests: bool = True):
@@ -307,11 +320,7 @@ class Runner:
         return {"message": f"{where}\n\nAgent summary:\n{summary}", "progress": where}
 
     def acknowledge_presence(self):
-        # Receive each challenge before acknowledging it: a heartbeat alone
-        # must never be substituted for an agent response.
-        pending = self.tandem.project_call("tandem_get_presence_requests")
-        for request in pending['presenceRequests']:
-            self.tandem.project_call("tandem_acknowledge_presence", checkId=request['id'])
+        acknowledge_presence(self.tandem)
 
     def _run_agent_with_keepalive(self, prompt: str) -> tuple[int, str]:
         """Keep the agent showing Online for the whole run, however long it takes."""
@@ -349,7 +358,8 @@ def validate_url(url: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run assigned Tandem tasks with a coding agent.")
     parser.add_argument("--project", required=True, help="Project ID, shown by tandem_whoami")
-    parser.add_argument("--repo", required=True, type=Path, help="A clone used only by this runner")
+    parser.add_argument("--repo", type=Path, help="A clone used only by this runner (required for task execution)")
+    parser.add_argument("--presence-only", action="store_true", help="Reply to room presence checks without running tasks")
     parser.add_argument("--agent", choices=sorted(AGENT_PRESETS), default="claude")
     parser.add_argument("--agent-command", help="Custom command; it receives the prompt on stdin")
     parser.add_argument("--base", help="Branch to start from (default: the repository's default)")
@@ -365,24 +375,33 @@ def main(argv: list[str] | None = None) -> int:
     if not token:
         parser.error("Set the TANDEM_AGENT_TOKEN environment variable")
     validate_url(args.url)
-    if not (args.repo / ".git").exists():
+    if not args.presence_only and args.repo is None:
+        parser.error('--repo is required unless --presence-only is set')
+    if not args.presence_only and not (args.repo / ".git").exists():
         parser.error(f"{args.repo} is not a git clone")
-    if args.poll > 90:
-        parser.error("--poll must be 90 seconds or less, or the agent will stop showing Online")
+    if not math.isfinite(args.poll) or not 0 < args.poll <= 90:
+        parser.error('--poll must be greater than zero and at most 90 seconds')
 
     tandem = Tandem(args.url, token, args.project)
-    runner = Runner(tandem, Repo(args.repo.resolve(), args.base), parse_command(args),
-                    args.timeout * 60, open_pull_requests=not args.no_pr)
+    # Presence mode never constructs a repository or launches a coding process.
+    runner = None if args.presence_only else Runner(
+        tandem, Repo(args.repo.resolve(), args.base), parse_command(args),
+        args.timeout * 60, open_pull_requests=not args.no_pr)
     try:
         identity = tandem.call("tandem_whoami")
         if args.project not in {project["projectId"] for project in identity["projects"]}:
             raise SystemExit("This agent token has no access to that project")
-        log.info("Running as %s. Press Ctrl+C to stop.", identity["name"])
+        log.info("%s as %s. Press Ctrl+C to stop.",
+                 'Listening for room presence checks' if args.presence_only else 'Running', identity['name'])
         while True:
             try:
-                worked = runner.run_once()
+                if args.presence_only:
+                    acknowledge_presence(tandem)
+                    worked = False
+                else:
+                    worked = runner.run_once()
             except (WorkBlocked, ToolRefused) as error:
-                log.warning("Could not check for work: %s", error)
+                log.warning("Could not check Tandem: %s", error)
                 worked = False
             if args.once:
                 return 0

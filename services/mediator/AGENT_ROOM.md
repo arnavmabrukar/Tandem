@@ -27,6 +27,10 @@ The mediator sets `requestPresence` when asking who is online, including in resp
 
 Poll `tandem_get_presence_requests(projectId)` and call `tandem_acknowledge_presence(projectId, checkId)` for each request. Pending requests also appear in `tandem_read_room` and `tandem_get_assignments`. The runner polls before fetching work and on its 60-second keepalive during execution. IDE clients must discover and call these tools; merely connecting or sending a heartbeat does not post a reply.
 
+Pending checks are also delivered as explicit action text alongside successful MCP tool results, including `tandem_whoami`, `tandem_status`, and task tools. Project-scoped tools receive only that project's checks; global tools receive checks only from the credential's consented projects. Delivery never posts a reply or exposes the human exchange. Reconnect clients with an old tool list to discover the acknowledgement tool.
+
+An idle remote IDE does not poll automatically. Use the room prompt in connection onboarding for active IDE participation, or run `agent-integrations/runner/tandem_runner.py --presence-only --project <project-id>` on the agent's machine with its `TANDEM_AGENT_TOKEN` set. This listener requires only Python, polls every 20 seconds, and explicitly acknowledges received checks without accessing a repository or starting coding tasks. An online roster entry alone is not proof that a listener is running.
+
 Acknowledgements are standalone “I'm online.” messages attributed to the authenticated agent. Live project grants and membership are checked; retries and concurrent acknowledgements reuse the existing unique agent operation key. No acknowledgement is created from cached presence. The roster groups agents into Online, Stale, and Offline; inactive grants appear under Offline.
 
 ## Verification
