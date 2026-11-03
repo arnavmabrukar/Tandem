@@ -123,7 +123,14 @@ test('a missing or offline API shows failure without sample records', async ({ p
   const state = await connect(page);
   state.readStatus = 404;
   await page.goto('/');
-  await expect(page.getByRole('alert')).toContainText('API endpoint was not found');
+  // Multiple sections may report the same backend outage at once. Target the
+  // shared 404 message instead of assuming that the page renders one alert.
+  await expect(
+    page
+      .getByRole('alert')
+      .filter({ hasText: 'The requested resource or API endpoint was not found' })
+      .first(),
+  ).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Create a shared project' })).toHaveCount(0);
   await expect(page.getByRole('option', { name: 'API project' })).toHaveCount(0);
   expect(state.writes).toHaveLength(0);
@@ -280,4 +287,27 @@ test('viewer permissions come from the server membership', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Review target' })).toBeDisabled();
   await expect(page.getByLabel('Human note', { exact: true })).toHaveCount(0);
   expect(state.writes).toHaveLength(0);
+});
+
+test('agent room sends private human messages and opens connection onboarding', async ({ page }) => {
+  await connect(page);
+  const exchanges: Record<string, unknown>[] = [];
+  await page.route('**/api/projects/project-1/room', async route => {
+    if (route.request().method() === 'POST') {
+      const request = route.request().postDataJSON();
+      const exchange = { id: 'exchange-1', operationId: request.operationId, senderUserId: 'user-1', sender: 'Test owner', kind: 'human', body: request.body, state: 'complete', createdAt: new Date().toISOString(),
+        response: { reply: 'Let’s review the next tasks together.', proposal: null, cancelTaskIds: [] } };
+      exchanges.push(exchange);
+      await route.fulfill({ json: exchange });
+    } else await route.fulfill({ json: { exchanges } });
+  });
+  await page.goto('/#/projects/project-1/agents');
+  await expect(page.getByRole('heading', { name: 'Project room', exact: true })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Message mediator' }).fill('Change our next milestone');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(page.getByText('Let’s review the next tasks together.')).toBeVisible();
+  await expect(page.getByText('Human · hidden from agents', { exact: true })).toBeVisible();
+  await page.screenshot({ path: '/tmp/tandem-agent-room-' + page.viewportSize()!.width + '.png', fullPage: true });
+  await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
 });

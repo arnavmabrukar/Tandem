@@ -1,3 +1,4 @@
+import { roomExchangeSchema } from '../types/room';
 import { z } from 'zod';
 import { planProposalSchema, planRevisionSchema, savedPlanSchema, approvedPlanSchema } from '../types/plans';
 import {
@@ -247,6 +248,11 @@ export function createApiClient({
     completeGitHub: (code, state) => request('/api/github/complete', z.object({login: z.string()}), {method: 'POST', body: {code, state}}),
     githubInstallations: (page) => request(`/api/github/installations?page=${page}`, z.object({items: z.array(z.object({id: z.number(), name: z.string()})), hasMore: z.boolean(), installUrl: z.string().url()})),
     githubRepositories: (id, page) => request(`/api/github/installations/${id}/repositories?page=${page}`, z.object({items: z.array(z.object({id: z.number(), name: z.string(), fullName: z.string(), defaultBranch: z.string(), description: z.string()})), hasMore: z.boolean()})),
+    saveRoomDraft: (projectId, exchangeId) => request(`${endpoints.projects}/${segment(projectId)}/room/${segment(exchangeId)}/draft`, planRevisionSchema, { method: 'POST' }),
+    readRoom: (projectId, signal) => request(`/api/projects/${segment(projectId)}/room`,
+      z.object({exchanges: z.array(roomExchangeSchema)}), {signal}),
+    postRoom: (projectId, body) => request(`/api/projects/${segment(projectId)}/room`,
+      roomExchangeSchema, {method: 'POST', body, operationId: body.operationId, timeoutMs: 135000}),
     chatPlan: (projectId, messages) => request(
       `${endpoints.projects}/${segment(projectId)}/plans/chat`,
       z.object({ reply: z.string(), proposal: planProposalSchema.nullable() }),
