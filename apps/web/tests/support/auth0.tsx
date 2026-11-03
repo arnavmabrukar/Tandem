@@ -25,8 +25,9 @@ export function Auth0Provider({
   const [loading, setLoading] = useState(location.search.includes('test-auth=delayed'));
   useEffect(() => {
     if (!loading) return;
-    const timer = setTimeout(() => setLoading(false), 1500);
-    return () => clearTimeout(timer);
+    const restore = () => setLoading(false);
+    window.addEventListener('test-auth-restored', restore);
+    return () => window.removeEventListener('test-auth-restored', restore);
   }, [loading]);
   return (
     <Context.Provider

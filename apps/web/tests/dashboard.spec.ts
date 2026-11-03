@@ -31,8 +31,12 @@ test('delayed session restoration preserves the task route across reload', async
   await page.goto('/?test-auth=delayed#/projects/project-1/tasks/task-1');
   await expect(page.getByRole('button', { name: 'Sign in with Auth0' })).toHaveCount(0);
   expect(state.reads).toBe(0);
+  await expect(page.getByRole('status')).toContainText('Checking your session');
+  await page.evaluate(() => window.dispatchEvent(new Event('test-auth-restored')));
   await expect(page.getByRole('heading', { name: 'Task returned by test API', exact: true })).toBeVisible();
   await page.reload();
+  await expect(page.getByRole('status')).toContainText('Checking your session');
+  await page.evaluate(() => window.dispatchEvent(new Event('test-auth-restored')));
   await expect(page.getByRole('button', { name: 'Sign in with Auth0' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Task returned by test API', exact: true })).toBeVisible();
   await expect(page).toHaveURL(/#\/projects\/project-1\/tasks\/task-1$/);
