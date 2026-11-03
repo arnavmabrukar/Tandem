@@ -236,6 +236,7 @@ class Runner:
 
     def next_task(self) -> dict | None:
         """Pick work to start or resume. Tasks waiting on a person are skipped."""
+        self.acknowledge_presence()
         tasks = self.tandem.project_call("tandem_get_assignments")["tasks"]
         for task in tasks:
             if task["status"] in ("claimed", "in_progress") or (task["status"] == "open" and task["claimable"]):
@@ -305,6 +306,13 @@ class Runner:
         where = f"Pull request: {url}" if url else f"Pushed to branch {branch}; no pull request was opened."
         return {"message": f"{where}\n\nAgent summary:\n{summary}", "progress": where}
 
+    def acknowledge_presence(self):
+        # Receive each challenge before acknowledging it: a heartbeat alone
+        # must never be substituted for an agent response.
+        pending = self.tandem.project_call("tandem_get_presence_requests")
+        for request in pending['presenceRequests']:
+            self.tandem.project_call("tandem_acknowledge_presence", checkId=request['id'])
+
     def _run_agent_with_keepalive(self, prompt: str) -> tuple[int, str]:
         """Keep the agent showing Online for the whole run, however long it takes."""
         finished = threading.Event()
@@ -312,7 +320,7 @@ class Runner:
         def keep_alive():
             while not finished.wait(KEEPALIVE_SECONDS):
                 try:
-                    self.tandem.call("tandem_status")
+                    self.acknowledge_presence()
                 except (WorkBlocked, ToolRefused, TokenRejected) as error:
                     log.info("Check-in failed: %s", type(error).__name__)
 

@@ -18,5 +18,6 @@ class RoomMessageRequest(BaseModel):
 
 
 class RoomReply(PlanChatResponse):
+    requestPresence: bool = False
     # Suggestions only; existing cancellation permissions/version checks still apply.
     cancelTaskIds: list[UUID] = Field(default_factory=list, max_length=20)

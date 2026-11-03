@@ -289,6 +289,27 @@ test('viewer permissions come from the server membership', async ({ page }) => {
   expect(state.writes).toHaveLength(0);
 });
 
+test('agent room renders standalone acknowledgements and groups presence counts', async ({ page }) => {
+  const state = await connect(page);
+  state.project.agents = (['online', 'stale', 'offline'] as const).map((presence, index) => ({
+    id: `agent-${index}`, name: `Agent ${presence}`, client: 'Codex', owner: 'Test owner',
+    machine: 'Laptop', capabilities: [], grant: 'active', presence, lastSeen: null, session: null,
+  }));
+  state.project.agents.push({ ...state.project.agents[0], id: 'revoked', name: 'Revoked agent', grant: 'revoked' });
+  await page.route('**/api/projects/project-1/room', route => route.fulfill({ json: { mediatorModel: 'muse-spark-1.3-contributor', exchanges: [{
+    id: 'ack-1', operationId: 'check-1', senderUserId: null, senderAgentId: 'agent-0', sender: 'Agent online', kind: 'agent',
+    body: "I'm online.", state: 'complete', createdAt: new Date().toISOString(), response: null,
+  }] } }));
+  await page.goto('/#/projects/project-1/agents');
+  await expect(page.getByText("I'm online.", { exact: true })).toBeVisible();
+  await expect(page.locator('.room-mediator')).toHaveCount(0);
+  await expect(page.getByRole('log').getByRole('img', { name: 'Codex', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Online · 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Stale · 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Offline · 2', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'offline agents' }).getByText('Revoked agent')).toBeVisible();
+});
+
 test('agent room sends private human messages and opens connection onboarding', async ({ page }) => {
   await connect(page);
   const exchanges: Record<string, unknown>[] = [];
@@ -296,10 +317,10 @@ test('agent room sends private human messages and opens connection onboarding', 
     if (route.request().method() === 'POST') {
       const request = route.request().postDataJSON();
       const exchange = { id: 'exchange-1', operationId: request.operationId, senderUserId: 'user-1', sender: 'Test owner', kind: 'human', body: request.body, state: 'complete', createdAt: new Date().toISOString(),
-        response: { reply: 'Let’s review the next tasks together.', proposal: null, cancelTaskIds: [] } };
+        response: { reply: 'Let’s review the next tasks together.', model: 'muse-spark-1.3-contributor', proposal: null, cancelTaskIds: [] } };
       exchanges.push(exchange);
       await route.fulfill({ json: exchange });
-    } else await route.fulfill({ json: { exchanges } });
+    } else await route.fulfill({ json: { exchanges, mediatorModel: 'muse-spark-1.3-contributor' } });
   });
   await page.goto('/#/projects/project-1/agents');
   await expect(page.getByRole('heading', { name: 'Project room', exact: true })).toBeVisible();
@@ -307,6 +328,9 @@ test('agent room sends private human messages and opens connection onboarding', 
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByText('Let’s review the next tasks together.')).toBeVisible();
   await expect(page.getByText('Human · hidden from agents', { exact: true })).toBeVisible();
+  await expect(page.getByRole('log').getByRole('img', { name: 'Human profile', exact: true })).toBeVisible();
+  await expect(page.locator('.room-mediator strong')).toHaveText('muse-spark-1.3-contributor');
+  await expect(page.locator('.room-mediator .mediator-tag')).toHaveText('Mediator');
   await page.screenshot({ path: '/tmp/tandem-agent-room-' + page.viewportSize()!.width + '.png', fullPage: true });
   await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();

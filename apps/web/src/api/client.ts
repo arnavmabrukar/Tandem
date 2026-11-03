@@ -1,4 +1,4 @@
-import { roomExchangeSchema } from '../types/room';
+import { roomExchangeSchema, roomSchema } from '../types/room';
 import { z } from 'zod';
 import { planProposalSchema, planRevisionSchema, savedPlanSchema, approvedPlanSchema } from '../types/plans';
 import {
@@ -254,7 +254,7 @@ export function createApiClient({
     githubRepositories: (id, page) => request(`/api/github/installations/${id}/repositories?page=${page}`, z.object({items: z.array(z.object({id: z.number(), name: z.string(), fullName: z.string(), defaultBranch: z.string(), description: z.string()})), hasMore: z.boolean()})),
     saveRoomDraft: (projectId, exchangeId) => request(`${endpoints.projects}/${segment(projectId)}/room/${segment(exchangeId)}/draft`, planRevisionSchema, { method: 'POST' }),
     readRoom: (projectId, signal) => request(`/api/projects/${segment(projectId)}/room`,
-      z.object({exchanges: z.array(roomExchangeSchema)}), {signal}),
+      roomSchema, {signal}),
     postRoom: (projectId, body) => request(`/api/projects/${segment(projectId)}/room`,
       roomExchangeSchema, {method: 'POST', body, operationId: body.operationId, timeoutMs: 135000}),
     chatPlan: (projectId, messages) => request(

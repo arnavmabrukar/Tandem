@@ -82,6 +82,20 @@ class ProjectScopeTests(ToolTestCase):
                 database.assert_not_called()
 
 
+class PresenceToolTests(ToolTestCase):
+    def test_identity_is_derived_from_auth_and_other_projects_are_refused(self):
+        for tool, function, arguments in (
+            ('tandem_get_presence_requests', 'pending_presence', {}),
+            ('tandem_acknowledge_presence', 'acknowledge_presence', {'checkId': str(uuid4())}),
+        ):
+            with self.subTest(tool=tool), patch(f'mediator.db.room.{function}', return_value={}) as database:
+                self.assert_refused(self.call(tool, projectId=OTHER_PROJECT_ID, **arguments))
+                database.assert_not_called()
+                result = self.call(tool, projectId=PROJECT_ID, **arguments)
+                self.assertFalse(result.get('isError'), result)
+                self.assertEqual(database.call_args.args[-1], IDENTITY)
+
+
 class PlanToolTests(ToolTestCase):
     def test_plan_tool_registration_identity_and_project_scope(self):
         names = {tool["name"] for tool in self.request("tools/list").json()["result"]["tools"]}

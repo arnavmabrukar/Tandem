@@ -1269,6 +1269,12 @@ td:first-child {
 .room-mediator { margin-top: 8px; }
 .room-message strong { font-size: 14px; }
 .room-message time { font-size: 11px; color: #64748b; }
+.room-avatar { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 50%; background: #fff; border: 1px solid #dfe7ed; color: #64748b; }
+.room-avatar img { width: 19px; height: 19px; }
+.room-avatar-human { background: #e8edf1; }
+.room-avatar-mediator { background: #eef4ff; border-color: #d7e5fd; }
+.room-model-name { min-width: 0; overflow-wrap: anywhere; }
+.mediator-tag { display: inline-flex; border-radius: 5px; padding: 2px 6px; background: #e7efff; color: #355da8; font-size: 10px; font-weight: 600; line-height: 1.5; }
 .room-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
 .room-change { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid #dfe7ed; border-radius: 10px; margin: 8px 0; }
 .room-claims { margin-top: 20px; }
