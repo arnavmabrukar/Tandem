@@ -50,7 +50,7 @@ def start(user_id: UUID) -> dict:
     })}
 
 
-def api(token: str, path: str):
+def api(token: str, path: str, not_found: str | None = None):
     # Paths are constructed by this module; never follow arbitrary pagination URLs.
     try:
         with httpx.Client(timeout=20, follow_redirects=False) as client:
@@ -60,6 +60,9 @@ def api(token: str, path: str):
             })
         if response.status_code == 401:
             raise HTTPException(403, "Reconnect GitHub; your authorization expired or was revoked")
+        # Only for lookups made after access is confirmed, when a 404 means the thing is absent.
+        if response.status_code == 404 and not_found:
+            raise HTTPException(409, not_found)
         if response.status_code in (403, 404):
             raise HTTPException(403, "GitHub access unavailable. Check repository access and API rate limits")
         response.raise_for_status()
@@ -158,5 +161,7 @@ def verify_repository(user_id: UUID, installation_id: int, repository_id: int, b
             raise HTTPException(403, "Repository is not accessible through this GitHub installation")
         page += 1
     full_name = repo["full_name"]
-    api(token, f"/repos/{quote(full_name, safe='/')}/branches/{quote(branch, safe='')}")
+    api(token, f"/repos/{quote(full_name, safe='/')}/branches/{quote(branch, safe='')}",
+        not_found=f"{full_name} has no branch named {branch}. "
+                  "If the repository is empty, push a first commit and try again.")
     return repo

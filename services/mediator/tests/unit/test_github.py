@@ -78,4 +78,33 @@ class GitHubTests(unittest.TestCase):
             {'name':'repo','full_name':'owner/repo'}, {'repositories':[{'id':456}], 'total_count':1}, {}
         ]) as api:
             github.verify_repository(uuid4(),123,456,'feature/new')
-            api.assert_called_with('secret','/repos/owner/repo/branches/feature%2Fnew')
+            self.assertEqual(api.call_args.args, ('secret','/repos/owner/repo/branches/feature%2Fnew'))
+
+    def github_replies(self, *statuses):
+        """Make GitHub answer each request in turn with these statuses."""
+        replies = [MagicMock(status_code=status) for status in statuses]
+        replies[0].json.return_value = {'name': 'repo', 'full_name': 'owner/repo'}
+        replies[1].json.return_value = {'repositories': [{'id': 456}], 'total_count': 1}
+        client = MagicMock()
+        client.__enter__.return_value.get.side_effect = replies
+        return patch.object(github.httpx, 'Client', return_value=client)
+
+    def test_missing_branch_names_the_repository_and_the_fix(self):
+        with patch.object(github, 'user_token', return_value='secret'), self.github_replies(200, 200, 404):
+            with self.assertRaises(HTTPException) as error:
+                github.verify_repository(uuid4(), 123, 456, 'main')
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertIn('owner/repo has no branch named main', error.exception.detail)
+        self.assertIn('push a first commit', error.exception.detail)
+
+    def test_repository_lookup_404_is_still_an_access_failure(self):
+        with patch.object(github, 'user_token', return_value='secret'), self.github_replies(404, 200):
+            with self.assertRaises(HTTPException) as error:
+                github.verify_repository(uuid4(), 123, 456, 'main')
+        self.assertEqual(error.exception.status_code, 403)
+
+    def test_branch_lookup_403_is_still_an_access_failure(self):
+        with patch.object(github, 'user_token', return_value='secret'), self.github_replies(200, 200, 403):
+            with self.assertRaises(HTTPException) as error:
+                github.verify_repository(uuid4(), 123, 456, 'main')
+        self.assertEqual(error.exception.status_code, 403)
