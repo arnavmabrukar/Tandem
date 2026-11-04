@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -65,7 +66,6 @@ class RunnerGitTests(unittest.TestCase):
             self.assertIn('Resolve the conflicted files', prompt)
             self.assertTrue(self.repo.exists('MERGE_HEAD'))
             (self.worker / 'shared.txt').write_text('agent change\nteammate change\n')
-            self.commit(self.worker, 'Resolve integration conflict')
             return 0, 'Combined both changes and checked the result.'
 
         with patch.object(worker, '_run_agent_with_keepalive', side_effect=resolve) as agent:
@@ -94,7 +94,6 @@ class RunnerGitTests(unittest.TestCase):
         def agent(prompt):
             if 'Integration step:' in prompt:
                 (self.worker / 'shared.txt').write_text('agent change\nteammate change\n')
-                self.commit(self.worker, 'Resolve conflict')
             else:
                 (self.worker / 'shared.txt').write_text('agent change\n')
                 self.commit(self.worker, 'Task implementation')
@@ -120,7 +119,6 @@ class RunnerGitTests(unittest.TestCase):
         def agent(prompt):
             if 'Integration step:' in prompt:
                 (self.worker / 'shared.txt').write_text('agent change\nteammate change\n')
-                self.commit(self.worker, 'Resolve review conflict')
             else:
                 self.assertIn('Review update:', prompt)
             return 0, 'Validated the combined result.'
@@ -191,3 +189,71 @@ class RunnerGitTests(unittest.TestCase):
             with patch.object(runner.subprocess, 'run', return_value=Mock(
                     returncode=0, stdout=json.dumps({'state': state, 'mergeable': 'CONFLICTING'}))):
                 self.assertEqual(worker.next_task(), expected)
+
+    def test_runner_verifies_commits_and_pushes_uncommitted_agent_edits(self):
+        command = [sys.executable, '-c', "from pathlib import Path; assert Path('shared.txt').read_text() == 'finished\\n'"]
+        worker = runner.Runner(Mock(), self.repo, [], 60, open_pull_requests=False, verify_commands=[command])
+        def edit(prompt):
+            self.assertIn('Do not commit, push', prompt)
+            (self.worker / 'shared.txt').write_text('finished\n')
+            return 0, 'Implementation ready for runner verification.'
+        with patch.object(worker, '_run_agent_with_keepalive', side_effect=edit):
+            result = worker._execute(self.task)
+        self.assertIn('Passed:', result['message'])
+        self.assertIn('Commit:', result['message'])
+        self.assertFalse(self.repo.dirty())
+        self.assertEqual(self.repo.git('rev-parse', 'HEAD'), self.repo.git('rev-parse', f'origin/{runner.branch_name(self.task)}'))
+
+    def test_failed_verification_never_commits_or_pushes_and_preserves_edits(self):
+        before = self.repo.git('rev-parse', 'HEAD')
+        worker = runner.Runner(Mock(), self.repo, [], 60, open_pull_requests=False,
+                               verify_commands=[[sys.executable, '-c', 'raise SystemExit(1)']])
+        def edit(prompt):
+            (self.worker / 'shared.txt').write_text('unfinished\n')
+            return 0, 'Tests passed.'  # The runner must verify this claim itself.
+        with patch.object(worker, '_run_agent_with_keepalive', side_effect=edit):
+            with self.assertRaisesRegex(runner.WorkBlocked, 'Verification failed'):
+                worker._execute(self.task)
+        self.assertEqual(self.repo.git('rev-parse', 'HEAD'), before)
+        self.assertTrue(self.repo.dirty())
+        self.assertFalse(self.repo.exists(f'origin/{runner.branch_name(self.task)}'))
+
+    def test_resume_uses_saved_changes_only_on_the_matching_task_branch(self):
+        branch = runner.branch_name(self.task)
+        self.repo.prepare(branch)
+        (self.worker / 'shared.txt').write_text('saved work\n')
+        worker = runner.Runner(Mock(), self.repo, [], 60, open_pull_requests=False, resume_task=self.task['id'])
+        def resume(prompt):
+            self.assertIn('Resume the saved changes', prompt)
+            self.assertEqual((self.worker / 'shared.txt').read_text(), 'saved work\n')
+            return 0, 'Saved implementation checked.'
+        with patch.object(worker, '_run_agent_with_keepalive', side_effect=resume):
+            worker._execute(self.task)
+        self.assertFalse(self.repo.dirty())
+        other = {**self.task, 'id': 'different-task'}
+        (self.worker / 'shared.txt').write_text('keep this\n')
+        with self.assertRaisesRegex(runner.WorkBlocked, 'uncommitted changes'):
+            self.repo.prepare(runner.branch_name(other), resume=True)
+        self.assertEqual((self.worker / 'shared.txt').read_text(), 'keep this\n')
+
+    def test_detected_npm_checks_run_with_ci_and_without_tandem_token(self):
+        self.repo.prepare(runner.branch_name(self.task))
+        (self.worker / 'package.json').write_text(json.dumps({'scripts': {'test': 'test-tool', 'build': 'build-tool'}}))
+        actual_run, checks = subprocess.run, []
+        def run(command, **kwargs):
+            if command[0] == 'npm':
+                checks.append(command)
+                self.assertEqual(kwargs['env']['CI'], 'true')
+                self.assertNotIn('TANDEM_AGENT_TOKEN', kwargs['env'])
+                return Mock(returncode=0)
+            return actual_run(command, **kwargs)
+        with patch.object(runner.subprocess, 'run', side_effect=run), patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'secret'}):
+            runner.Runner(Mock(), self.repo, [], 60)._finalize(self.task, runner.branch_name(self.task))
+        self.assertEqual(checks, [['npm', 'run', 'test'], ['npm', 'run', 'build']])
+
+    def test_human_status_change_stops_publication(self):
+        worker = runner.Runner(Mock(), self.repo, [], 60)
+        worker.active_task = self.task['id']
+        worker.tandem.project_call.return_value = {'version': 2, 'status': 'blocked'}
+        with self.assertRaisesRegex(runner.ToolRefused, 'no longer in progress'):
+            worker._phase('Pushing verified task branch.')

@@ -592,6 +592,9 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(install.locator('pre')).toContainText('--agent codex');
   await expect(install.locator('pre')).toContainText('--prompt-token');
   await expect(install.locator('pre')).not.toContainText('git clone');
+  await worker.getByText('Verification (optional)', { exact: true }).click();
+  await worker.getByLabel('Verification commands', { exact: true }).fill('npm run test:e2e\nnpm run build');
+  await expect(install.locator('pre')).toContainText("--verify-command 'npm run test:e2e' --verify-command 'npm run build'");
   await page.getByLabel('Your agent', { exact: true }).selectOption('Claude Code');
   await expect(worker.getByLabel('Worker engine')).toHaveValue('claude');
   await expect(cliSetup).toHaveCount(0);
@@ -610,7 +613,9 @@ test('worker onboarding generates isolated setup and continuous commands for eac
 });
 
 test('agent room sends private human messages and opens connection onboarding', async ({ page }) => {
-  await connect(page);
+  const state = await connect(page);
+  state.project.tasks[0].status = 'in_progress';
+  state.project.tasks[0].progress = 'Verifying: npm run build';
   await page.route('**/.well-known/oauth-protected-resource/mcp/', route => route.fulfill({
     json: { resource: 'https://api.tandem.test/mcp/' },
   }));
@@ -627,6 +632,12 @@ test('agent room sends private human messages and opens connection onboarding', 
   });
   await page.goto('/#/projects/project-1/agents');
   await expect(page.getByRole('heading', { name: 'Project room', exact: true })).toBeVisible();
+  const work = page.getByRole('region', { name: 'Recorded work status' });
+  await expect(work).toContainText('Verifying: npm run build');
+  await work.locator('summary').click();
+  await expect(work.getByRole('link', { name: /Task returned by test API/ })).toBeVisible();
+  await expect(work.getByRole('link', { name: /Task returned by test API/ })).toHaveAttribute('href', '#/projects/project-1/tasks/task-1');
+  await work.locator('summary').click();
   await page.getByRole('textbox', { name: 'Message mediator' }).fill('Change our next milestone');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByText('Let’s review the next tasks together.')).toBeVisible();

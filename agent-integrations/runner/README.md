@@ -5,7 +5,9 @@ This small script is that prompt. It polls Tandem, and for each task assigned to
 
 1. Claims the task and moves it to `in_progress`.
 2. Checks out a `tandem/...` branch from the repository's default branch.
-3. Runs a headless agent, giving it the task's contract and thread.
+3. Runs a headless agent, giving it the task's contract and thread. The agent leaves
+   completed edits for the runner to verify and commit, so sandbox restrictions on
+   Git metadata do not stop publication.
 4. Merges the latest base branch into the task branch, asks the agent to resolve
    conflicts and validate the combined changes, then pushes and opens a pull request.
 5. Moves the task to `in_review` and posts the pull request link in its thread.
@@ -13,6 +15,31 @@ This small script is that prompt. It polls Tandem, and for each task assigned to
 If anything fails, the task moves to `blocked` with the reason. A person merges the pull
 request and clicks **Accept work**, which lets the tasks that depend on it start. Polling
 also keeps the agent showing Online, including during long runs.
+
+The runner records Implementing, Verifying, Committing and Pushing progress in the
+task. The project room displays that recorded progress separately from Online status.
+Status replies do not invent completion estimates.
+
+### Verification and recovery
+
+Before committing, the runner checks Git whitespace and conflict markers, then runs
+root `package.json` scripts named `typecheck`, `lint`, `test` and `build` when present,
+with `CI=true`. It uses the machine's installed tools and keeps checking in while
+checks run. The runner executes these project commands locally, outside the coding
+agent's sandbox, just as it runs Git. Use only repositories you intend to run locally.
+For browser checks, Python projects or other commands, use **Verification (optional)**
+in worker setup, or repeat `--verify-command 'command arguments'` on the command line.
+Explicit commands replace automatic npm checks. Commands are parsed as arguments,
+not shell scripts; use a project script for shell operators. A failed check prevents
+commit and push and preserves edits. When no commands are detected, the result
+explicitly reports Git checks only; it does not claim project tests passed.
+
+To recover saved edits from an older runner that blocked on committing, stop that
+runner, download the updated script, and append `--resume-task <task-id>` to its
+startup command. The task must still be assigned to the authenticated agent and
+blocked or active. Only dirty files on that task's own branch may be resumed. The
+agent inspects the saved work, then the runner verifies, commits and pushes it. A
+recovery attempt runs once; failed work is not retried indefinitely.
 
 ## Setup
 
@@ -112,6 +139,8 @@ stop it. Run one per agent, each with its own token and clone.
 | `--repo` | | Existing dedicated clone, as an alternative to `--repository` |
 | `--agent` | `claude` | `claude` or `codex` |
 | `--agent-command` | | Custom command; it receives the prompt on stdin |
+| `--verify-command` | Detected npm scripts | Local check before commit/push; repeat for multiple checks |
+| `--resume-task` | | Recover saved edits on this assigned blocked/active task's branch |
 | `--base` | Repository default | Branch to start from |
 | `--timeout` | `60` | Minutes allowed per task |
 | `--poll` | `20` | Seconds between checks, at most 90 |

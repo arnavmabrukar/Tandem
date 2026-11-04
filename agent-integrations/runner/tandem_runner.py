@@ -142,9 +142,13 @@ class Repo:
                               cwd=self.path, capture_output=True, env=_agent_env())
         return done.returncode == 0
 
-    def prepare(self, branch: str) -> str:
+    def prepare(self, branch: str, resume: bool = False) -> str:
         """Check out the task's branch, continuing earlier work if there is any."""
         if self.dirty():
+            if resume and self.git('branch', '--show-current') == branch:
+                # Explicit recovery may use only the saved files on this task's
+                # branch. Never stash or reset another task's unfinished work.
+                return self.base_branch()
             raise WorkBlocked("The runner's clone has uncommitted changes. Clean it, then send "
                               "this task back to the agent.")
         self.git("fetch", "origin", "--prune")
@@ -197,8 +201,9 @@ def build_prompt(task: dict, branch: str) -> str:
         "",
         "Rules:",
         "- Do only this task and meet every acceptance criterion. Run relevant tests if any exist.",
-        "- Commit all of your work to the current branch before finishing.",
-        "- Do not push, switch branches, merge, or open a pull request. Tandem's runner does that.",
+        "- Leave completed edits in the working tree. The runner verifies, stages, commits, and pushes them.",
+        "- Do not commit, push, switch branches, merge, or open a pull request.",
+        "- If a check fails or cannot run, report it accurately; never claim it passed.",
         "- Never read, print, or commit credentials or environment files.",
         "- Finish with a short summary of what you changed and how you checked it.",
     ]
@@ -253,14 +258,22 @@ def acknowledge_presence(tandem: Tandem):
 
 class Runner:
     def __init__(self, tandem: Tandem, repo: Repo, command: list[str], timeout: float,
-                 open_pull_requests: bool = True):
+                 open_pull_requests: bool = True, verify_commands: list[list[str]] | None = None,
+                 resume_task: str | None = None):
         self.tandem, self.repo, self.command, self.timeout = tandem, repo, command, timeout
         self.open_pull_requests = open_pull_requests
+        self.verify_commands, self.resume_task = verify_commands, resume_task
+        self.active_task = None
 
     def next_task(self) -> dict | None:
         """Pick work to start or resume. Tasks waiting on a person are skipped."""
         self.acknowledge_presence()
         tasks = self.tandem.project_call("tandem_get_assignments")["tasks"]
+        if self.resume_task:
+            task = next((task for task in tasks if task['id'] == self.resume_task), None)
+            if task is None or task['status'] not in ('blocked', 'claimed', 'in_progress'):
+                raise WorkBlocked('Resume requires a blocked or active task assigned to this agent.')
+            return task
         for task in tasks:
             if task["status"] in ("claimed", "in_progress") or (task["status"] == "open" and task["claimable"]):
                 return task
@@ -301,7 +314,18 @@ class Runner:
         except ToolRefused as error:
             # Usually a person released or reassigned the task while it ran.
             log.warning("Stopped task %s: %s", task["id"], error)
+        finally:
+            # Recovery is a single explicit attempt, not an endless blocked-task loop.
+            self.resume_task = None
         return True
+
+    def _phase(self, message: str) -> None:
+        log.info('%s', message)
+        if self.active_task:
+            task = self.tandem.project_call('tandem_get_task', taskId=self.active_task)
+            if task['status'] != 'in_progress':
+                raise ToolRefused('Task is no longer in progress; stopping publication.')
+            self._update(self.active_task, task['version'], progress=message)
 
     def work(self, task: dict) -> None:
         task_id, version = task["id"], task["version"]
@@ -314,6 +338,7 @@ class Runner:
                 version = self._update(task_id, version, status="in_progress",
                                        progress="The runner is preparing the task.")
             detail = self.tandem.project_call("tandem_get_task", taskId=task_id)
+            self.active_task = task_id
             result = self._execute(detail, review_refresh=task['status'] == 'in_review')
         except WorkBlocked as error:
             log.warning("Task %s is blocked: %s", task_id, error)
@@ -321,6 +346,8 @@ class Runner:
             self._post(task_id, "status", f"The runner stopped: {error}")
             self._update(task_id, detail["version"], status="blocked", progress=str(error)[:PROGRESS_LIMIT])
             return
+        finally:
+            self.active_task = None
         self._post(task_id, "result", result["message"])
         detail = self.tandem.project_call("tandem_get_task", taskId=task_id)
         self._update(task_id, detail["version"], status="in_review", progress=result["progress"][:PROGRESS_LIMIT])
@@ -328,34 +355,86 @@ class Runner:
 
     def _execute(self, task: dict, review_refresh: bool = False) -> dict:
         branch = branch_name(task)
-        base = self.repo.prepare(branch)
-        self._integrate_base(task, branch, base)
+        recovering = self.resume_task == task['id']
+        base = self.repo.prepare(branch, resume=recovering)
+        if not self.repo.dirty():
+            self._integrate_base(task, branch, base)
         before = self.repo.git("rev-parse", "HEAD")
+        self._phase('Implementing task changes.' if not recovering else 'Resuming saved task changes.')
         if review_refresh:
             # The implementation was already submitted; only refresh and validate it.
-            prompt = build_prompt(task, branch) + '\nReview update: preserve the submitted implementation, validate its integration with the base branch, and run relevant tests. Commit only if further fixes are needed.'
+            prompt = build_prompt(task, branch) + '\nReview update: preserve the submitted implementation, validate its integration with the base branch, and run relevant tests. Leave any fixes for the runner to commit.'
         else:
             prompt = build_prompt(task, branch)
+        if recovering:
+            prompt += '\nResume the saved changes already in this task branch. Inspect and finish them; do not discard or redo completed work.'
         code, output = self._run_agent_with_keepalive(prompt)
         summary = output.strip()[-4000:]
         if code != 0:
             raise WorkBlocked(f"The agent exited with code {code}. Last output:\n{summary[-1500:]}")
-        if self.repo.dirty():
-            raise WorkBlocked("The agent left uncommitted changes in the clone. Last output:\n"
-                              + summary[-1500:])
+        verification = self._finalize(task, branch)
         if not review_refresh and self.repo.git("rev-parse", "HEAD") == before:
-            raise WorkBlocked("The agent finished without committing anything. Last output:\n"
+            raise WorkBlocked("The agent finished without any task changes to commit. Last output:\n"
                               + summary[-1500:])
         # Fetch again because another agent may have finished while this one worked.
-        self._integrate_base(task, branch, base)
+        integration_checks = self._integrate_base(task, branch, base)
+        verification = integration_checks or verification
         if self.repo.git('branch', '--show-current') != branch:
             raise WorkBlocked('The agent switched away from its assigned task branch.')
+        self._phase('Pushing verified task branch.')
+        # Recheck the live claim immediately before publication, including after
+        # a long verification run. A reassignment must stop this worker's push.
         self.repo.git("push", "-u", "origin", branch)
-        url = _pull_request(self.repo, branch, base, task, summary) if self.open_pull_requests else None
+        url = _pull_request(self.repo, branch, base, task,
+                            f'Runner verification:\n{verification}\n\nAgent summary:\n{summary}') if self.open_pull_requests else None
         where = f"Pull request: {url}" if url else f"Pushed to branch {branch}; no pull request was opened."
-        return {"message": f"{where}\n\nAgent summary:\n{summary}", "progress": where}
+        commit = self.repo.git('rev-parse', 'HEAD')
+        return {"message": f"{where}\nCommit: {commit}\n\nRunner verification:\n{verification}\n\nAgent summary:\n{summary}", "progress": where}
 
-    def _integrate_base(self, task: dict, branch: str, base: str) -> None:
+    def _finalize(self, task: dict, branch: str) -> str:
+        """The trusted local runner owns tests and Git writes, outside the model sandbox."""
+        if self.repo.git('branch', '--show-current') != branch:
+            raise WorkBlocked('The agent switched away from its assigned task branch.')
+        self._phase('Verifying task changes.')
+        self.repo.git('diff', '--check')
+        self.repo.git('diff', '--cached', '--check')
+        commands = self.verify_commands
+        if commands is None:
+            package = self.repo.path / 'package.json'
+            try:
+                scripts = json.loads(package.read_text()).get('scripts', {}) if package.exists() else {}
+            except (OSError, ValueError):
+                raise WorkBlocked('Could not read package.json for verification.') from None
+            commands = [['npm', 'run', name] for name in ('typecheck', 'lint', 'test', 'build') if name in scripts]
+        results = ['Git whitespace and conflict-marker checks passed.']
+        for command in commands:
+            name = shlex.join(command)
+            self._phase(f'Verifying: {name}')
+            try:
+                done = self._with_keepalive(lambda: subprocess.run(
+                    command, cwd=self.repo.path, capture_output=True, text=True,
+                    encoding='utf-8', errors='replace', timeout=self.timeout,
+                    env={**_agent_env(), 'CI': 'true', 'GIT_TERMINAL_PROMPT': '0'}))
+            except (OSError, subprocess.TimeoutExpired):
+                raise WorkBlocked(f'Verification could not run: {name}. Changes were preserved; nothing was pushed.') from None
+            if done.returncode:
+                raise WorkBlocked(f'Verification failed: {name}. Nothing was pushed.\n'
+                                  + ((done.stdout or '') + (done.stderr or ''))[-1500:])
+            results.append(f'Passed: {name}')
+        if not commands:
+            results.append('No project test commands detected. Only Git checks ran; use --verify-command to configure tests.')
+        if self.repo.git('branch', '--show-current') != branch:
+            raise WorkBlocked('Verification switched away from the task branch.')
+        if self.repo.dirty() or self.repo.exists('MERGE_HEAD'):
+            self._phase('Committing verified task changes.')
+            self.repo.git('add', '-A', '--', '.')
+            self.repo.git('diff', '--cached', '--check')
+            self.repo.git('commit', '-m', f"Tandem: {task['title']}")
+        if self.repo.dirty():
+            raise WorkBlocked('The repository is still dirty after commit. Nothing was pushed.')
+        return '\n'.join(results)
+
+    def _integrate_base(self, task: dict, branch: str, base: str) -> str | None:
         """Merge teammates' published work into this task, without rewriting history."""
         if self.repo.git('branch', '--show-current') != branch:
             raise WorkBlocked('The agent switched away from its assigned task branch.')
@@ -371,21 +450,31 @@ class Runner:
         instruction = (
             'The runner has started merging the latest base branch into your task branch. '
             'Resolve the conflicted files, preserve both the task requirements and teammates\' changes, '
-            'stage the resolutions and commit the merge. Do not abort the merge or discard either side wholesale. '
+            'leave resolved files for the runner to stage and commit. Do not abort the merge or discard either side wholesale. '
             f'Conflicted files:\n{conflicts}' if merging else
             'The runner merged the latest base branch into your task branch. Validate the combined changes, '
-            'run relevant tests, and commit any fixes needed.'
+            'run relevant tests, and leave any fixes for the runner to commit.'
         )
         code, output = self._run_agent_with_keepalive(build_prompt(task, branch) + '\n\nIntegration step:\n' + instruction)
-        if (code or self.repo.dirty() or self.repo.exists('MERGE_HEAD')
+        if code:
+            raise WorkBlocked('The agent could not resolve integration. Work was preserved for inspection.\n' + output.strip()[-1500:])
+        try:
+            verification = self._finalize(task, branch)
+        except WorkBlocked as error:
+            raise WorkBlocked(f'Integration verification failed; work was preserved for inspection. {error}') from None
+        if (self.repo.dirty() or self.repo.exists('MERGE_HEAD')
                 or self.repo.git('branch', '--show-current') != branch or not self.repo.contains(target)):
             raise WorkBlocked('The agent could not finish and validate integration with the base branch. '
                               'Work was preserved for inspection. Last output:\n' + output.strip()[-1500:])
+        return verification
 
     def acknowledge_presence(self):
         acknowledge_presence(self.tandem)
 
     def _run_agent_with_keepalive(self, prompt: str) -> tuple[int, str]:
+        return self._with_keepalive(lambda: run_agent(self.command, prompt, self.repo.path, self.timeout))
+
+    def _with_keepalive(self, action):
         """Keep the agent showing Online for the whole run, however long it takes."""
         finished = threading.Event()
 
@@ -399,7 +488,7 @@ class Runner:
         thread = threading.Thread(target=keep_alive, daemon=True)
         thread.start()
         try:
-            return run_agent(self.command, prompt, self.repo.path, self.timeout)
+            return action()
         finally:
             finished.set()
             thread.join(timeout=5)
@@ -418,12 +507,12 @@ def validate_url(url: str) -> None:
         raise SystemExit("--url must use HTTPS, or HTTP to localhost")
 
 
-def check_worker(repo: Repo, command: list[str], open_pull_requests: bool) -> None:
+def check_worker(repo: Repo, command: list[str], open_pull_requests: bool, allow_dirty: bool = False) -> None:
     """Fail setup before claiming tasks; these checks never edit the checkout."""
     for executable in ['git', command[0], *(['gh'] if open_pull_requests else [])]:
         if shutil.which(executable) is None:
             raise WorkBlocked(f"Install and sign in to {executable}, then run setup again.")
-    if repo.dirty():
+    if repo.dirty() and not allow_dirty:
         raise WorkBlocked('Use a clean, dedicated clone for this worker, not your active checkout.')
     if not repo.git('remote', 'get-url', 'origin'):
         raise WorkBlocked('The worker clone needs an origin remote.')
@@ -525,6 +614,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--prompt-token', action='store_true', help='Ask for a hidden token instead of placing it in shell history')
     parser.add_argument('--check', action='store_true', help='Check identity and worker prerequisites without claiming or executing tasks')
     parser.add_argument('--agent-id', help='Require this agent identity, preventing a token for another worker from being used')
+    parser.add_argument('--verify-command', action='append', help='Verification command to run before commit/push; repeat for multiple checks (default: detected npm scripts)')
+    parser.add_argument('--resume-task', help='Explicitly resume saved changes for this assigned blocked or active task ID')
     parser.add_argument("--agent", choices=sorted(AGENT_PRESETS), default="claude")
     parser.add_argument("--agent-command", help="Custom command; it receives the prompt on stdin")
     parser.add_argument("--base", help="Branch to start from (default: the repository's default)")
@@ -556,6 +647,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error('--timeout must be a positive number of minutes')
     if not parse_command(args):
         parser.error('--agent-command cannot be empty')
+    try:
+        verification_commands = [shlex.split(command) for command in args.verify_command] if args.verify_command else None
+    except ValueError:
+        parser.error('--verify-command has unmatched quotes')
+    if verification_commands and any(not command for command in verification_commands):
+        parser.error('--verify-command cannot be empty')
+    if args.presence_only and args.resume_task:
+        parser.error('--resume-task cannot be used with --presence-only')
 
     tandem = Tandem(args.url, token, args.project)
     runner = None
@@ -569,9 +668,11 @@ def main(argv: list[str] | None = None) -> int:
         if not args.presence_only:
             path = managed_clone(args.repository, args.project, identity['agentId']) if args.repository else args.repo.resolve()
             runner = Runner(tandem, Repo(path, args.base), parse_command(args),
-                            args.timeout * 60, open_pull_requests=not args.no_pr)
+                            args.timeout * 60, open_pull_requests=not args.no_pr,
+                            verify_commands=verification_commands,
+                            resume_task=args.resume_task)
         if runner is not None:
-            check_worker(runner.repo, runner.command, runner.open_pull_requests)
+            check_worker(runner.repo, runner.command, runner.open_pull_requests, allow_dirty=bool(args.resume_task))
         if args.check:
             log.info('Setup checks passed for %s. No task was claimed or executed. Remove --check to keep working.', identity['name'])
             return 0

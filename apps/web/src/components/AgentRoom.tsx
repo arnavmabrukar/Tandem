@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { ArrowUp, Sparkles, LockKeyhole, Trash2 } from 'lucide-react';
 import { useSession } from '../auth/session';
@@ -7,7 +8,7 @@ import { useAction } from '../hooks/useWorkspace';
 import { roleFor, type Project } from '../types/domain';
 import type { Room, RoomExchange } from '../types/room';
 import { Button } from './ui/button';
-import { ErrorNotice, Timestamp } from './common';
+import { Badge, ErrorNotice, Timestamp } from './common';
 import { Modal } from './ui/dialog';
 import { DraftCard } from './PlanChat';
 import { MediatorIdentity, RoomAvatar } from './RoomIdentity';
@@ -95,6 +96,7 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
     onSettled: () => { void client.invalidateQueries({ queryKey: key }); },
   });
   const items = room.data?.exchanges ?? [];
+  const work = project.tasks.filter(task => ['claimed', 'in_progress', 'blocked', 'conflict', 'in_review'].includes(task.status));
   useEffect(() => {
     // Match the authenticated sender AND operation, never just repeated text.
     // Wait for the POST to settle so its late error cannot overwrite recovery.
@@ -116,6 +118,16 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
       {owner && <Button variant="ghost" size="sm" disabled={!items.length || room.isPending || send.isPending || clear.isPending}
         onClick={() => { clear.reset(); setCleared(false); setClearTarget(items.at(-1)!.id); }}><Trash2 size={15} />Clear chat</Button>}
     </header>
+    {work.length > 0 && <section className="room-work-status" aria-label="Recorded work status">
+      <details><summary><strong>Work status · {work.length}</strong><span className="room-work-preview">{work[0].progress || 'Waiting for an agent update.'}</span></summary>
+      <Link to={`/projects/${project.id}/workflow?stage=execute`}>View workflow</Link>
+      {work.slice(0, 4).map(task => <Link className="room-work-item" key={task.id} to={`/projects/${project.id}/tasks/${task.id}`}>
+        <div className="row wrap"><strong>{task.title}</strong><Badge value={task.status} /></div>
+        <span>{task.progress || 'Waiting for an agent update.'}</span>
+      </Link>)}
+      <p className="small muted">Latest recorded progress. Online indicates recent activity; completion estimates come from the agent.</p>
+      </details>
+    </section>}
     <div className="chat-transcript room-transcript" role="log" aria-live="polite" aria-label="Room conversation">
       <ErrorNotice error={room.error} />
       {cleared && <p role="status">Previous room messages deleted.</p>}

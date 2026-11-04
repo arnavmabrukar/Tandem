@@ -53,6 +53,7 @@ function CopyButton({ text, label, disabled = false }: { text: string; label: st
 function WorkerSetup({ project, agent, url, initialClient }: { project: Project; agent?: Agent; url: string; initialClient: string }) {
   const [engine, setEngine] = useState(initialClient === 'Claude Code' ? 'claude' : initialClient === 'Codex' ? 'codex' : 'custom');
   const [custom, setCustom] = useState('');
+  const [verification, setVerification] = useState('');
   const codexSetup = 'npm install -g @openai/codex@latest\ncodex login\ncodex login status';
   // The native installer uses ~/.local/bin; make it available in this terminal
   // immediately so the login commands and runner can find the new executable.
@@ -61,7 +62,9 @@ function WorkerSetup({ project, agent, url, initialClient }: { project: Project;
   const repositoryValid = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(project.repository)
     && project.repository.split('/').every(part => part !== '.' && part !== '..');
   const ready = repositoryValid && (engine !== 'custom' || !!custom.trim());
-  const argumentsText = `--prompt-token --project ${quote(project.id)} --url ${quote(url)} --repository ${quote(project.repository)}${agent ? ` --agent-id ${quote(agent.id)}` : ''} ${engine === 'custom' ? `--agent-command ${quote(custom.trim() || 'YOUR_AGENT_COMMAND')}` : `--agent ${engine}`}`;
+  const verificationArgs = verification.split('\n').map(line => line.trim()).filter(Boolean)
+    .map(command => ` --verify-command ${quote(command)}`).join('');
+  const argumentsText = `--prompt-token --project ${quote(project.id)} --url ${quote(url)} --repository ${quote(project.repository)}${agent ? ` --agent-id ${quote(agent.id)}` : ''} ${engine === 'custom' ? `--agent-command ${quote(custom.trim() || 'YOUR_AGENT_COMMAND')}` : `--agent ${engine}`}${verificationArgs}`;
   // The frontend serves the runner; absolute install and managed workspace paths
   // let users run this command from any terminal directory.
   const installCommand = `mkdir -p "$HOME/Downloads" &&\ncurl -fLsS ${quote(new URL('/downloads/tandem_runner.py', window.location.origin).href)} \\\n  -o "$HOME/Downloads/tandem_runner.py" &&\npython3 "$HOME/Downloads/tandem_runner.py" ${argumentsText}`;
@@ -72,7 +75,7 @@ function WorkerSetup({ project, agent, url, initialClient }: { project: Project;
       <option value="codex">Codex CLI</option><option value="claude">Claude Code CLI</option><option value="custom">Other command</option>
     </select></Field>
     {engine === 'custom' && <Field label="Agent command"><input value={custom} onChange={e => setCustom(e.target.value)} placeholder="Your headless command" /></Field>}
-    {engine === 'custom' && <p className="small muted">Accept tasks on stdin, run without prompts, and commit changes. Sign in before starting.</p>}
+    {engine === 'custom' && <p className="small muted">Accept tasks on stdin, run without prompts, and leave edits for the runner to verify and commit. Sign in before starting.</p>}
     {engine === 'codex' && <section aria-label="Codex CLI setup">
       <p>One-time Codex CLI setup: run each line in your terminal and finish browser sign-in. Requires Node.js/npm.</p>
       <pre className="oauth-code">{codexSetup}</pre>
@@ -83,6 +86,10 @@ function WorkerSetup({ project, agent, url, initialClient }: { project: Project;
       <pre className="oauth-code">{claudeSetup}</pre>
       <CopyButton text={claudeSetup} label="Copy Claude setup commands" />
     </section>}
+    <details className="agent-advanced"><summary>Verification (optional)</summary>
+      <p className="small muted">Automatically runs root package.json scripts: typecheck, lint, test and build, when present. For other checks, enter commands below, one per line; these replace automatic checks. Failed checks stop the push.</p>
+      <Field label="Verification commands"><textarea value={verification} onChange={e => setVerification(e.target.value)} placeholder="npm run test:e2e" /></Field>
+    </details>
     <p>Tandem prepares <strong>{project.repository}</strong> automatically, with a worktree and task branches per agent. Your GitHub account needs repository access.</p>
     {!repositoryValid && <p role="alert">Set this project’s GitHub repository to owner/repository before starting a worker.</p>}
     <p className="small muted">macOS/Linux: Python 3.11+, curl, Git, and signed-in GitHub CLI (gh auth login) and agent CLI.</p>
@@ -96,7 +103,7 @@ function WorkerSetup({ project, agent, url, initialClient }: { project: Project;
       <pre className="oauth-code">{installCommand}</pre>
       <CopyButton key={installCommand} text={installCommand} label="Copy download and start command" disabled={!ready} />
     </section>
-    <p className="small muted">Saves the runner to Downloads. Keep the terminal open; Ctrl+C stops it. The worker opens PRs; you approve and merge.</p>
+    <p className="small muted">Saves the runner to Downloads. Keep the terminal open; Ctrl+C stops it. The runner verifies, commits, pushes and opens PRs; you approve and merge.</p>
   </section>;
 }
 

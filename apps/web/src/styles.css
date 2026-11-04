@@ -1367,6 +1367,14 @@ td:first-child {
 .room-header > div { min-width: 0; }
 .room-header h2 { margin-bottom: 10px; }
 .room-header > button { flex-shrink: 0; }
+.room-work-status { padding: 14px 24px; border-bottom: 1px solid #edf1f5; font-size: 13px; max-height: 200px; overflow-y: auto; flex-shrink: 0; }
+.room-work-status summary { cursor: pointer; }
+.room-work-preview { display: block; margin-top: 4px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.room-work-status details[open] summary { margin-bottom: 10px; }
+.room-work-item { display: block; padding: 10px 0; color: inherit; text-decoration: none; border-bottom: 1px solid #edf1f5; overflow-wrap: anywhere; }
+.room-work-item:hover strong { text-decoration: underline; }
+.room-work-item > span { display: block; margin-top: 4px; color: #64748b; white-space: pre-wrap; max-height: 4.5em; overflow: hidden; }
+.room-work-status p { margin: 8px 0 0; }
 .room-avatar { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 50%; background: #fff; border: 1px solid #dfe7ed; color: #64748b; }
 .room-avatar img { width: 19px; height: 19px; }
 .room-avatar-human { background: #e8edf1; }
