@@ -313,20 +313,26 @@ class Runner:
         )
         if self.resume_task:
             task = next((task for task in tasks if task['id'] == self.resume_task), None)
-            if task is None or task['status'] not in ('blocked', 'claimed', 'in_progress'):
-                raise WorkBlocked('Resume requires a blocked or active task assigned to this agent.')
+            if task is None or not self._resumable(task):
+                raise WorkBlocked('Resume requires a blocked, active, or claimable open task assigned to this agent.')
             return task
         for task in tasks:
             if task["status"] in ("claimed", "in_progress") or (task["status"] == "open" and task["claimable"]):
                 return task
         return None
 
+    @staticmethod
+    def _resumable(task: dict) -> bool:
+        # Release/reassignment returns tasks to open. Resume their saved edits
+        # only if server-side contract and dependency checks permit a new claim.
+        return (task['status'] in ('blocked', 'claimed', 'in_progress')
+                or (task['status'] == 'open' and task.get('claimable') is True))
+
     def recover_interrupted_task(self, tasks: list[dict]) -> None:
         """Resume only this authenticated agent's saved task branch on startup."""
         if self.resume_task:
             return
-        candidates = [task for task in tasks
-                      if task['status'] in ('blocked', 'claimed', 'in_progress')]
+        candidates = [task for task in tasks if self._resumable(task)]
         if not candidates:
             return
         current = self.repo.git('branch', '--show-current')

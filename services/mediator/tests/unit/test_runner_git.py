@@ -113,11 +113,38 @@ class RunnerGitTests(unittest.TestCase):
         self.repo.prepare(runner.branch_name(self.task))
         (self.worker / 'shared.txt').write_text('preserve this\n')
         for tasks in ([], [{**self.task, 'status': 'in_review'}],
+                      [{**self.task, 'status': 'open', 'claimable': False}],
                       [{**self.task, 'id': 'another-task', 'status': 'in_progress'}]):
             worker = runner.Runner(Mock(), self.repo, ['fake-agent'], 60)
             worker.recover_interrupted_task(tasks)
             self.assertIsNone(worker.resume_task)
         self.assertEqual((self.worker / 'shared.txt').read_text(), 'preserve this\n')
+
+    def test_released_and_reassigned_task_resumes_after_claiming(self):
+        self.repo.prepare(runner.branch_name(self.task))
+        (self.worker / 'shared.txt').write_text('saved scaffold\n')
+        task = {**self.task, 'status': 'open', 'claimable': True, 'version': 19}
+        tandem = Mock()
+        def call(tool, **arguments):
+            if tool == 'tandem_get_assignments':
+                return {'tasks': [task], 'pushBranch': 'main'}
+            if tool == 'tandem_claim_task':
+                return {'taskVersion': 20}
+            if tool == 'tandem_get_task':
+                return {**task, 'status': 'in_progress', 'version': 21}
+            return {'taskVersion': 21}
+        tandem.project_call.side_effect = call
+        worker = runner.Runner(tandem, self.repo, ['fake-agent'], 60)
+        worker.recover_interrupted_task([task])
+        self.assertEqual(worker.resume_task, task['id'])
+        with patch.object(worker, 'acknowledge_presence'), \
+                patch.object(worker, '_execute', return_value={'message': 'Done', 'progress': 'Verified'}) as execute:
+            self.assertEqual(worker.next_task(), task)
+            worker.work(task)
+        calls = [entry.args[0] for entry in tandem.project_call.call_args_list]
+        self.assertLess(calls.index('tandem_claim_task'), calls.index('tandem_update_task'))
+        execute.assert_called_once()
+        self.assertEqual((self.worker / 'shared.txt').read_text(), 'saved scaffold\n')
 
     def test_restart_preserves_explicit_recovery_selection(self):
         worker = runner.Runner(Mock(), self.repo, ['fake-agent'], 60, resume_task='selected-task')

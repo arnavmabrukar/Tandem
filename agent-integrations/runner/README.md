@@ -56,7 +56,8 @@ Changes needing content filters (such as Git LFS) block for manual review rather
 than silently publishing data in a different format.
 
 Restarting the runner automatically resumes its saved task branch when it matches
-one blocked or active task still assigned to the authenticated agent. Saved edits
+one blocked, active, or claimable open task assigned to the authenticated agent.
+Released and reassigned open tasks are claimed again before work resumes. Saved edits
 are preserved. Work awaiting review, reassigned tasks, and unrelated changes are
 never automatically resumed. Recovery makes one attempt per startup, so a failing
 task does not enter an endless retry loop.
