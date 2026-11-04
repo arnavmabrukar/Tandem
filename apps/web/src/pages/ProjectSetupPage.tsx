@@ -1,7 +1,7 @@
 import { GitHubRepositoryPicker } from '../components/GitHubRepositoryPicker';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, Copy, ExternalLink, GitBranch } from 'lucide-react';
+import { ExternalLink, GitBranch } from 'lucide-react';
 import { useSession } from '../auth/session';
 import { useAction } from '../hooks/useWorkspace';
 import { initials, label, roleFor, roles, type Project, type Role } from '../types/domain';
@@ -35,14 +35,10 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<Role>('reviewer');
   const [saved, setSaved] = useState(false);
-  const [copied, setCopied] = useState(false);
   const changed = !!project && project.version !== formVersion;
-  const dirty = !!project && description !== project.description;
-  useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), 1800);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
+  const trimmedName = name.trim();
+  const dirty =
+    !!project && (description !== project.description || trimmedName !== project.name);
   function loadLatest() {
     if (project) {
       setName(project.name);
@@ -116,14 +112,6 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
 
   const pendingInvitations = project.invitations.filter((i) => i.status === 'pending').length;
   const delegating = !!project.autoDelegate;
-  async function copyRepository() {
-    try {
-      await navigator.clipboard.writeText(project!.repository);
-      setCopied(true);
-    } catch {
-      /* Clipboard access can be refused; the name stays selectable on the page. */
-    }
-  }
 
   return (
     <div className="setup-stack">
@@ -158,15 +146,6 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
             <strong className="identity-name">{project.name}</strong>
             <div className="identity-repo">
               <code>{project.repository}</code>
-              <button
-                type="button"
-                className="icon-link"
-                onClick={() => void copyRepository()}
-                aria-label="Copy repository name"
-              >
-                {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-                {copied ? 'Copied' : 'Copy'}
-              </button>
               <a
                 className="icon-link"
                 href={`https://github.com/${project.repository}`}
@@ -184,7 +163,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
           </span>
         </div>
         <p className="small muted identity-note">
-          Name, repository and branch are set when a repository is imported. To track a different
+          The repository and branch are set when a repository is imported. To track a different
           repository, import it as a new project.
         </p>
         <form
@@ -193,7 +172,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
             e.preventDefault();
             try {
               const result = await save.mutateAsync({
-                type: 'update-project', name: project.name, repository: project.repository, description,
+                type: 'update-project', name: trimmedName, repository: project.repository, description,
               });
               setFormVersion(result.projectVersion);
               setSaved(true);
@@ -204,7 +183,18 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
         >
           {owner ? (
             <fieldset disabled={save.isPending}>
-              <Field label="Description" hint="Shown to teammates and agents. Up to 1,000 characters.">
+              <Field label="Project name">
+                <input
+                  required
+                  maxLength={80}
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setSaved(false);
+                  }}
+                />
+              </Field>
+              <Field label="Description" hint="Shown to teammates and agents.">
                 <textarea
                   maxLength={1000}
                   value={description}
@@ -218,13 +208,14 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
                 {description.length.toLocaleString()} / 1,000
               </div>
               <div className="form-actions">
-                <Button type="submit" disabled={changed || !dirty}>
+                <Button type="submit" disabled={changed || !dirty || !trimmedName}>
                   {save.isPending ? 'Saving…' : 'Save changes'}
                 </Button>
                 {dirty && (
                   <Button
                     variant="ghost"
                     onClick={() => {
+                      setName(project.name);
                       setDescription(project.description);
                       setSaved(false);
                     }}
@@ -407,10 +398,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
             </details>
             {confirmingDelete && (
               <div className="delete-confirm">
-                <Field
-                  label={`Type ${project.repository} to confirm`}
-                  hint="The delete button unlocks when the name matches exactly."
-                >
+                <Field label={`Type ${project.repository} to confirm`}>
                   <input
                     autoFocus
                     autoComplete="off"

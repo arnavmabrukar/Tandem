@@ -71,8 +71,8 @@ class UpdateProjectRequest(BaseModel):
     # strict=True rejects strings and booleans masquerading as integers.
     expectedVersion: int = Field(ge=1, strict=True)
 
-    # Identity fields are sent for compatibility, but must match the saved project.
-    # Only the description is editable after import.
+    # The name can be changed. The repository is sent for compatibility, but must
+    # match the saved project, because it is fixed when the repository is imported.
     name: str = Field(min_length=1, max_length=80)
 
     # Require owner/repository format.
