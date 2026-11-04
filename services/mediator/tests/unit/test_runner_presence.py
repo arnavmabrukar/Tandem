@@ -87,7 +87,7 @@ class RunnerPresenceTests(unittest.TestCase):
                 runner_module.check_worker(repo, ['codex'])
         with patch.object(runner_module.shutil, 'which', return_value='/bin/tool'):
             repo.dirty.return_value = True
-            with self.assertRaisesRegex(runner_module.WorkBlocked, 'dedicated clone'):
+            with self.assertRaisesRegex(runner_module.WorkBlocked, 'uncommitted changes'):
                 runner_module.check_worker(repo, ['codex'])
 
     def test_preflight_checks_logins_without_exposing_token_to_process(self):

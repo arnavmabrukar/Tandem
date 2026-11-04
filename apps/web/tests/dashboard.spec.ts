@@ -7,16 +7,16 @@ test('navigation switches between all projects and a project overview', async ({
   await page.goto('/#/dashboard');
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
   await expect(nav.getByRole('link', { name: 'Projects', exact: true })).toHaveAttribute('aria-current', 'page');
-  await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toHaveCount(0);
+  await expect(nav.getByRole('link', { name: 'Meta Mediator', exact: true })).toHaveCount(0);
   await page.locator('.project-link').first().click();
   await expect(page).toHaveURL(/\/projects\/project-1\/overview$/);
   await expect(nav.getByRole('link', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
   await page.reload();
-  await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Meta Mediator', exact: true })).toBeVisible();
   await nav.getByRole('link', { name: 'Projects', exact: true }).click();
   await expect(nav.getByRole('link', { name: 'Projects', exact: true })).toHaveAttribute('aria-current', 'page');
-  await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toHaveCount(0);
+  await expect(nav.getByRole('link', { name: 'Meta Mediator', exact: true })).toHaveCount(0);
   await page.goBack();
   await expect(nav.getByRole('link', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page');
 });
@@ -699,8 +699,8 @@ test('connect guide moves one step at a time and keeps worker setup optional', a
   await page.keyboard.press('ArrowRight');
   await expect(dialog.getByRole('tab', { name: 'Reconnecting' })).toHaveAttribute('aria-selected', 'true');
   const reconnect = dialog.getByRole('region', { name: 'Reconnect your worker' });
-  await expect(reconnect).toContainText('Your current terminal folder is not the cause.');
-  await expect(reconnect).toContainText('Do not delete or reset the workspace.');
+  await expect(reconnect).toContainText('separate agent worktree');
+  await expect(reconnect).toContainText('Do not delete or reset unfinished work.');
   await expect(reconnect.getByRole('button', { name: 'Copy download and start command' })).toBeDisabled();
   await dialog.getByRole('tab', { name: 'First-time setup' }).click();
 
@@ -718,6 +718,10 @@ test('connect guide moves one step at a time and keeps worker setup optional', a
 
   await rail.getByRole('button', { name: /Agent chat/ }).click();
   const startup = dialog.getByRole('region', { name: 'Agent startup prompt' });
+  const mcp = dialog.getByRole('region', { name: 'Normal MCP connection' });
+  await expect(mcp.getByRole('region', { name: 'Agent startup prompt' })).toBeVisible();
+  await expect(mcp.getByRole('region', { name: 'Continuous worker setup' })).toHaveCount(0);
+  await expect(startup).toContainText('do not start an autonomous task loop');
   await expect(startup).toContainText('Use Tandem for project project-1.');
   await expect(startup.getByRole('button', { name: 'Copy startup prompt' })).toBeEnabled();
   await dialog.getByRole('button', { name: 'Set up a worker' }).click();
@@ -786,6 +790,8 @@ test('connect guide moves one step at a time and keeps worker setup optional', a
   await expect(download).toContainText('Leave it open and continue to the next step.');
   await expect(download.locator('.trust-note')).toContainText('Use it only on projects whose members you trust');
   await expect(download.getByRole('link', { name: 'Open the script' })).toHaveAttribute('href', '/downloads/tandem_runner.py');
+  await expect(download).toContainText('Startup blocked by uncommitted changes');
+  await expect(dialog.getByRole('region', { name: 'Autonomous worker guide' }).getByRole('region', { name: 'Continuous worker setup' })).toHaveCount(1);
   await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeEnabled();
   for (const name of ['Copy clone command', 'Copy setup check', 'Copy worker command', 'Copy listener command']) {
     await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
@@ -884,7 +890,7 @@ test('reconnecting an agent offers a task-specific resume command for saved edit
   await reconnect.getByLabel('Task to resume').selectOption('task-1');
   await expect(reconnect.locator('pre').last()).toContainText("--resume-task 'task-1'");
   await expect(reconnect.getByRole('button', { name: 'Copy resume command' })).toBeEnabled();
-  await expect(reconnect).toContainText('Do not delete or reset the workspace.');
+  await expect(reconnect).toContainText('Do not delete or reset unfinished work.');
 });
 
 test('reconnecting from the general guide selects an owned agent for token replacement', async ({ page }) => {

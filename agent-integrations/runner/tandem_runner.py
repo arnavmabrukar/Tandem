@@ -683,7 +683,11 @@ def check_worker(repo: Repo, command: list[str], allow_dirty: bool = False) -> N
         if shutil.which(executable) is None:
             raise WorkBlocked(f"Install and sign in to {executable}, then run setup again.")
     if repo.dirty() and not allow_dirty:
-        raise WorkBlocked('Use a clean, dedicated clone for this worker, not your active checkout.')
+        raise WorkBlocked(
+            f'Worker workspace has uncommitted changes: {repo.path}. '
+            'Your files were preserved. Inspect them with git status in that folder. '
+            'To continue an unfinished Tandem task, rerun with --resume-task <task-id> '
+            'using the task ID from Tandem. Otherwise commit or move the saved changes before restarting.')
     if not repo.git('remote', 'get-url', 'origin'):
         raise WorkBlocked('The worker clone needs an origin remote.')
     repo.git('fetch', 'origin', '--prune')
@@ -799,6 +803,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    # Native Windows cannot enforce the verification boundary. Reject before
+    # requesting credentials, creating worktrees, or claiming any assigned work.
+    if sys.platform == 'win32' and not args.presence_only:
+        log.error(
+            'Windows workers require Ubuntu in WSL 2; native PowerShell is not supported. '
+            'Run wsl --install -d Ubuntu in Administrator PowerShell, then open Ubuntu. '
+            'In Tandem setup select Windows (WSL 2), install and sign in to Claude/Codex '
+            'and GitHub CLI inside Ubuntu, and run the download-and-start command there. '
+            'Existing Windows workspace changes were preserved; no task was claimed.')
+        return 1
     token = os.environ.get("TANDEM_AGENT_TOKEN", "").strip()
     if args.prompt_token:
         if not sys.stdin.isatty():

@@ -255,6 +255,7 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, connectNo
         <CommandBox text={installCommand} label="Copy download and start command" disabled={!ready} {...commandPlatform} />
         <p className="trust-note">This downloads Tandem’s worker script to your Downloads folder and runs it as you. It keeps its own copy of your repository under <code>~/.local/share/tandem</code>, runs your agent CLI on approved tasks, and pushes only to <code>{branch}</code>. Use it only on projects whose members you trust. <a href="/downloads/tandem_runner.py" target="_blank" rel="noreferrer">Open the script</a> to read it first.</p>
         <p>Wait until the terminal shows <code>Tandem agent token (hidden, not saved):</code>. Leave it open and continue to the next step.</p>
+        <p className="small muted">Startup blocked by uncommitted changes or “Use a clean, dedicated clone”? Open the <button type="button" className="text-button" onClick={() => { setTab('reconnect'); document.getElementById('setup-reconnect-tab')?.focus(); }}>Reconnecting tab</button> and choose the unfinished task under Resume saved task changes.</p>
       </section>
     </>}
     {workerStep === 3 && <>
@@ -306,9 +307,9 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, connectNo
   <div role="tabpanel" id="setup-first-panel" aria-labelledby="setup-first-tab" hidden={tab !== 'first'}>
     <ProgressRail stage={stage} setStage={setStage} authorized={authorized} />
     <div className="setup-stage" ref={stageBox}>
-      {stage === 'connect' && connectNode}
-      {stage === 'prompt' && promptContent}
-      {stage === 'worker' && workerContent}
+      {stage === 'worker'
+        ? <section aria-label="Autonomous worker guide">{workerContent}</section>
+        : <section aria-label="Normal MCP connection">{stage === 'connect' ? connectNode : promptContent}</section>}
     </div>
   </div>
   <div role="tabpanel" id="setup-reconnect-panel" aria-labelledby="setup-reconnect-tab" hidden={tab !== 'reconnect'}>
@@ -332,7 +333,8 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, connectNo
     <p className="small muted">Downloads the latest worker script, then restarts it with your token and saved workspace.</p>
     {!ready && <p className="small muted">Complete the worker settings in First-time setup to enable copying.</p>}
     <h3>Resume saved task changes</h3>
-    <p><strong>Saved changes:</strong> If setup says “Use a clean, dedicated clone,” this agent’s workspace has uncommitted task work. Your current terminal folder is not the cause. Do not delete or reset the workspace.</p>
+    <p><strong>Saved changes:</strong> “Worker workspace has uncommitted changes” (or the older “Use a clean, dedicated clone” message) means the worker found saved edits. With the command above, these are in its separate agent worktree, even when your terminal is open in another folder. The latest runner shows the exact path; run <code>git status</code> in that folder to inspect it. Do not delete or reset unfinished work.</p>
+    <p>Select the task that owns those edits below, then copy and run its resume command. Paste your token when prompted and press Enter; the token stays hidden. On Windows, run the command in Ubuntu / WSL 2.</p>
     {workerAgent ? <>
       <Field label="Task to resume" hint="Choose the blocked or active task that owns those saved changes.">
         <select value={resumeTaskId} onChange={event => setResumeTaskId(event.target.value)}>
@@ -408,7 +410,7 @@ Confirm access with tandem_whoami. Fetch tandem_get_assignments and summarize re
 Check tandem_get_presence_requests; acknowledge returned IDs with tandem_acknowledge_presence. Repeat between tasks.
 Check tandem_get_worker_room_requests between task steps. Answer mediator-relayed questions addressed to you with tandem_reply_worker_room_request, using the same request ID. Human room messages remain private.
 Before claiming work, read repo instructions, git status, the approved contract and dependencies. Preserve others’ changes and report progress, questions, tests and blockers through Tandem. Retry the same write with its original operation ID.
-Never approve or merge your own work, access human room messages, or duplicate a running worker’s tasks. Continuous work while this chat is idle requires the terminal worker.`;
+Never approve or merge your own work, access human room messages, or duplicate a running worker’s tasks. Work on tasks when I ask you to; do not start an autonomous task loop from this prompt.`;
   const snippet = url && (client === 'Claude Code'
     ? JSON.stringify({ mcpServers: { 'tandem-oauth': { type: 'http', url } } }, null, 2)
     : `# Tandem remote MCP connection. Authentication happens in your browser.\n[mcp_servers.tandem-oauth]\nurl = ${JSON.stringify(url)}`);

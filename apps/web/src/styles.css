@@ -2985,3 +2985,13 @@ main#main:has(.agent-room-page) { padding: 0; margin: 0; max-width: none; flex: 
     height: 20px;
   }
 }
+
+.text-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-0b5a8a);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
