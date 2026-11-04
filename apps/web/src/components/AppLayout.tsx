@@ -12,6 +12,7 @@ import {
   Moon,
   Plus,
   Settings,
+  Sun,
 } from 'lucide-react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -200,17 +201,29 @@ export function AppLayout({
                     <Settings size={16} aria-hidden="true" />
                     User settings
                   </DropdownMenu.Item>
-                  <DropdownMenu.CheckboxItem
-                    className="account-menu-item theme-item"
-                    checked={theme === 'dark'}
-                    onCheckedChange={(on) => setTheme(on ? 'dark' : 'light')}
-                    // Keep the menu open so the change can be seen and undone.
-                    onSelect={(event) => event.preventDefault()}
-                  >
-                    <Moon size={16} aria-hidden="true" />
-                    <span className="theme-label">Dark mode</span>
-                    <span className="theme-switch" aria-hidden="true" />
-                  </DropdownMenu.CheckboxItem>
+                  <div className="theme-row">
+                    <span id="theme-label">Theme</span>
+                    <DropdownMenu.RadioGroup
+                      className="theme-seg"
+                      aria-labelledby="theme-label"
+                      value={theme}
+                      onValueChange={(value) => setTheme(value === 'dark' ? 'dark' : 'light')}
+                    >
+                      {([['light', Sun], ['dark', Moon]] as const).map(([value, Icon]) => (
+                        <DropdownMenu.RadioItem
+                          key={value}
+                          value={value}
+                          className="theme-option"
+                          aria-label={value === 'light' ? 'Light theme' : 'Dark theme'}
+                          title={value === 'light' ? 'Light' : 'Dark'}
+                          // Keep the menu open so the change can be seen and undone.
+                          onSelect={(event) => event.preventDefault()}
+                        >
+                          <Icon size={16} aria-hidden="true" />
+                        </DropdownMenu.RadioItem>
+                      ))}
+                    </DropdownMenu.RadioGroup>
+                  </div>
                   <DropdownMenu.Separator className="account-menu-separator" />
                   <DropdownMenu.Item
                     className="account-menu-item account-menu-danger"

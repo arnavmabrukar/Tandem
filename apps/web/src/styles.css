@@ -2666,39 +2666,39 @@ main#main:has(.agent-room-page) { padding: 0; margin: 0; max-width: none; flex: 
   }
 }
 
-/* Dark mode switch in the account menu. */
-.theme-label {
-  flex: 1;
+/* Theme choice in the account menu: a label and a light/dark pill. */
+.theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 10px;
+  color: var(--c-2b4c63);
 }
-.theme-switch {
-  position: relative;
-  flex: none;
-  width: 30px;
-  height: 18px;
-  border-radius: 9px;
-  background: var(--c-b3c9db);
-  transition: background-color 0.15s;
+.theme-seg {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--c-d2e1ed);
+  border-radius: 999px;
 }
-.theme-switch::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 14px;
-  height: 14px;
+.theme-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
   border-radius: 50%;
-  background: #ffffff;
-  transition: transform 0.15s;
+  color: var(--c-536f84);
+  cursor: pointer;
+  outline: none;
 }
-.theme-item[data-state='checked'] .theme-switch {
-  background: var(--accent-solid);
+.theme-option[data-highlighted] {
+  background: var(--c-e3edf5);
 }
-.theme-item[data-state='checked'] .theme-switch::after {
-  transform: translateX(12px);
-}
-@media (prefers-reduced-motion: reduce) {
-  .theme-switch,
-  .theme-switch::after {
-    transition: none;
-  }
+.theme-option[data-state='checked'] {
+  border-color: var(--c-b3c9db);
+  background: var(--c-e3edf5);
+  color: var(--c-0b3954);
 }
