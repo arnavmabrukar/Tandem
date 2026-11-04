@@ -1,5 +1,6 @@
 """Human delegation, using the same readiness rules as MCP task claims."""
 from uuid import UUID
+from contextlib import nullcontext
 from psycopg.types.json import Jsonb
 from mediator.db import agent_tasks
 from mediator.db.projects import OperationConflict, ProjectAccessDenied, ProjectVersionConflict
@@ -7,14 +8,17 @@ from mediator.schemas.assignments import AssignTaskRequest
 
 
 def assign_task(actor_id: UUID, project_id: UUID, task_id: UUID,
-                request: AssignTaskRequest, *, automatic: bool = False) -> dict:
+                request: AssignTaskRequest, *, automatic: bool = False, connection=None,
+                require_unassigned: bool = False) -> dict:
     payload = {"projectId": str(project_id), "taskId": str(task_id),
                **request.model_dump(mode="json")}
     # Preserve the canonical payload used by manual assignment retries.
     if not request.autoSelect:
         payload.pop("autoSelect", None)
     selected_agent = request.agentId
-    with agent_tasks._transaction() as connection:
+    # Room actions share their exchange transaction so an assignment and its
+    # visible receipt commit together. Normal API calls own their transaction.
+    with (nullcontext(connection) if connection is not None else agent_tasks._transaction()) as connection:
         if automatic:
             # Bound each background attempt; the next sweep retries contention.
             connection.execute("SET LOCAL statement_timeout = '5s'")
@@ -96,6 +100,8 @@ def assign_task(actor_id: UUID, project_id: UUID, task_id: UUID,
         task = agent_tasks._lock_task(connection, project_id, task_id)
         if task["status"] != "open" or task["claimed_by_agent_id"] is not None:
             raise agent_tasks.AgentTaskConflict("Only open, unclaimed tasks can be assigned")
+        if require_unassigned and task['assigned_agent_id'] is not None:
+            raise agent_tasks.AgentTaskConflict('Task already has an assignment; existing work was preserved')
         if request.autoSelect:
             if task["assigned_agent_id"] is not None:
                 raise agent_tasks.AgentTaskConflict("Task already has an assignment; clear it before automatic selection")

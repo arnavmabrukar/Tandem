@@ -1,6 +1,6 @@
 """Project room: agents can never read human exchanges, even through model context."""
 import re
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 from psycopg.types.json import Jsonb
 from mediator.config import settings
 from mediator.db.agent_tasks import _transaction, _current_role, AgentAccessDenied, AgentOperationConflict
@@ -178,11 +178,66 @@ def clear_room(project_id: UUID, through_id: UUID, user_id: UUID):
 
 def _context(conn, project_id, project, role, agent):
     tasks = conn.execute("""SELECT t.id::text, t.title, t.status, t.contract_summary AS scope,
-        t.progress, t.claimed_by_agent_id::text AS agent_id, a.name AS agent_name
+        t.progress, t.claimed_by_agent_id::text AS agent_id, a.name AS agent_name,
+        t.assigned_agent_id::text,
+        (SELECT approval.status FROM public.contract_approvals approval
+          WHERE approval.project_id=t.project_id AND approval.task_id=t.id
+            AND approval.contract_version=t.contract_version
+          ORDER BY approval.requested_at DESC, approval.id DESC LIMIT 1) AS contract_review,
+        (SELECT json_agg(json_build_object('title',d.title,'status',d.status))
+          FROM public.task_dependencies dep JOIN public.tasks d ON d.id=dep.depends_on_task_id
+          WHERE dep.task_id=t.id) AS dependencies
         FROM public.tasks t LEFT JOIN public.agents a ON a.id=t.claimed_by_agent_id
         WHERE t.project_id=%s ORDER BY t.updated_at DESC, t.id LIMIT 100""", (project_id,)).fetchall()
+    agents = [] if agent else conn.execute("""SELECT a.id::text, a.name, a.client,
+        a.capabilities,
+        (a.last_seen_at > now() - interval '2 minutes') AS online,
+        (SELECT count(*) FROM public.tasks t WHERE t.project_id=g.project_id
+          AND COALESCE(t.claimed_by_agent_id,t.assigned_agent_id)=a.id
+          AND t.status NOT IN ('approved','merged','cancelled')) AS workload
+        FROM public.agents a
+        JOIN public.agent_project_grants g ON g.agent_id=a.id AND g.owner_user_id=a.owner_user_id
+        JOIN public.project_memberships m ON m.project_id=g.project_id AND m.user_id=a.owner_user_id
+        WHERE g.project_id=%s AND g.status='active' AND a.grant_status='active'
+          AND m.role IN ('owner','reviewer') ORDER BY a.id LIMIT 100""", (project_id,)).fetchall()
     return {**project, 'role': role, 'senderKind': 'agent' if agent else 'human',
-            'tasks': tasks, 'taskLimit': 100}
+            'tasks': tasks, 'agents': agents, 'taskLimit': 100}
+
+
+def _assign_from_reply(conn, project_id, user_id, operation_id, reply, context):
+    """Apply model choices through normal authorization/readiness/CAS checks."""
+    from mediator.db.assignments import assign_task
+    from mediator.db.agent_tasks import AgentTaskConflict, AgentClaimBlocked
+    from mediator.db.projects import ProjectAccessDenied, ProjectVersionConflict
+    from mediator.schemas.assignments import AssignTaskRequest
+    tasks = {str(task['id']): task for task in context['tasks']
+             if task['status'] == 'open' and not task.get('assigned_agent_id')}
+    agents = {str(agent['id']): agent for agent in context.get('agents', [])}
+    outcomes = []
+    seen = set()
+    for choice in reply.assignments:
+        task_id, agent_id = str(choice.taskId), str(choice.agentId)
+        if task_id in seen:
+            continue
+        seen.add(task_id)
+        task, agent = tasks.get(task_id), agents.get(agent_id)
+        if task is None or agent is None:
+            outcomes.append('Skipped an assignment outside the available open tasks and eligible agents.')
+            continue
+        try:
+            # A rejected choice rolls back its project version and reservation,
+            # without dropping other valid choices or the human's room reply.
+            with conn.transaction():
+                version = conn.execute('SELECT version FROM public.projects WHERE id=%s',
+                                       (project_id,)).fetchone()['version']
+                assign_task(user_id, project_id, choice.taskId, AssignTaskRequest(
+                    operationId=uuid5(operation_id, f'assign:{task_id}'),
+                    expectedVersion=version, agentId=agent_id), connection=conn, require_unassigned=True)
+            outcomes.append(f"Assigned {task['title']} to {agent['name']}.")
+        except (AgentTaskConflict, AgentClaimBlocked, AgentAccessDenied,
+                ProjectAccessDenied, ProjectVersionConflict) as error:
+            outcomes.append(f"Could not assign {task['title']}: {error}")
+    return '\n'.join(outcomes)
 
 
 def _mentioned_agent(body: str, tasks: list[dict]) -> tuple[str | None, str | None]:
@@ -262,7 +317,14 @@ def post_message(project_id: UUID, request: RoomMessageRequest, *, user_id=None,
         # Never hold a transaction open while waiting for a model provider.
         reply = RoomReply.model_validate(generate_plan('', context, conversation=conversation, room=True))
         with _transaction() as conn:
-            _, role, _ = _authorize(conn, project_id, user_id=user_id, identity=identity, write=True)
+            _, role, _ = _authorize(conn, project_id, user_id=user_id, identity=identity, write=True,
+                                    lock_project=not bool(reply.assignments))
+            # Agent-authored messages cannot trigger delegation. Human owners
+            # and reviewers use the same permissions as the assignment UI.
+            if identity is not None or role not in ('owner', 'reviewer'):
+                reply.assignments = []
+            assignment_reply = (_assign_from_reply(conn, project_id, user_id, request.operationId, reply, context)
+                                if reply.assignments else None)
             if identity is not None or role != 'owner':
                 reply.proposal = None
                 reply.cancelTaskIds = []
@@ -270,7 +332,10 @@ def post_message(project_id: UUID, request: RoomMessageRequest, *, user_id=None,
                 # Model output cannot introduce arbitrary task IDs or change active work.
                 allowed = {str(t['id']) for t in context['tasks'] if t['status'] == 'open'}
                 reply.cancelTaskIds = [i for i in reply.cancelTaskIds if str(i) in allowed]
-            response = reply.model_dump(mode='json', exclude={'relayTaskId', 'relayMessage'})
+            response = reply.model_dump(mode='json', exclude={'relayTaskId', 'relayMessage', 'assignments'})
+            if assignment_reply:
+                # Report committed outcomes instead of a model's unverified claim.
+                response['reply'] = assignment_reply
             # Attribute replies to the configured model, never a name supplied
             # by the model itself. Persist it so future config changes keep history accurate.
             response['model'] = settings.meta_model
