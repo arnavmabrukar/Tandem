@@ -217,14 +217,14 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
       if (selected) setEngine(selected.client === 'Claude Code' ? 'claude' : selected.client === 'Codex' ? 'codex' : 'custom');
     }}><option value="">Select an agent</option>{ownedAgents.map(candidate =>
       <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></Field>}
-    <p>Reuse this agent’s saved token at the hidden terminal prompt, then press Enter. Tandem cannot show the token again. You do not need to reconnect MCP.</p>
+    <p>Reuse this agent’s saved token at the hidden prompt after running the restart command below, then press Enter. The worker automatically resumes its interrupted task and preserves saved edits when that task is still assigned to this agent. You do not need to reconnect MCP.</p>
     {workerAgent ? <><p>Lost the token? Generate a replacement below. The previous token will stop working.</p>
       <AgentTokenButton project={project} agent={workerAgent} buttonLabel="Generate replacement token" /></>
       : <p className="small muted">Select an agent to get its token and restart command.</p>}
     <CommandBox text={installCommand} label="Copy download and start command" disabled={!ready || !workerAgent} {...commandPlatform} />
     <p className="small muted"><code>mkdir</code> ensures Downloads exists; <code>curl</code> updates the runner; <code>python3</code> restarts it using your token and saved workspace.</p>
     {!ready && <p className="small muted">Complete the worker settings in First-time setup to enable copying.</p>}
-    <h3>Resume saved task changes</h3>
+    <h3>Manual recovery (if automatic resume cannot match the task)</h3>
     <p><strong>Saved changes:</strong> “Worker workspace has uncommitted changes” (or the older “Use a clean, dedicated clone” message) means the worker found saved edits. With the command above, these are in its separate agent worktree, even when your terminal is open in another folder. The latest runner shows the exact path; run <code>git status</code> in that folder to inspect it. Do not delete or reset unfinished work.</p>
     <p>Select the task that owns those edits below, then copy and run its resume command. Paste your token when prompted and press Enter; the token stays hidden. On Windows, run the command in Ubuntu / WSL 2.</p>
     {workerAgent ? <>

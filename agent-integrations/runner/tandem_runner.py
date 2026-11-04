@@ -321,6 +321,23 @@ class Runner:
                 return task
         return None
 
+    def recover_interrupted_task(self, tasks: list[dict]) -> None:
+        """Resume only this authenticated agent's saved task branch on startup."""
+        if self.resume_task:
+            return
+        candidates = [task for task in tasks
+                      if task['status'] in ('blocked', 'claimed', 'in_progress')]
+        if not candidates:
+            return
+        current = self.repo.git('branch', '--show-current')
+        matches = [task for task in candidates if branch_name(task) == current]
+        # Assignments come from the authenticated server, not local files or a
+        # short task-ID guess. Ambiguous or reassigned work must stay untouched.
+        if len(matches) == 1:
+            self.resume_task = matches[0]['id']
+            log.info('Resuming interrupted task %s from %s; saved edits will be preserved.',
+                     self.resume_task, self.repo.path)
+
     def _update(self, task_id: str, version: int, **fields) -> int:
         done = self.tandem.project_call("tandem_update_task", taskId=task_id, expectedVersion=version,
                                         operationId=str(uuid4()), **fields)
@@ -858,7 +875,8 @@ def main(argv: list[str] | None = None) -> int:
                             verify_commands=verification_commands,
                             resume_task=args.resume_task)
         if runner is not None:
-            runner._apply_project_settings(tandem.project_call("tandem_get_assignments"))
+            assignments = runner._apply_project_settings(tandem.project_call("tandem_get_assignments"))
+            runner.recover_interrupted_task(assignments)
             check_worker(runner.repo, runner.command, allow_dirty=bool(args.resume_task))
         if args.check:
             log.info('Setup checks passed for %s. No task was claimed or executed. Remove --check to keep working.', identity['name'])

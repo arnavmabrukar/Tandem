@@ -100,6 +100,30 @@ class RunnerGitTests(unittest.TestCase):
         self.git(self.source, 'push', 'origin', 'main')
         return branch
 
+    def test_restart_recovers_assigned_task_without_discarding_edits(self):
+        self.repo.prepare(runner.branch_name(self.task))
+        (self.worker / 'shared.txt').write_text('unfinished changes\n')
+        worker = runner.Runner(Mock(), self.repo, ['fake-agent'], 60)
+        worker.recover_interrupted_task([{**self.task, 'status': 'blocked'}])
+        self.assertEqual(worker.resume_task, self.task['id'])
+        self.repo.prepare(runner.branch_name(self.task), resume=True)
+        self.assertEqual((self.worker / 'shared.txt').read_text(), 'unfinished changes\n')
+
+    def test_restart_does_not_recover_reassigned_or_reviewed_work(self):
+        self.repo.prepare(runner.branch_name(self.task))
+        (self.worker / 'shared.txt').write_text('preserve this\n')
+        for tasks in ([], [{**self.task, 'status': 'in_review'}],
+                      [{**self.task, 'id': 'another-task', 'status': 'in_progress'}]):
+            worker = runner.Runner(Mock(), self.repo, ['fake-agent'], 60)
+            worker.recover_interrupted_task(tasks)
+            self.assertIsNone(worker.resume_task)
+        self.assertEqual((self.worker / 'shared.txt').read_text(), 'preserve this\n')
+
+    def test_restart_preserves_explicit_recovery_selection(self):
+        worker = runner.Runner(Mock(), self.repo, ['fake-agent'], 60, resume_task='selected-task')
+        worker.recover_interrupted_task([{**self.task, 'status': 'blocked'}])
+        self.assertEqual(worker.resume_task, 'selected-task')
+
     def test_conflict_is_resolved_by_agent_and_both_histories_preserved(self):
         branch = self.make_conflict()
         worker = runner.Runner(Mock(), self.repo, ['fake-agent'], 60)

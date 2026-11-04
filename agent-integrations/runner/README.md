@@ -55,7 +55,13 @@ filters, and custom merge drivers are disabled for runner-owned Git operations.
 Changes needing content filters (such as Git LFS) block for manual review rather
 than silently publishing data in a different format.
 
-To recover saved edits from an older runner that blocked on committing, stop that
+Restarting the runner automatically resumes its saved task branch when it matches
+one blocked or active task still assigned to the authenticated agent. Saved edits
+are preserved. Work awaiting review, reassigned tasks, and unrelated changes are
+never automatically resumed. Recovery makes one attempt per startup, so a failing
+task does not enter an endless retry loop.
+
+To explicitly recover saved edits from an older runner that blocked on committing, stop that
 runner, download the updated script, and append `--resume-task <task-id>` to its
 startup command. The task must still be assigned to the authenticated agent and
 blocked or active. Only dirty files on that task's own branch may be resumed. The
