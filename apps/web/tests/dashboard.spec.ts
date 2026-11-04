@@ -577,7 +577,7 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   const reconnect = dialog.getByRole('region', { name: 'Reconnect your worker' });
   await expect(reconnect).toContainText('Your current terminal folder is not the cause.');
   await expect(reconnect).toContainText('Do not delete or reset the workspace.');
-  await expect(reconnect.getByRole('button', { name: 'Copy download and start command' })).toBeEnabled();
+  await expect(reconnect.getByRole('button', { name: 'Copy download and start command' })).toBeDisabled();
   await expect(dialog.getByRole('region', { name: 'Continuous worker setup' })).toBeHidden();
   await dialog.getByRole('tab', { name: 'First-time setup' }).click();
   const worker = page.getByRole('region', { name: 'Continuous worker setup' });
@@ -681,10 +681,37 @@ test('reconnecting an agent offers a task-specific resume command for saved edit
   await page.locator('.roster-agent').getByRole('button', { name: 'Set up worker' }).click();
   await page.getByRole('tab', { name: 'Reconnecting' }).click();
   const reconnect = page.getByRole('region', { name: 'Reconnect your worker' });
+  await expect(reconnect).toContainText('Reuse this agent’s saved token');
+  await expect(reconnect.getByRole('button', { name: 'Generate replacement token' })).toBeVisible();
+  await expect(reconnect.locator('pre').first()).toContainText("--agent-id 'agent-1'");
   await reconnect.getByLabel('Task to resume').selectOption('task-1');
   await expect(reconnect.locator('pre').last()).toContainText("--resume-task 'task-1'");
   await expect(reconnect.getByRole('button', { name: 'Copy resume command' })).toBeEnabled();
   await expect(reconnect).toContainText('Do not delete or reset the workspace.');
+});
+
+test('reconnecting from the general guide selects an owned agent for token replacement', async ({ page }) => {
+  const state = await connect(page);
+  const ownerId = '11111111-1111-4111-8111-111111111111';
+  state.project.members[0].id = ownerId;
+  state.project.agents.push({
+    id: 'agent-1', name: 'My Codex', client: 'Codex', owner: 'Test owner', ownerId,
+    machine: 'Laptop', capabilities: [], grant: 'active', presence: 'offline', lastSeen: null, session: null,
+  });
+  await page.route('https://api.tandem.test/api/me', route => route.fulfill({ json: { id: ownerId, name: 'Test owner' } }));
+  await page.route('**/.well-known/oauth-protected-resource/mcp/', route => route.fulfill({ json: { resource: 'https://api.tandem.test/mcp/' } }));
+  await page.route('**/api/mcp/oauth/connections', route => route.fulfill({ json: [] }));
+  await page.route('**/api/projects/project-1/room', route => route.fulfill({ json: { exchanges: [] } }));
+  await page.goto('/#/projects/project-1/agents');
+  await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
+  await page.getByRole('tab', { name: 'Reconnecting' }).click();
+  const reconnect = page.getByRole('region', { name: 'Reconnect your worker' });
+  await expect(reconnect.getByRole('button', { name: 'Copy download and start command' })).toBeDisabled();
+  await reconnect.getByLabel('Agent to reconnect').selectOption('agent-1');
+  await expect(reconnect.locator('pre').first()).toContainText("--agent-id 'agent-1'");
+  await expect(reconnect.getByRole('button', { name: 'Copy download and start command' })).toBeEnabled();
+  await reconnect.getByRole('button', { name: 'Generate replacement token' }).click();
+  await expect(page.getByRole('dialog', { name: 'Connection token for My Codex' })).toContainText('replaces any existing token');
 });
 
 test('agent room sends private human messages and opens connection onboarding', async ({ page }) => {

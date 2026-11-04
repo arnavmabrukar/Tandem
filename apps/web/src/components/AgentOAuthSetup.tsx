@@ -51,11 +51,15 @@ function CopyButton({ text, label, disabled = false }: { text: string; label: st
 }
 
 function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTimeIntro }: { project: Project; agent?: Agent; url: string; initialClient: string; roomPrompt: string; firstTimeIntro: ReactNode }) {
+  const { user } = useSession();
   const [tab, setTab] = useState<'first' | 'reconnect'>('first');
+  const [selectedAgentId, setSelectedAgentId] = useState('');
   const [engine, setEngine] = useState(initialClient === 'Claude Code' ? 'claude' : initialClient === 'Codex' ? 'codex' : 'custom');
   const [custom, setCustom] = useState('');
   const [verification, setVerification] = useState('');
   const [resumeTaskId, setResumeTaskId] = useState('');
+  const ownedAgents = project.agents.filter(candidate => candidate.ownerId === user?.id && candidate.grant !== 'revoked');
+  const workerAgent = agent ?? ownedAgents.find(candidate => candidate.id === selectedAgentId);
   const sandboxSetup = 'npm install -g @anthropic-ai/sandbox-runtime@0.0.81';
   const codexSetup = 'npm install -g @openai/codex@latest @anthropic-ai/sandbox-runtime@0.0.81\ncodex login\ncodex login status';
   // The native installer uses ~/.local/bin; make it available in this terminal
@@ -67,12 +71,12 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
   const ready = repositoryValid && (engine !== 'custom' || !!custom.trim());
   const verificationArgs = verification.split('\n').map(line => line.trim()).filter(Boolean)
     .map(command => ` --verify-command ${quote(command)}`).join('');
-  const argumentsText = `--prompt-token --project ${quote(project.id)} --url ${quote(url)} --repository ${quote(project.repository)}${agent ? ` --agent-id ${quote(agent.id)}` : ''} ${engine === 'custom' ? `--agent-command ${quote(custom.trim() || 'YOUR_AGENT_COMMAND')}` : `--agent ${engine}`}${verificationArgs}`;
+  const argumentsText = `--prompt-token --project ${quote(project.id)} --url ${quote(url)} --repository ${quote(project.repository)}${workerAgent ? ` --agent-id ${quote(workerAgent.id)}` : ''} ${engine === 'custom' ? `--agent-command ${quote(custom.trim() || 'YOUR_AGENT_COMMAND')}` : `--agent ${engine}`}${verificationArgs}`;
   // The frontend serves the runner; absolute install and managed workspace paths
   // let users run this command from any terminal directory.
   const installCommand = `mkdir -p "$HOME/Downloads" &&\ncurl -fLsS ${quote(new URL('/downloads/tandem_runner.py', window.location.origin).href)} \\\n  -o "$HOME/Downloads/tandem_runner.py" &&\npython3 "$HOME/Downloads/tandem_runner.py" ${argumentsText}`;
-  const resumableTasks = agent ? project.tasks.filter(task =>
-    (task.agentId === agent.id || task.assignedAgentId === agent.id)
+  const resumableTasks = workerAgent ? project.tasks.filter(task =>
+    (task.agentId === workerAgent.id || task.assignedAgentId === workerAgent.id)
     && ['blocked', 'claimed', 'in_progress'].includes(task.status)) : [];
   const resumeCommand = resumeTaskId ? `${installCommand} --resume-task ${quote(resumeTaskId)}` : '';
   return <>
@@ -140,13 +144,23 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
   <div role="tabpanel" id="setup-reconnect-panel" aria-labelledby="setup-reconnect-tab" hidden={tab !== 'reconnect'}>
   <section aria-label="Reconnect your worker" className="oauth-step worker-reconnect">
     <h3>Restart your worker</h3>
-    <p>Run this command again to reuse this agent’s workspace. Paste the agent token at the hidden prompt and press Enter. You do not need to reconnect MCP.</p>
+    {!agent && <Field label="Agent to reconnect"><select value={selectedAgentId} onChange={event => {
+      const selected = ownedAgents.find(candidate => candidate.id === event.target.value);
+      setSelectedAgentId(event.target.value);
+      setResumeTaskId('');
+      if (selected) setEngine(selected.client === 'Claude Code' ? 'claude' : selected.client === 'Codex' ? 'codex' : 'custom');
+    }}><option value="">Select an agent</option>{ownedAgents.map(candidate =>
+      <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></Field>}
+    <p>Reuse this agent’s saved token at the hidden terminal prompt, then press Enter. Tandem cannot show the token again. You do not need to reconnect MCP.</p>
+    {workerAgent ? <><p>Lost the token? Generate a replacement below. The previous token will stop working.</p>
+      <AgentTokenButton project={project} agent={workerAgent} buttonLabel="Generate replacement token" /></>
+      : <p className="small muted">Select an agent to get its token and restart command.</p>}
     <pre className="oauth-code">{installCommand}</pre>
-    <CopyButton key={installCommand} text={installCommand} label="Copy download and start command" disabled={!ready} />
+    <CopyButton key={installCommand} text={installCommand} label="Copy download and start command" disabled={!ready || !workerAgent} />
     {!ready && <p className="small muted">Complete the worker settings in First-time setup to enable copying.</p>}
     <h3>Resume saved task changes</h3>
     <p><strong>Saved changes:</strong> If setup says “Use a clean, dedicated clone,” this agent’s workspace has uncommitted task work. Your current terminal folder is not the cause. Do not delete or reset the workspace.</p>
-    {agent ? <>
+    {workerAgent ? <>
       <Field label="Task to resume" hint="Choose the blocked or active task that owns those saved changes.">
         <select value={resumeTaskId} onChange={event => setResumeTaskId(event.target.value)}>
           <option value="">Select a task</option>
