@@ -722,6 +722,21 @@ test('one repository control searches every page and accepts a pasted URL', asyn
   await expect(page.getByRole('link', { name: 'Adjust GitHub access' })).toBeVisible();
 });
 
+test('importing a repository without the branch shows the backend explanation', async ({ page }) => {
+  await connect(page);
+  await mockGitHub(page, { connected: true, login: 'octo' });
+  const detail = 'octo/alpha has no branch named main. If the repository is empty, push a first commit and try again.';
+  await page.route('https://api.tandem.test/api/projects', (route) =>
+    route.fulfill({ status: 409, json: { detail } }));
+  await page.goto('/#/projects/new');
+  await page.getByRole('combobox', { name: 'Repository' }).click();
+  await page.getByRole('option', { name: 'octo/alpha' }).click();
+  await page.getByRole('button', { name: 'Import repository' }).click();
+  await expect(page.getByRole('alert')).toContainText(detail);
+  await expect(page.getByText('You do not have permission')).toHaveCount(0);
+  await expect(page.getByRole('combobox', { name: 'Repository' })).toHaveValue('octo/alpha');
+});
+
 test('settings finishes GitHub authorization and removes the code from the address', async ({ page }) => {
   await connect(page);
   const completed = await mockGitHub(page, { connected: false, login: null });

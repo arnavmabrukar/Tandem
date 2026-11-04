@@ -192,6 +192,8 @@ See `services/mediator/META_PLANNER.md` for backend environment configuration.
 
 New projects require a GitHub App user connection. The backend verifies the numeric
 repository ID, installation access and selected branch using GitHub before insertion.
+A branch that does not exist, including on an empty repository, returns 409 with a message
+that can be shown to people.
 `name` must match GitHub's repository name (truncated to 80 characters), and
 `repository` must match its canonical `owner/name`. Duplicate active imports by the
 same creator return 409. Existing projects may update name/description, but not repository.
