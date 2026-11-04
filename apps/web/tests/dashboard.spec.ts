@@ -563,35 +563,33 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await page.goto('/#/projects/project-1/agents');
   await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
   const worker = page.getByRole('region', { name: 'Continuous worker setup' });
-  const download = worker.getByRole('link', { name: 'Download the standalone Tandem runner' });
-  await expect(download).toHaveAttribute('download', 'tandem_runner.py');
-  const script = await page.request.get((await download.getAttribute('href'))!);
+  const script = await page.request.get('/downloads/tandem_runner.py');
   expect(script.status()).toBe(200);
   expect(await script.text()).toBe(readFileSync(new URL('../../../agent-integrations/runner/tandem_runner.py', import.meta.url), 'utf8'));
   await expect(worker).not.toContainText('agent-integrations/runner/');
-  await expect(worker).toContainText('Connecting an IDE grants access; it does not start a worker.');
-  await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText('--agent codex');
-  await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText('--prompt-token');
-  await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText('python3 tandem_runner.py');
+  await expect(worker).toContainText('No access to Tandem’s private repository is needed.');
+  await expect(worker.locator('pre')).toHaveCount(0);
+  await worker.getByLabel('Project folder', { exact: true }).fill('/projects/my-worker');
+  await expect(worker.locator('pre')).toHaveCount(1);
+  for (const name of ['Copy clone command', 'Copy setup check', 'Copy worker command', 'Copy listener command']) {
+    await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
+  }
   const install = worker.getByRole('region', { name: 'Download and start worker' });
   await expect(install.locator('pre')).toContainText("curl -fLsS 'http://127.0.0.1:4173/downloads/tandem_runner.py'");
   await expect(install.locator('pre')).toContainText('--project \'project-1\'');
   await expect(install.locator('pre')).toContainText('--agent codex');
   await expect(install.locator('pre')).toContainText('--prompt-token');
-  await expect(worker.locator('pre').filter({ hasText: 'git clone' })).toContainText('https://github.com/team/tandem.git');
+  await expect(install.locator('pre')).not.toContainText('git clone');
   await page.getByLabel('Your IDE agent').selectOption('Claude Code');
   await expect(worker.getByLabel('Worker engine')).toHaveValue('claude');
-  await worker.getByLabel('Worker clone path').fill("../worker's clone");
-  await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText('--agent claude');
-  await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText("'../worker'\\''s clone'");
+  await worker.getByLabel('Project folder', { exact: true }).fill("../worker's clone");
   await expect(install.locator('pre')).toContainText("'../worker'\\''s clone'");
   await expect(install.locator('pre')).toContainText('--agent claude');
   await worker.getByLabel('Worker engine').selectOption('custom');
   await expect(worker.getByRole('button', { name: 'Copy worker command' })).toHaveCount(0);
   await expect(install).toHaveCount(0);
   await worker.getByLabel('Agent command', { exact: true }).fill('my-agent --headless');
-  await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText("--agent-command 'my-agent --headless'");
-  await expect(worker.getByRole('button', { name: 'Copy worker command' })).toBeVisible();
+  await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeVisible();
   await expect(install.locator('pre')).toContainText("--agent-command 'my-agent --headless'");
 });
 
@@ -623,9 +621,8 @@ test('agent room sends private human messages and opens connection onboarding', 
   await page.screenshot({ path: '/tmp/tandem-agent-room-' + page.viewportSize()!.width + '.png', fullPage: true });
   await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
-  await page.getByText('Automatic room replies while idle', { exact: true }).click();
-  await expect(page.getByRole('dialog').locator('pre').filter({ hasText: '--presence-only' })).toContainText('--project');
-  await expect(page.getByRole('button', { name: 'Copy listener command', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Continuous worker setup' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Copy listener command', exact: true })).toHaveCount(0);
 });
 
 test('the site root is the public landing page and never waits for the session', async ({ page }) => {
