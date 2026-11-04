@@ -407,6 +407,7 @@ fieldset {
 .settings-nav-toggle > svg.expanded { transform: none; }
 .settings-subnav { margin: 0 0 8px 20px; padding-left: 10px; border-left: 1px solid #dce7ef; flex-shrink: 0; }
 .settings-subnav p { margin: 14px 10px 4px; color: #536f84; font-size: 11px; font-weight: 650; overflow-wrap: anywhere; }
+.settings-subnav p strong { font-weight: 800; color: #0b3954; }
 .sidebar nav .settings-subnav a { padding: 7px 10px; font-size: 12px; }
 .settings-section, .setup-stack h2 { scroll-margin-top: 24px; }
 .nav-count {

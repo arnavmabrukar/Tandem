@@ -86,8 +86,8 @@ export function AppLayout({
     { to: 'agents', text: 'Agents', icon: Bot },
   ];
   const settingsLink = (section: string) => `/settings?${new URLSearchParams({ ...(id ? { project: id } : {}), section })}`;
+  const defaultSettingsSection = id ? 'setup-details' : 'connection-guide';
   const settingsSections = [
-    { title: 'Account', items: [['profile', 'Profile'], ['github', 'GitHub'], ['connected-agents', 'Connected agents'], ['local-runner', 'Local runner'], ['delete-account', 'Delete account']] },
     ...(id ? [{ title: project?.name ?? 'Project', items: [['setup-details', 'Project details'], ['setup-people', 'People & invitations'], ['setup-automation', 'Agents & automation'], ...(project && roleFor(project, user!.id) === 'owner' ? [['setup-danger', 'Danger zone']] : [])] }] : []),
     { title: 'Help', items: [['connection-guide', 'Connection guide']] },
   ];
@@ -140,15 +140,15 @@ export function AppLayout({
           <button className={`settings-nav-toggle${inSettings ? ' active' : ''}`} aria-expanded={settingsOpen} aria-controls="settings-navigation"
             onClick={() => {
               setSettingsOpen(inSettings ? !settingsOpen : true);
-              if (!inSettings) navigate(settingsLink('profile'));
+              if (!inSettings) navigate(settingsLink(defaultSettingsSection));
             }}>
             <Settings size={18} /><span>Settings</span><ChevronDown size={16} className={settingsOpen ? 'expanded' : ''} />
           </button>
           {settingsOpen && <div id="settings-navigation" className="settings-subnav">
             {settingsSections.map(group => <div key={group.title}>
-              <p>{group.title}</p>
+              <p><strong>{group.title}</strong></p>
               {group.items.map(([section, text]) => {
-                const active = inSettings && (new URLSearchParams(location.search).get('section') ?? 'profile') === section;
+                const active = inSettings && (new URLSearchParams(location.search).get('section') ?? defaultSettingsSection) === section;
                 return <Link key={section} to={settingsLink(section)} className={active ? 'active' : undefined} aria-current={active ? 'location' : undefined}>{text}</Link>;
               })}
             </div>)}

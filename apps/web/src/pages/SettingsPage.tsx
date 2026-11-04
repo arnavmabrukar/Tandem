@@ -13,7 +13,7 @@ import { McpConnectionList } from './McpOAuthPage';
 export function SettingsPage({ project, userOnly = false }: { project: Project | null; userOnly?: boolean }) {
   const [params] = useSearchParams();
   const location = useLocation();
-  const section = params.get('section') ?? 'profile';
+  const section = params.get('section') ?? (userOnly ? 'profile' : project ? 'setup-details' : 'connection-guide');
   useLayoutEffect(() => {
     // Query parameters work with the app's hash router and repeated section clicks.
     const target = document.getElementById(section);
@@ -53,8 +53,9 @@ export function SettingsPage({ project, userOnly = false }: { project: Project |
 
   return (
     <>
-      <PageHeader title={userOnly ? 'User settings' : 'Settings'} description={userOnly ? 'Manage your profile, sign-ins and account access.' : 'Manage your account, project and agent connections in one place.'} />
+      <PageHeader title={userOnly ? 'User settings' : 'Settings'} description={userOnly ? 'Manage your profile, sign-ins and account access.' : 'Manage your project, people and automation.'} />
 
+      {userOnly && <>
       <section id="profile" tabIndex={-1} className="panel narrow-panel settings-section">
         <h2>Profile</h2>
         <form onSubmit={submit}>
@@ -128,9 +129,10 @@ export function SettingsPage({ project, userOnly = false }: { project: Project |
         {removalCopyFailed && <p role="alert">Clipboard unavailable. Select and copy the command above.</p>}
         <p className="small muted">This deletes the runner from Downloads and its previous install location. It does not stop an already running worker, remove project clones or managed workspaces, or revoke agent access. You can download it again from agent setup.</p>
       </section>
+      </>}
       {!userOnly && project && <ProjectSetupPage key={project.id} project={project} embedded />}
       {!userOnly && <div id="connection-guide" tabIndex={-1} className="settings-section"><ConnectionsPage /></div>}
-      <section id="delete-account" tabIndex={-1} className="panel narrow-panel danger-zone settings-section">
+      {userOnly && <section id="delete-account" tabIndex={-1} className="panel narrow-panel danger-zone settings-section">
         <h2>Delete your Tandem account</h2>
         <p>Removes your profile and project memberships, disconnects GitHub, and revokes your agents and their tokens. Transfer ownership or delete any projects where you are the only owner first.</p>
         <p className="small muted">Shared project history, including past messages and activity, remains. Your Google, GitHub and Auth0 accounts are not deleted. Signing in again creates a new Tandem account without your previous access.</p>
@@ -139,7 +141,7 @@ export function SettingsPage({ project, userOnly = false }: { project: Project |
           <ErrorNotice error={deletion.error} />
           <Button variant="destructive" type="submit" disabled={confirmation !== 'DELETE' || deletion.isPending || deletion.isSuccess}>{deletion.isPending ? 'Deleting…' : 'Delete my account'}</Button>
         </form>
-      </section>
+      </section>}
     </>
   );
 }

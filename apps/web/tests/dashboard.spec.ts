@@ -24,7 +24,7 @@ test('profile menu opens user settings and account deletion requires confirmatio
   expect(deletion).toEqual({ confirmation: 'DELETE' });
 });
 
-test('settings sidebar expands and navigates unified account and project sections', async ({ page }) => {
+test('settings sidebar expands and navigates project and help sections', async ({ page }) => {
   await connect(page);
   await page.goto('/#/projects/project-1/activity');
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
@@ -33,12 +33,14 @@ test('settings sidebar expands and navigates unified account and project section
   await nav.getByRole('link', { name: 'People & invitations' }).click();
   await expect(page).toHaveURL(/project=project-1&section=setup-people/);
   await expect(page.locator('#setup-people')).toBeFocused();
-  await nav.getByRole('link', { name: 'GitHub', exact: true }).click();
-  await expect(page.locator('#github')).toBeFocused();
-  await nav.getByRole('button', { name: 'Settings' }).click();
   await expect(nav.getByRole('link', { name: 'Profile', exact: true })).toHaveCount(0);
+  await expect(page.locator('#profile')).toHaveCount(0);
+  await nav.getByRole('link', { name: 'Connection guide', exact: true }).click();
+  await expect(page.locator('#connection-guide')).toBeFocused();
+  await nav.getByRole('button', { name: 'Settings' }).click();
+  await expect(nav.getByRole('link', { name: 'Project details', exact: true })).toHaveCount(0);
   await page.reload();
-  await expect(nav.getByRole('link', { name: 'GitHub', exact: true })).toHaveAttribute('aria-current', 'location');
+  await expect(nav.getByRole('link', { name: 'Connection guide', exact: true })).toHaveAttribute('aria-current', 'location');
 });
 
 async function connect(page: Page) {
