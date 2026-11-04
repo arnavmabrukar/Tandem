@@ -331,6 +331,10 @@ def claim_task(identity: dict, project_id: UUID, task_id: UUID,
                expected_version: int, operation_id: UUID) -> dict:
     """Claim an open task whose contract is approved and dependencies finished."""
     def apply(connection, project_version: int) -> dict:
+        from mediator.db.worker_controls import latest_control
+        control = latest_control(connection, project_id, identity['agentId'])
+        if control and control['action'] == 'stop':
+            raise AgentClaimBlocked('This worker is stopped. A project member must send /start @agent before it can claim tasks.')
         task = _lock_task(connection, project_id, task_id)
         if task["version"] != expected_version:
             raise AgentTaskConflict(
@@ -462,7 +466,9 @@ def get_assignments(identity: dict, project_id: UUID) -> dict:
                                ORDER BY t.created_at, t.id LIMIT %s""",
             (project_id, identity["agentId"], TASK_LIMIT + 1),
         ).fetchall()
+        from mediator.db.worker_controls import latest_control
+        control = latest_control(connection, project_id, identity['agentId'])
     return {"projectId": str(project_id), "agentId": identity["agentId"],
             "pushBranch": project["push_branch"],
             "tasks": [_public_task(task, identity["agentId"]) for task in tasks[:TASK_LIMIT]],
-            "truncated": len(tasks) > TASK_LIMIT}
+            "truncated": len(tasks) > TASK_LIMIT, 'workerControl': control}

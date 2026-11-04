@@ -1053,6 +1053,38 @@ test('humans speak through the mediator and see authenticated worker replies', a
   await expect(page.getByText('Your messages stay private.', { exact: false })).toBeVisible();
 });
 
+test('room offers everyone and idle agents as recipients and renders broadcast replies', async ({ page }) => {
+  const state = await connect(page);
+  state.project.agents.push({ id: 'agent-1', name: 'Idle Codex', client: 'Codex', owner: 'Test owner',
+    machine: 'Laptop', capabilities: [], grant: 'active', presence: 'online', lastSeen: null, session: null });
+  const exchanges: Record<string, unknown>[] = [];
+  const bodies: string[] = [];
+  await page.route('**/api/projects/project-1/room', async route => {
+    if (route.request().method() !== 'POST') return route.fulfill({ json: { exchanges } });
+    const sent = route.request().postDataJSON();
+    bodies.push(sent.body);
+    const exchange = { id: `exchange-${bodies.length}`, operationId: sent.operationId, senderUserId: 'user-1',
+      sender: 'Test owner', kind: 'human', body: sent.body, state: 'complete', createdAt: new Date().toISOString(),
+      response: { reply: 'Queued for Idle Codex.', proposal: null, cancelTaskIds: [],
+        workerRequests: sent.body.startsWith('@everyone') ? [{ id: 'broadcast-1', taskId: null, agentId: 'agent-1', message: 'What is your status?' }] : [] } };
+    exchanges.push(exchange);
+    await route.fulfill({ json: exchange });
+  });
+  await page.goto('/#/projects/project-1/agents');
+  const composer = page.getByRole('textbox', { name: 'Message mediator' });
+  await composer.fill('/stop @Idle');
+  await page.getByRole('button', { name: '@Idle Codex', exact: true }).click();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(composer).toHaveValue('');
+  expect(bodies).toEqual(['/stop @Idle Codex']);
+  await composer.fill('@every');
+  await page.getByRole('button', { name: '@everyone', exact: true }).click();
+  await composer.pressSequentially('what is your status?');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(page.locator('.room-mediator').last()).toContainText('Relayed to Idle Codex: What is your status?');
+  expect(bodies[1]).toBe('@everyone what is your status?');
+});
+
 test('the site root is the public landing page and never waits for the session', async ({ page }) => {
   const state = await connect(page);
   await page.goto('/?test-auth=delayed');

@@ -96,20 +96,24 @@ def acknowledge_presence(project_id: UUID, check_id: UUID, identity):
 def pending_worker_requests(project_id: UUID, identity, task_id: UUID | None = None):
     with _transaction() as conn:
         _authorize(conn, project_id, identity=identity)
-        rows = conn.execute("""SELECT r.body, r.response->'workerRequest' AS request
+        rows = conn.execute("""SELECT target.request
             FROM public.agent_room_exchanges r
+            CROSS JOIN LATERAL jsonb_array_elements(
+                COALESCE(r.response->'workerRequests','[]'::jsonb) ||
+                CASE WHEN r.response->'workerRequest' IS NOT NULL
+                     THEN jsonb_build_array(r.response->'workerRequest') ELSE '[]'::jsonb END
+            ) AS target(request)
             WHERE r.project_id=%s AND r.state='complete'
-              AND r.response->'workerRequest'->>'agentId'=%s
-              AND (%s::text IS NULL OR r.response->'workerRequest'->>'taskId'=%s::text)
+              AND target.request->>'agentId'=%s
+              AND (%s::text IS NULL OR target.request->>'taskId'=%s::text OR target.request->>'taskId' IS NULL)
               AND NOT EXISTS (SELECT 1 FROM public.agent_room_exchanges a
                   WHERE a.project_id=r.project_id AND a.sender_agent_id=%s
-                    AND a.operation_id=(r.response->'workerRequest'->>'id')::uuid)
+                    AND a.operation_id=(target.request->>'id')::uuid)
             ORDER BY r.created_at, r.id LIMIT 10""",
             (project_id, identity['agentId'], task_id, task_id, identity['agentId'])).fetchall()
-        # Older requests explicitly shared their human text; new requests carry
-        # only mediator-written text in the workerRequest payload.
+        # Never fall back to a private human body, including for legacy records.
         return {'workerRequests': [{'id': row['request']['id'], 'taskId': row['request']['taskId'],
-                                    'message': row['request'].get('message', row['body'])} for row in rows]}
+                                    'message': row['request'].get('message', 'The mediator requested a task update.')} for row in rows]}
 
 
 def reply_worker_request(project_id: UUID, request_id: UUID, body: str, identity):
@@ -126,10 +130,14 @@ def reply_worker_request(project_id: UUID, request_id: UUID, body: str, identity
             if existing['body'] != body:
                 raise AgentOperationConflict('This worker request already has a different reply')
             return _public(existing)
-        request = conn.execute("""SELECT 1 FROM public.agent_room_exchanges
+        request = conn.execute("""SELECT 1 FROM public.agent_room_exchanges r
+            CROSS JOIN LATERAL jsonb_array_elements(
+                COALESCE(r.response->'workerRequests','[]'::jsonb) ||
+                CASE WHEN r.response->'workerRequest' IS NOT NULL
+                     THEN jsonb_build_array(r.response->'workerRequest') ELSE '[]'::jsonb END
+            ) AS target(request)
             WHERE project_id=%s AND state='complete' AND sender_user_id IS NOT NULL
-              AND response->'workerRequest'->>'id'=%s
-              AND response->'workerRequest'->>'agentId'=%s""",
+              AND target.request->>'id'=%s AND target.request->>'agentId'=%s""",
             (project_id, str(request_id), identity['agentId'])).fetchone()
         if not request:
             raise AgentOperationConflict('Worker request is unavailable or addressed to another agent')
@@ -240,11 +248,26 @@ def _assign_from_reply(conn, project_id, user_id, operation_id, reply, context):
     return '\n'.join(outcomes)
 
 
-def _mentioned_agent(body: str, tasks: list[dict]) -> tuple[str | None, str | None]:
+def _control_command(body, agents):
+    """Slash controls have exact recipients; the model cannot invent controls."""
+    if not body.startswith('/'):
+        return None
+    match = re.fullmatch(r'/(start|stop)\s+@(.+)', body, flags=re.IGNORECASE)
+    if not match:
+        return {'error': 'Use /start @Agent Name or /stop @Agent Name. Use @everyone to target all agents.'}
+    action, name = match.group(1).lower(), match.group(2).strip()
+    targets = agents if name.casefold() == 'everyone' else [agent for agent in agents if agent['name'].casefold() == name.casefold()]
+    if not targets or (name.casefold() != 'everyone' and len(targets) != 1):
+        return {'error': 'Choose an eligible project agent by its exact @name, or use @everyone.'}
+    return {'action': action, 'agents': targets}
+
+
+def _mentioned_agent(body: str, tasks: list[dict], roster=None) -> tuple[str | None, str | None]:
     """Resolve exact @names from this project's working tasks, including spaces."""
     agents = {(str(task['agent_id']), task['agent_name']) for task in tasks
               if task.get('agent_id') and task.get('agent_name')
               and task['status'] in ('claimed', 'in_progress', 'blocked')}
+    agents.update((str(agent['id']), agent['name']) for agent in (roster or []))
     matches = set()
     for marker in re.finditer(r'(?<!\S)@', body):
         remaining = body[marker.end():]
@@ -306,7 +329,12 @@ def post_message(project_id: UUID, request: RoomMessageRequest, *, user_id=None,
                 VALUES (%s,%s,%s,%s,%s,%s,%s,now()+interval '3 minutes') RETURNING *""",
                 (project_id, user_id, agent_id, name, request.operationId, request.body, lease)).fetchone()
         context = _context(conn, project_id, project, role, identity is not None)
-        mention_id, mention_error = _mentioned_agent(request.body, context['tasks']) if identity is None else (None, None)
+        command = _control_command(request.body, context.get('agents', [])) if identity is None else None
+        broadcast = bool(identity is None and re.search(r'(?<!\S)@everyone(?=\s|$|[,.!?])', request.body, re.IGNORECASE))
+        mention_id, mention_error = (_mentioned_agent(request.body, context['tasks'], context.get('agents'))
+                                    if identity is None and not command and not broadcast else (None, None))
+        if broadcast:
+            context['broadcastToEveryone'] = True
         if mention_id:
             context['mentionedAgentId'] = mention_id
         history = _history(conn, project_id, identity is not None, 10)
@@ -315,10 +343,11 @@ def post_message(project_id: UUID, request: RoomMessageRequest, *, user_id=None,
         conversation = _conversation(history, row['id'])
     try:
         # Never hold a transaction open while waiting for a model provider.
-        reply = RoomReply.model_validate(generate_plan('', context, conversation=conversation, room=True))
+        reply = (RoomReply(reply=command.get('error', 'Worker control queued.')) if command
+                 else RoomReply.model_validate(generate_plan('', context, conversation=conversation, room=True)))
         with _transaction() as conn:
             _, role, _ = _authorize(conn, project_id, user_id=user_id, identity=identity, write=True,
-                                    lock_project=not bool(reply.assignments))
+                                    lock_project=not bool(reply.assignments or command))
             # Agent-authored messages cannot trigger delegation. Human owners
             # and reviewers use the same permissions as the assignment UI.
             if identity is not None or role not in ('owner', 'reviewer'):
@@ -339,11 +368,36 @@ def post_message(project_id: UUID, request: RoomMessageRequest, *, user_id=None,
             # Attribute replies to the configured model, never a name supplied
             # by the model itself. Persist it so future config changes keep history accurate.
             response['model'] = settings.meta_model
+            if command and not command.get('error'):
+                from mediator.db.worker_controls import save_controls
+                save_controls(conn, project_id, user_id, request.operationId, command['action'], command['agents'])
+                names = ', '.join(agent['name'] for agent in command['agents'])
+                response['reply'] = (f'{names}: finish current work, then stop claiming tasks. Each worker will confirm here when idle.'
+                                     if command['action'] == 'stop' else f'{names}: accepting tasks is enabled. Running workers will confirm here after check-in.')
             if reply.requestPresence:
                 # Independent random ID: agents cannot infer the private source ID.
                 response['presenceCheckId'] = str(uuid4())
-            if mention_error:
+            if command:
+                pass
+            elif mention_error:
                 response['reply'] = mention_error
+            elif identity is None and (broadcast or (mention_id and not any(
+                    t.get('agent_id') == mention_id and t['status'] in ('claimed','in_progress','blocked')
+                    for t in context['tasks']))) and reply.relayMessage:
+                relay_text = reply.relayMessage.strip()
+                targets = context.get('agents', []) if broadcast else [a for a in context.get('agents', []) if str(a['id']) == mention_id]
+                # Only the separately composed mediator text is made available
+                # to recipients, never the private exchange or its identifier.
+                if relay_text and relay_text.casefold() != request.body.casefold() and '\x00' not in relay_text and targets:
+                    response['workerRequests'] = []
+                    for agent in targets:
+                        active = next((t for t in context['tasks'] if t.get('agent_id') == str(agent['id'])
+                                       and t['status'] in ('claimed', 'in_progress', 'blocked')), None)
+                        response['workerRequests'].append({'id': str(uuid4()), 'agentId': str(agent['id']),
+                            'taskId': str(active['id']) if active else None, 'message': relay_text})
+                    response['reply'] = 'Queued a mediator message to ' + ', '.join(a['name'] for a in targets) + '. Their replies will appear here after check-in.'
+                else:
+                    response['reply'] = 'I could not compose a separate message for those agents. Please try again.'
             elif identity is None and (reply.relayTaskId or reply.relayMessage or mention_id):
                 relay_text = (reply.relayMessage or '').strip()
                 if relay_text.casefold() == request.body.casefold() or '\x00' in relay_text:

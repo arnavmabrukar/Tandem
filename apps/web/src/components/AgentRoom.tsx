@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { AlertCircle, ArrowUp, Sparkles, LockKeyhole, Trash2 } from 'lucide-react';
+import { AlertCircle, ArrowUp, Sparkles, LockKeyhole, Trash2, Terminal } from 'lucide-react';
 import { useSession } from '../auth/session';
 import { ApiError } from '../api/client';
 import { useAction } from '../hooks/useWorkspace';
@@ -91,6 +91,7 @@ function Exchange({ item, project, mediatorModel }: { item: RoomExchange; projec
           </div>
         : <p className="room-body">{item.response?.reply ?? 'Waiting for the mediator…'}</p>}
       {workerRequest?.message && <p className="room-body"><strong>Relayed to {workerName}:</strong> {workerRequest.message}</p>}
+      {item.response?.workerRequests?.map(request => <p className="room-body" key={request.id}><strong>Relayed to {project.agents.find(agent => agent.id === request.agentId)?.name ?? 'agent'}:</strong> {request.message}</p>)}
       {item.response?.proposal && <DraftCard project={project} proposal={item.response.proposal}
         disabled={!owner || item.senderUserId !== user!.id} message={{ role: 'assistant', content: item.response.reply,
           saved: item.response.saved, approved: item.response.saved?.approvedPlanVersion === item.response.saved?.planVersion && !!item.response.saved }}
@@ -117,6 +118,7 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
   const [mention, setMention] = useState<{ start: number; end: number; query: string } | null>(null);
   const [clearTarget, setClearTarget] = useState<string | null>(null);
   const [cleared, setCleared] = useState(false);
+  const [commandsOpen, setCommandsOpen] = useState(false);
   const owner = roleFor(project, user!.id) === 'owner';
   const clear = useMutation({
     mutationFn: () => api.clearRoom(project.id, clearTarget!),
@@ -168,9 +170,8 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
   const sendRecorded = !!pending.current && items.some(item => item.operationId === pending.current!.operationId
     && item.senderUserId === user!.id && item.kind === 'human' && (item.state === 'complete' || item.state === 'failed'));
   const work = project.tasks.filter(task => ['claimed', 'in_progress', 'blocked', 'conflict', 'in_review'].includes(task.status));
-  const workingAgents = project.agents.filter(agent => agent.grant === 'active'
-    && project.tasks.some(task => task.agentId === agent.id && ['claimed', 'in_progress', 'blocked'].includes(task.status)));
-  const mentionOptions = mention ? workingAgents.filter(agent =>
+  const workingAgents = project.agents.filter(agent => agent.grant === 'active');
+  const mentionOptions = mention ? [{ id: 'everyone', name: 'everyone' }, ...workingAgents].filter(agent =>
     agent.name.toLocaleLowerCase().startsWith(mention.query.trimStart().toLocaleLowerCase())).slice(0, 5) : [];
   useEffect(() => {
     // Match the authenticated sender AND operation, never just repeated text.
@@ -205,8 +206,11 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
   }
   return <section className="plan-chat agent-room-chat" aria-label="Project room">
     <header className="chat-header room-header"><div><h2>Project room</h2><div className="row wrap"><MediatorIdentity model={room.data?.mediatorModel} /><span className="chat-caption">{project.name}</span></div></div>
+      <div className="row wrap">
+      <Button variant="ghost" size="sm" onClick={() => setCommandsOpen(true)}><Terminal size={15} />Commands</Button>
       {owner && <Button variant="ghost" size="sm" disabled={!items.length || room.isPending || send.isPending || clear.isPending}
         onClick={() => { clear.reset(); setCleared(false); setClearTarget(items.at(-1)!.id); }}><Trash2 size={15} />Clear chat</Button>}
+      </div>
     </header>
     {work.length > 0 && <section className="room-work-status" aria-label="Recorded work status">
       <details><summary><strong>Work status · {work.length}</strong><span className="room-work-preview">{work[0].progress || 'Waiting for an agent update.'}</span></summary>
@@ -232,14 +236,30 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
         {pending.current?.uncertain && <Button variant="outline" size="sm" onClick={() => send.mutate()}>Try again</Button>}
       </div>}
       <form className="chat-composer" onSubmit={e => { e.preventDefault(); submit(); }}>
-        {mentionOptions.length > 0 && <div className="room-mentions" aria-label="Mention a working agent">
+        {mentionOptions.length > 0 && <div className="room-mentions" aria-label="Mention an agent or everyone">
           {mentionOptions.map(agent => <button type="button" key={agent.id} onClick={() => insertMention(agent.name)}>@{agent.name}</button>)}
         </div>}
-        <textarea ref={composer} aria-label="Message mediator" placeholder={canPost ? 'Message Mediator — type @ to ask a working agent…' : 'Your role can read this room.'} maxLength={8000} value={body} disabled={!canPost || send.isPending} onChange={e => { setBody(e.target.value); updateMention(e.target.value, e.target.selectionStart); }} onKeyDown={e => { if (e.key === 'Escape') setMention(null); else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); if (mentionOptions.length) insertMention(mentionOptions[0].name); else submit(); } }} />
+        <textarea ref={composer} aria-label="Message mediator" placeholder={canPost ? 'Message Mediator — use @Agent Name or @everyone…' : 'Your role can read this room.'} maxLength={8000} value={body} disabled={!canPost || send.isPending} onChange={e => { setBody(e.target.value); updateMention(e.target.value, e.target.selectionStart); }} onKeyDown={e => { if (e.key === 'Escape') setMention(null); else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); if (mentionOptions.length) insertMention(mentionOptions[0].name); else submit(); } }} />
         <Button type="submit" className="chat-send" aria-label="Send message" disabled={!canPost || !body.trim() || send.isPending || pending.current?.uncertain}><ArrowUp size={20} /></Button>
       </form>
-      <p className="chat-footnote"><LockKeyhole size={13} /> Your messages stay private. Type @ to choose one working agent; the mediator relays a separate question only to that agent. Replies appear here after check-in. Latest 100 exchanges.</p>
+      <p className="chat-footnote"><LockKeyhole size={13} /> Use @Agent Name or @everyone to relay a question. /stop @Agent Name finishes current work, then goes idle; /start @Agent Name resumes accepting tasks. Commands require an @recipient. Your messages stay private. Latest 100 exchanges.</p>
     </div>
+    <Modal open={commandsOpen} onOpenChange={setCommandsOpen} title="Chat commands"
+      description="Talk through the mediator, or control which agents accept new tasks.">
+      <dl>
+        <dt><strong><code>/stop @Agent Name</code></strong></dt>
+        <dd>Finish current work, then stop claiming tasks. The agent posts “I’m idle” when it has finished.</dd>
+        <dt><strong><code>/start @Agent Name</code></strong></dt>
+        <dd>Allow the agent to accept tasks again. Its terminal worker must be running.</dd>
+        <dt><strong><code>@Agent Name your question</code></strong></dt>
+        <dd>Ask one agent through the mediator. Its reply appears in this chat after check-in.</dd>
+        <dt><strong><code>@everyone your question</code></strong></dt>
+        <dd>Relay a question to all eligible project agents, including idle ones.</dd>
+      </dl>
+      <p>Slash commands require an @recipient. Use <code>/stop @everyone</code> or <code>/start @everyone</code> to control all agents.</p>
+      <p className="small muted">Use the agent’s exact name, or type @ to select it. Owners and reviewers can send commands. Stop state survives restarts and clearing chat. Workers need the latest runner; these commands do not launch a closed terminal.</p>
+      <div className="row end"><Button variant="outline" onClick={() => setCommandsOpen(false)}>Got it</Button></div>
+    </Modal>
     <Modal open={clearTarget !== null} onOpenChange={open => { if (!open && !clear.isPending) setClearTarget(null); }}
       title="Delete previous room messages?" description="This permanently deletes earlier human, agent, and mediator messages for everyone in this project, including older history. Saved plans, tasks, and approvals stay intact.">
       <p>New messages arriving while this dialog is open will remain. This cannot be undone.</p>

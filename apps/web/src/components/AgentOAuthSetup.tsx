@@ -407,6 +407,7 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
   const url = discovery.data;
   const roomPrompt = `Use Tandem for project ${project.id}.
 Confirm access with tandem_whoami. Fetch tandem_get_assignments and summarize ready work and blockers.
+Respect workerControl from tandem_get_assignments: stop means finish current work and claim no new tasks until start. Acknowledge the control with tandem_acknowledge_worker_control only when ready or idle.
 Check tandem_get_presence_requests; acknowledge returned IDs with tandem_acknowledge_presence. Repeat between tasks.
 Check tandem_get_worker_room_requests between task steps. Answer mediator-relayed questions addressed to you with tandem_reply_worker_room_request, using the same request ID. Human room messages remain private.
 Before claiming work, read repo instructions, git status, the approved contract and dependencies. Preserve others’ changes and report progress, questions, tests and blockers through Tandem. Retry the same write with its original operation ID.

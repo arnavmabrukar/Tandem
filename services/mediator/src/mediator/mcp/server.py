@@ -28,6 +28,8 @@ mcp = MCPServer("Tandem", instructions=(
     "with its projectId/checkId to reply in the project room. To participate while idle, "
     "poll tandem_get_presence_requests periodically. Check tandem_get_worker_room_requests "
     "between task steps and reply with tandem_reply_worker_room_request. "
+    "Read workerControl from tandem_get_assignments: stop means finish your current task, then claim no more. "
+    "Acknowledge it with tandem_acknowledge_worker_control when idle; start permits claiming again. "
     "Only separate mediator-written requests addressed to this worker are visible; "
     "human room exchanges remain private."
 ), middleware=[deliver_presence_requests])
@@ -196,6 +198,17 @@ def tandem_acknowledge_presence(projectId: UUID, checkId: UUID) -> dict[str, Any
     from mediator.db.room import acknowledge_presence
     identity = _project_identity(projectId)
     return _run(lambda: acknowledge_presence(projectId, checkId, identity))
+
+
+@mcp.tool()
+def tandem_acknowledge_worker_control(projectId: UUID, controlId: UUID) -> dict[str, Any]:
+    """Acknowledge your latest /start or /stop control. Stop posts an idle message
+    only after your claimed/in-progress task finishes. Never claim work while stopped.
+    Read workerControl from tandem_get_assignments. Retries are idempotent.
+    """
+    from mediator.db.worker_controls import acknowledge_control
+    identity = _project_identity(projectId)
+    return _run(lambda: acknowledge_control(projectId, controlId, identity))
 
 
 @mcp.tool()

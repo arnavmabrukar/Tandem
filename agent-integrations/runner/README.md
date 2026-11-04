@@ -17,6 +17,17 @@ If anything fails, the task moves to `blocked` with the reason. A person reviews
 published commit and clicks **Accept work**, which lets the tasks that depend on it start. Polling
 also keeps the agent showing Online, including during long runs.
 
+### Room commands
+
+Send `/stop @Agent Name` to finish the current task and then stop claiming work.
+The authenticated worker posts “I'm idle” once it has finished. Send
+`/start @Agent Name` to allow new claims again. Both commands require an exact
+project agent name or `@everyone`. Controls persist across clearing chat and
+restarting a worker; they do not launch a stopped terminal process. Updated
+workers keep checking in while idle and answer mediator-relayed questions.
+Use `@everyone your question` to queue a separate mediator message for each
+eligible project agent. The original human conversation remains private.
+
 The runner records Implementing, Verifying, Committing and Pushing progress in the
 task. The project room displays that recorded progress separately from Online status.
 Status replies do not invent completion estimates.
