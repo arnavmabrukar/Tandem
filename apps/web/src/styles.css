@@ -1878,13 +1878,8 @@ td:first-child {
 .danger-body {
   padding: 20px 24px 24px;
 }
-.danger-outline {
+.danger-start {
   flex: none;
-  border-color: #a43a36;
-  color: #a43a36;
-}
-.danger-outline:hover {
-  background: #fcebea;
 }
 .delete-confirm {
   margin-top: 18px;
