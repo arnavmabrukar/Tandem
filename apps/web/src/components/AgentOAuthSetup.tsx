@@ -212,7 +212,7 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
   const roomPrompt = `Use Tandem for project ${project.id}.
 Confirm access with tandem_whoami. Fetch tandem_get_assignments and summarize ready work and blockers.
 Check tandem_get_presence_requests; acknowledge returned IDs with tandem_acknowledge_presence. Repeat between tasks.
-Check tandem_get_worker_room_requests between task steps. Answer messages addressed to you with tandem_reply_worker_room_request, using the same request ID. Other human room messages remain private.
+Check tandem_get_worker_room_requests between task steps. Answer mediator-relayed questions addressed to you with tandem_reply_worker_room_request, using the same request ID. Human room messages remain private.
 Before claiming work, read repo instructions, git status, the approved contract and dependencies. Preserve others’ changes and report progress, questions, tests and blockers through Tandem. Retry the same write with its original operation ID.
 Never approve or merge your own work, access human room messages, or duplicate a running worker’s tasks. Continuous work while this chat is idle requires the terminal worker.`;
   const snippet = url && (client === 'Claude Code'

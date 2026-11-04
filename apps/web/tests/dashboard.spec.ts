@@ -685,7 +685,7 @@ test('agent room sends private human messages and opens connection onboarding', 
   await page.getByRole('textbox', { name: 'Message mediator' }).fill('Change our next milestone');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByText('Let’s review the next tasks together.')).toBeVisible();
-  await expect(page.getByText('Human · hidden from agents', { exact: true })).toBeVisible();
+  await expect(page.getByText('Human → Mediator · hidden from agents', { exact: true })).toBeVisible();
   await expect(page.getByRole('log').getByRole('img', { name: 'Human profile', exact: true })).toBeVisible();
   await expect(page.locator('.room-mediator strong')).toHaveText('muse-spark-1.3-contributor');
   await expect(page.locator('.room-mediator .mediator-tag')).toHaveText('Mediator');
@@ -696,7 +696,7 @@ test('agent room sends private human messages and opens connection onboarding', 
   await expect(page.getByRole('button', { name: 'Copy listener command', exact: true })).toHaveCount(0);
 });
 
-test('room messages can be explicitly addressed to a working agent without exposing private chat', async ({ page }) => {
+test('humans speak through the mediator and see authenticated worker replies', async ({ page }) => {
   const state = await connect(page);
   state.project.agents.push({ id: 'agent-1', name: 'My Codex', client: 'Codex', owner: 'Test owner',
     machine: 'Laptop', capabilities: [], grant: 'active', presence: 'online', lastSeen: null, session: null });
@@ -704,30 +704,33 @@ test('room messages can be explicitly addressed to a working agent without expos
   state.project.tasks[0].agentId = 'agent-1';
   const exchanges: Record<string, unknown>[] = [];
   let sent: Record<string, string> | null = null;
-  await page.route('**/api/projects/project-1/room/worker', async route => {
+  await page.route('**/api/projects/project-1/room', async route => {
+    if (route.request().method() !== 'POST') return route.fulfill({ json: { exchanges } });
     sent = route.request().postDataJSON();
     const exchange = { id: 'exchange-1', operationId: sent!.operationId, senderUserId: 'user-1',
       senderAgentId: null, sender: 'Test owner', kind: 'human', body: sent!.body, state: 'complete',
-      createdAt: new Date().toISOString(), response: { reply: 'Queued for My Codex.', proposal: null,
-        cancelTaskIds: [], workerRequest: { id: 'request-1', taskId: sent!.taskId, agentId: 'agent-1' } } };
+      createdAt: new Date().toISOString(), response: { reply: 'I have queued a question for My Codex.', proposal: null,
+        cancelTaskIds: [], workerRequest: { id: 'request-1', taskId: 'task-1', agentId: 'agent-1', message: 'What is your progress on the current task?' } } };
     exchanges.push(exchange);
     await route.fulfill({ json: exchange });
   });
-  await page.route('**/api/projects/project-1/room', route => route.fulfill({ json: { exchanges } }));
   await page.goto('/#/projects/project-1/agents');
-  await page.getByRole('combobox', { name: 'Chat recipient' }).selectOption('task-1');
-  await expect(page.getByText('Only this message is shared with the selected worker.', { exact: false })).toBeVisible();
-  await page.getByRole('textbox', { name: 'Message working agent' }).fill('How is this task going?');
+  await expect(page.getByRole('combobox', { name: 'Chat recipient' })).toHaveCount(0);
+  const composer = page.getByRole('textbox', { name: 'Message mediator' });
+  await composer.fill('Ask @My');
+  await page.getByRole('button', { name: '@My Codex' }).click();
+  await expect(composer).toHaveValue('Ask @My Codex ');
+  await composer.pressSequentially('how the task is going.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await expect(page.getByText('Human → My Codex · shared with worker')).toBeVisible();
-  expect(sent).toMatchObject({ taskId: 'task-1', body: 'How is this task going?' });
+  await expect(page.getByText('Human → Mediator · hidden from agents')).toBeVisible();
+  await expect(page.locator('.room-mediator .room-body').last()).toContainText('Relayed to My Codex: What is your progress on the current task?');
+  expect(sent).toMatchObject({ body: 'Ask @My Codex how the task is going.' });
   exchanges.push({ id: 'exchange-2', operationId: 'request-1', senderUserId: null, senderAgentId: 'agent-1',
     sender: 'My Codex', kind: 'agent', body: 'I finished the implementation and am verifying it.',
     state: 'complete', createdAt: new Date().toISOString(), response: null });
   await page.reload();
   await expect(page.getByText('I finished the implementation and am verifying it.')).toBeVisible();
-  await page.getByRole('combobox', { name: 'Chat recipient' }).selectOption('mediator');
-  await expect(page.getByText('Mediator messages stay hidden from agents.', { exact: false })).toBeVisible();
+  await expect(page.getByText('Your messages stay private.', { exact: false })).toBeVisible();
 });
 
 test('the site root is the public landing page and never waits for the session', async ({ page }) => {

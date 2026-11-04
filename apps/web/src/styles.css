@@ -1498,8 +1498,6 @@ td:first-child {
 .setup-tabs button[aria-selected="true"] { border-bottom-color: #0d5d61; color: #0d5d61; }
 .setup-tabs button:focus-visible { outline: 2px solid #0d5d61; outline-offset: -2px; }
 .worker-reconnect { border-top: 0; }
-.room-recipient { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; font-size: .85rem; color: #536f84; }
-.room-recipient select { width: auto; max-width: 100%; min-width: 0; padding: .35rem .6rem; }
 
 /* A bounded conversation keeps the composer within reach as the chat grows. */
 .plan-chat { display: flex; flex-direction: column; height: min(780px, 80dvh); min-height: 540px; background: #fff; border: 1px solid #dae5ee; border-radius: 22px; overflow: hidden; box-shadow: 0 8px 32px #172c3d10; margin-bottom: 32px; }
@@ -1536,6 +1534,9 @@ td:first-child {
 .chat-composer:focus-within { border-color: #6089aa; box-shadow: 0 0 0 3px #0b5a8a0c; }
 .chat-composer textarea { width: 100%; border: 0; background: transparent; border-radius: 0; resize: none; min-height: 28px; max-height: 180px; padding: 0; margin: 0; box-shadow: none; }
 .chat-composer textarea:focus-visible { outline: none; }
+.room-mentions { display: flex; flex-wrap: wrap; gap: .4rem; padding-bottom: .65rem; margin-bottom: .65rem; border-bottom: 1px solid #d5e2ec; }
+.room-mentions button { border: 1px solid #b8cbd9; border-radius: .5rem; background: #f1f7fa; color: #0b4b66; cursor: pointer; font: inherit; font-size: .85rem; padding: .35rem .6rem; }
+.room-mentions button:hover, .room-mentions button:focus-visible { background: #e1f1f4; outline: 2px solid #0d5d61; outline-offset: 1px; }
 .chat-composer-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
 .chat-composer-actions > span { color: #7f98aa; font-size: 11px; }
 .chat-send.button { width: 34px; height: 34px; min-height: 34px; padding: 0; border-radius: 11px; }

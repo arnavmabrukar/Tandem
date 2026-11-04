@@ -255,7 +255,7 @@ class AgentToolIntegrationTests(unittest.TestCase):
         self.assertNotIn('PRIVATE', str(visible))
         self.assertEqual(len(read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges']), 2)
 
-    def test_worker_room_request_is_explicit_private_and_idempotent(self):
+    def test_mediator_relay_is_private_targeted_and_idempotent(self):
         from unittest.mock import patch
         from uuid import UUID
         from mediator.main import app, get_current_user
@@ -263,24 +263,29 @@ class AgentToolIntegrationTests(unittest.TestCase):
         task = self.make_task()
         self.execute("UPDATE public.tasks SET status='in_progress', claimed_by_agent_id=%s WHERE id=%s",
                      (self.agent, task))
-        payload = {'operationId': str(uuid4()), 'taskId': task, 'body': 'How is this task going?'}
+        payload = {'operationId': str(uuid4()), 'body': 'Ask My Codex for a task update. Private detail: SECRET.'}
+        model_reply = {'reply': 'I queued a question for My Codex.', 'proposal': None,
+                       'requestPresence': False, 'cancelTaskIds': [], 'relayTaskId': task,
+                       'relayMessage': 'What is your current progress on the task?'}
         with patch.dict(app.dependency_overrides, {get_current_user: lambda: {'id': self.owner}}):
             self.execute("UPDATE public.project_memberships SET role='viewer' WHERE project_id=%s", (self.project,))
-            self.assertEqual(self.http.post(f'/api/projects/{self.project}/room/worker', json=payload).status_code, 403)
+            self.assertEqual(self.http.post(f'/api/projects/{self.project}/room', json=payload).status_code, 403)
             self.execute("UPDATE public.project_memberships SET role='owner' WHERE project_id=%s", (self.project,))
-            first = self.http.post(f'/api/projects/{self.project}/room/worker', json=payload)
-            self.assertEqual(first.status_code, 200, first.text)
-            replay = self.http.post(f'/api/projects/{self.project}/room/worker', json=payload)
-            self.assertEqual(replay.json()['id'], first.json()['id'])
-            changed = self.http.post(f'/api/projects/{self.project}/room/worker', json={**payload,
-                'body': 'Different text with the same operation ID'})
-            self.assertEqual(changed.status_code, 409)
+            with patch('mediator.db.room.generate_plan', return_value=model_reply) as model:
+                first = self.http.post(f'/api/projects/{self.project}/room', json=payload)
+                self.assertEqual(first.status_code, 200, first.text)
+                replay = self.http.post(f'/api/projects/{self.project}/room', json=payload)
+                self.assertEqual(replay.json()['id'], first.json()['id'])
+                changed = self.http.post(f'/api/projects/{self.project}/room', json={**payload,
+                    'body': 'Different text with the same operation ID'})
+                self.assertEqual(changed.status_code, 409)
+                model.assert_called_once()
         request_id = first.json()['response']['workerRequest']['id']
         visible = self.ok('tandem_read_room')
-        self.assertNotIn('How is this task going?', str(visible['exchanges']))
+        self.assertNotIn('SECRET', str(visible['exchanges']))
         self.assertNotIn(first.json()['id'], str(visible))
         self.assertEqual(self.ok('tandem_get_worker_room_requests')['workerRequests'], [
-            {'id': request_id, 'taskId': task, 'message': 'How is this task going?'}])
+            {'id': request_id, 'taskId': task, 'message': 'What is your current progress on the task?'}])
         other, other_token = self.make_agent(self.owner, self.project, f'Other {uuid4()}')
         self.assertEqual(self.ok('tandem_get_worker_room_requests', other_token)['workerRequests'], [])
         self.refused('another agent', 'tandem_reply_worker_room_request', other_token,

@@ -27,15 +27,17 @@ function Exchange({ item, project, mediatorModel }: { item: RoomExchange; projec
   const senderClient = project.agents.find(agent => agent.id === item.senderAgentId)?.client;
   const workerRequest = item.response?.workerRequest;
   const workerName = project.agents.find(agent => agent.id === workerRequest?.agentId)?.name ?? 'worker';
+  const legacyDirectMessage = workerRequest && !workerRequest.message;
   return <div className="room-exchange">
     <div className={`room-message room-${item.kind}`}>
-      <div className="row wrap"><RoomAvatar kind={item.kind} client={senderClient} /><strong>{item.sender}</strong><span className="chat-caption">{workerRequest ? `Human → ${workerName} · shared with worker` : item.kind === 'human' ? 'Human · hidden from agents' : 'Agent → Room'}</span><Timestamp value={item.createdAt} /></div>
+      <div className="row wrap"><RoomAvatar kind={item.kind} client={senderClient} /><strong>{item.sender}</strong><span className="chat-caption">{legacyDirectMessage ? `Human → ${workerName} · shared with worker` : item.kind === 'human' ? 'Human → Mediator · hidden from agents' : 'Agent → Mediator'}</span><Timestamp value={item.createdAt} /></div>
       <p className="room-body">{item.body}</p>
     </div>
     {/* Completed messages without a response are standalone agent posts. */}
     {!(item.state === 'complete' && item.response === null) && <div className="room-message room-mediator">
-      {workerRequest ? <strong>Worker message</strong> : <div className="row wrap"><MediatorIdentity model={item.response ? item.response.model || 'Model not recorded' : mediatorModel} />{item.kind === 'human' && <span className="chat-caption">Hidden from agents</span>}</div>}
+      <div className="row wrap"><MediatorIdentity model={item.response ? item.response.model || 'Model not recorded' : mediatorModel} />{item.kind === 'human' && <span className="chat-caption">Hidden from agents</span>}</div>
       <p className="room-body">{item.response?.reply ?? (item.state === 'failed' ? 'The mediator could not reply. You can try again.' : 'Waiting for the mediator…')}</p>
+      {workerRequest?.message && <p className="room-body"><strong>Relayed to {workerName}:</strong> {workerRequest.message}</p>}
       {item.state === 'failed' && item.senderUserId === user!.id && <><Button size="sm" variant="outline" disabled={retry.isPending} onClick={() => retry.mutate()}>{retry.isPending ? 'Retrying…' : 'Retry reply'}</Button><ErrorNotice error={retry.error} /></>}
       {item.response?.proposal && <DraftCard project={project} proposal={item.response.proposal}
         disabled={!owner || item.senderUserId !== user!.id} message={{ role: 'assistant', content: item.response.reply,
@@ -60,7 +62,7 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
   const client = useQueryClient();
   const key = ['agent-room', user!.id, project.id];
   const [body, setBody] = useState('');
-  const [recipient, setRecipient] = useState('mediator');
+  const [mention, setMention] = useState<{ start: number; end: number; query: string } | null>(null);
   const [clearTarget, setClearTarget] = useState<string | null>(null);
   const [cleared, setCleared] = useState(false);
   const owner = roleFor(project, user!.id) === 'owner';
@@ -79,20 +81,20 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
     onSettled: () => { void client.invalidateQueries({ queryKey: key }); },
     retry: false,
   });
-  const pending = useRef<{ operationId: string; body: string; taskId: string | null; uncertain?: boolean } | null>(null);
+  const pending = useRef<{ operationId: string; body: string; uncertain?: boolean } | null>(null);
+  const composer = useRef<HTMLTextAreaElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const canPost = ['owner', 'reviewer'].includes(roleFor(project, user!.id) ?? '');
   function completeSend() {
     const submitted = pending.current;
     // A refresh can confirm an earlier send after the user has edited the draft.
     setBody(current => current.trim() === submitted?.body ? '' : current);
+    setMention(null);
     pending.current = null;
   }
   const send = useMutation({ mutationFn: () => {
     const request = pending.current!;
-    return request.taskId
-      ? api.postRoomWorker(project.id, { operationId: request.operationId, taskId: request.taskId, body: request.body })
-      : api.postRoom(project.id, { operationId: request.operationId, body: request.body });
+    return api.postRoom(project.id, { operationId: request.operationId, body: request.body });
   }, retry: false,
     onSuccess: () => { completeSend(); void client.invalidateQueries({ queryKey: key }); },
     onError: error => {
@@ -102,8 +104,10 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
   });
   const items = room.data?.exchanges ?? [];
   const work = project.tasks.filter(task => ['claimed', 'in_progress', 'blocked', 'conflict', 'in_review'].includes(task.status));
-  const messageable = project.tasks.filter(task => ['claimed', 'in_progress', 'blocked'].includes(task.status)
-    && project.agents.some(agent => agent.id === task.agentId && agent.grant === 'active'));
+  const workingAgents = project.agents.filter(agent => agent.grant === 'active'
+    && project.tasks.some(task => task.agentId === agent.id && ['claimed', 'in_progress', 'blocked'].includes(task.status)));
+  const mentionOptions = mention ? workingAgents.filter(agent =>
+    agent.name.toLocaleLowerCase().startsWith(mention.query.trimStart().toLocaleLowerCase())).slice(0, 5) : [];
   useEffect(() => {
     // Match the authenticated sender AND operation, never just repeated text.
     // Wait for the POST to settle so its late error cannot overwrite recovery.
@@ -117,10 +121,21 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
   useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }); }, [items.length, items.at(-1)?.state]);
   function submit() {
     if (!body.trim() || send.isPending || pending.current?.uncertain || !canPost) return;
-    const taskId = recipient === 'mediator' ? null : recipient;
-    if (!pending.current || (!pending.current.uncertain && (pending.current.body !== body.trim() || pending.current.taskId !== taskId)))
-      pending.current = { operationId: crypto.randomUUID(), body: body.trim(), taskId };
+    if (!pending.current || (!pending.current.uncertain && pending.current.body !== body.trim()))
+      pending.current = { operationId: crypto.randomUUID(), body: body.trim() };
     send.mutate();
+  }
+  function updateMention(text: string, caret: number) {
+    const match = /(^|\s)@([^@\n]*)$/.exec(text.slice(0, caret));
+    setMention(match ? { start: match.index + match[1].length, end: caret, query: match[2] } : null);
+  }
+  function insertMention(name: string) {
+    if (!mention) return;
+    const inserted = `@${name} `;
+    const caret = mention.start + inserted.length;
+    setBody(current => current.slice(0, mention.start) + inserted + current.slice(mention.end));
+    setMention(null);
+    requestAnimationFrame(() => { composer.current?.focus(); composer.current?.setSelectionRange(caret, caret); });
   }
   return <section className="plan-chat agent-room-chat" aria-label="Project room">
     <header className="chat-header room-header"><div><h2>Project room</h2><div className="row wrap"><MediatorIdentity model={room.data?.mediatorModel} /><span className="chat-caption">{project.name}</span></div></div>
@@ -140,7 +155,7 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
     <div className="chat-transcript room-transcript" role="log" aria-live="polite" aria-label="Room conversation">
       <ErrorNotice error={room.error} />
       {cleared && <p role="status">Previous room messages deleted.</p>}
-      {room.isPending ? <p>Loading conversation…</p> : items.length === 0 && <div className="chat-welcome"><Sparkles size={30} /><h2>Build together.</h2><p>Ask the mediator for a plan, change direction, or check what’s happening.<br />Your agents can join through their MCP connection.</p></div>}
+      {room.isPending ? <p>Loading conversation…</p> : items.length === 0 && <div className="chat-welcome"><Sparkles size={30} /><h2>Build together.</h2><p>Ask the mediator for a plan, a status update, or to relay a question to a working agent.<br />Your agents can join through their MCP connection.</p></div>}
       {items.map(item => <Exchange key={item.id} item={item} project={project} mediatorModel={room.data?.mediatorModel} />)}
       {send.isPending && <p role="status">Mediator is thinking…</p>}<div ref={end} />
     </div>
@@ -148,14 +163,13 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
       {send.isError && pending.current?.uncertain && <div className="row wrap"><p>Confirm the previous message before sending another. Your edited draft will be kept.</p>
         <Button variant="outline" onClick={() => send.mutate()}>Retry previous message</Button></div>}
       <form className="chat-composer" onSubmit={e => { e.preventDefault(); submit(); }}>
-        <label className="room-recipient">Send to <select aria-label="Chat recipient" value={recipient} disabled={!canPost || send.isPending} onChange={e => setRecipient(e.target.value)}>
-          <option value="mediator">Mediator · private</option>
-          {messageable.map(task => <option key={task.id} value={task.id}>{project.agents.find(agent => agent.id === task.agentId)?.name ?? 'Worker'} · {task.title}</option>)}
-        </select></label>
-        <textarea aria-label={recipient === 'mediator' ? 'Message mediator' : 'Message working agent'} placeholder={canPost ? recipient === 'mediator' ? 'Message Mediator — plan, ask, or change direction…' : 'Ask this worker a question or give an in-scope instruction…' : 'Your role can read this room.'} maxLength={8000} value={body} disabled={!canPost || send.isPending} onChange={e => setBody(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } }} />
+        {mentionOptions.length > 0 && <div className="room-mentions" aria-label="Mention a working agent">
+          {mentionOptions.map(agent => <button type="button" key={agent.id} onClick={() => insertMention(agent.name)}>@{agent.name}</button>)}
+        </div>}
+        <textarea ref={composer} aria-label="Message mediator" placeholder={canPost ? 'Message Mediator — type @ to ask a working agent…' : 'Your role can read this room.'} maxLength={8000} value={body} disabled={!canPost || send.isPending} onChange={e => { setBody(e.target.value); updateMention(e.target.value, e.target.selectionStart); }} onKeyDown={e => { if (e.key === 'Escape') setMention(null); else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); if (mentionOptions.length) insertMention(mentionOptions[0].name); else submit(); } }} />
         <Button type="submit" className="chat-send" aria-label="Send message" disabled={!canPost || !body.trim() || send.isPending || pending.current?.uncertain}><ArrowUp size={20} /></Button>
       </form>
-      <p className="chat-footnote"><LockKeyhole size={13} /> {recipient === 'mediator' ? 'Mediator messages stay hidden from agents.' : 'Only this message is shared with the selected worker. It can reply after its current coding step or when it resumes.'} Latest 100 exchanges.</p>
+      <p className="chat-footnote"><LockKeyhole size={13} /> Your messages stay private. Type @ to choose one working agent; the mediator relays a separate question only to that agent. Replies appear here after check-in. Latest 100 exchanges.</p>
     </div>
     <Modal open={clearTarget !== null} onOpenChange={open => { if (!open && !clear.isPending) setClearTarget(null); }}
       title="Delete previous room messages?" description="This permanently deletes earlier human, agent, and mediator messages for everyone in this project, including older history. Saved plans, tasks, and approvals stay intact.">

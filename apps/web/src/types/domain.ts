@@ -213,7 +213,6 @@ export interface DashboardApi {
   readRoom(projectId: string, signal?: AbortSignal): Promise<import('./room').Room>;
   clearRoom(projectId: string, throughId: string): Promise<{ cleared: boolean }>;
   postRoom(projectId: string, body: {operationId: string; body: string}): Promise<import('./room').RoomExchange>;
-  postRoomWorker(projectId: string, body: {operationId: string; taskId: string; body: string}): Promise<import('./room').RoomExchange>;
   connectGitHub(): Promise<{url: string}>;
   completeGitHub(code: string, state: string): Promise<{login: string}>;
   githubInstallations(page: number): Promise<{items: {id: number; name: string}[]; hasMore: boolean; installUrl: string}>;

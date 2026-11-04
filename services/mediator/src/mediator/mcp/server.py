@@ -28,7 +28,8 @@ mcp = MCPServer("Tandem", instructions=(
     "with its projectId/checkId to reply in the project room. To participate while idle, "
     "poll tandem_get_presence_requests periodically. Check tandem_get_worker_room_requests "
     "between task steps and reply with tandem_reply_worker_room_request. "
-    "Only explicitly addressed worker requests are visible; other human room exchanges remain private."
+    "Only separate mediator-written requests addressed to this worker are visible; "
+    "human room exchanges remain private."
 ), middleware=[deliver_presence_requests])
 
 
@@ -199,7 +200,7 @@ def tandem_acknowledge_presence(projectId: UUID, checkId: UUID) -> dict[str, Any
 
 @mcp.tool()
 def tandem_get_worker_room_requests(projectId: UUID, taskId: UUID | None = None) -> dict[str, Any]:
-    """Get only room messages explicitly addressed to this agent by a project member.
+    """Get only mediator-relayed questions addressed to this authenticated agent.
 
     Other human room messages and conversation history remain private.
     """
