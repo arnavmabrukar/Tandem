@@ -37,8 +37,13 @@ Implementation uses the existing httpx dependency and Meta's Responses API at
 https://api.meta.ai/v1/responses. It requests a complete, non-streaming response
 with the supplied model, medium reasoning, temperature/top_p 1, and a 32,000
 output-token limit. Complete output is validated with PlanProposal, including
-path rules, unique task keys, and dependency-cycle rejection. Incomplete or
-malformed output produces 502; missing configuration produces 503.
+path rules, unique task keys, and dependency-cycle rejection. Harmless formatting is
+tidied first: a surrounding code fence, task key casing and spacing, and `./` or
+trailing `/` on paths. Paths that still aren't repository paths are dropped, because
+they are optional hints. Extra fields, cycles and other structural problems are still
+rejected. In the project room, a valid reply whose plan or actions are rejected is kept
+without them and says so, so a person can read the answer. Incomplete or malformed
+output otherwise produces 502; missing configuration produces 503.
 
 Owner authorization is checked before the provider call and again afterward.
 No database locks are held during inference. Network timeout is 120 seconds
