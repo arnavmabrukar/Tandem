@@ -202,7 +202,7 @@ app.add_middleware(
     allow_credentials=False,
 
     # HTTP methods used by our dashboard
-    allow_methods = ["GET", "POST", "PATCH", "OPTIONS"],
+    allow_methods = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
 
     # headers the frontend may send 
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
