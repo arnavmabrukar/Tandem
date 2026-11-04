@@ -53,6 +53,10 @@ function CopyButton({ text, label, disabled = false }: { text: string; label: st
 function WorkerSetup({ project, agent, url, initialClient }: { project: Project; agent?: Agent; url: string; initialClient: string }) {
   const [engine, setEngine] = useState(initialClient === 'Claude Code' ? 'claude' : initialClient === 'Codex' ? 'codex' : 'custom');
   const [custom, setCustom] = useState('');
+  const codexSetup = 'npm install -g @openai/codex@latest\ncodex login\ncodex login status';
+  // The native installer uses ~/.local/bin; make it available in this terminal
+  // immediately so the login commands and runner can find the new executable.
+  const claudeSetup = 'curl -fsSL https://claude.ai/install.sh | bash\nexport PATH="$HOME/.local/bin:$PATH"\nclaude auth login\nclaude auth status';
   const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
   const repositoryValid = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(project.repository)
     && project.repository.split('/').every(part => part !== '.' && part !== '..');
@@ -63,26 +67,36 @@ function WorkerSetup({ project, agent, url, initialClient }: { project: Project;
   const installCommand = `mkdir -p "$HOME/Downloads" &&\ncurl -fLsS ${quote(new URL('/downloads/tandem_runner.py', window.location.origin).href)} \\\n  -o "$HOME/Downloads/tandem_runner.py" &&\npython3 "$HOME/Downloads/tandem_runner.py" ${argumentsText}`;
   return <section aria-label="Continuous worker setup" className="agent-advanced">
     <h3>2. Choose your worker</h3>
-    <p>Start a worker to handle assigned, approved tasks and answer room pings automatically. No access to Tandem’s private repository is needed.</p>
+    <p>Automatically work on assigned, approved tasks and answer room pings. No access to Tandem’s private repository is needed.</p>
     <Field label="Worker engine"><select value={engine} onChange={e => setEngine(e.target.value)}>
       <option value="codex">Codex CLI</option><option value="claude">Claude Code CLI</option><option value="custom">Other command</option>
     </select></Field>
     {engine === 'custom' && <Field label="Agent command"><input value={custom} onChange={e => setCustom(e.target.value)} placeholder="Your headless command" /></Field>}
-    {engine === 'custom' && <p className="small muted">The command must accept the task on stdin, complete it without interactive prompts, and commit its changes before exiting. Verify its login separately.</p>}
-    <p>The runner downloads to your Downloads folder and prepares an agent worktree for <strong>{project.repository}</strong> automatically. Agents share the repository, work on their own task branches, and resolve conflicts with the base branch before submitting work. Your GitHub account needs access to this project.</p>
+    {engine === 'custom' && <p className="small muted">Accept tasks on stdin, run without prompts, and commit changes. Sign in before starting.</p>}
+    {engine === 'codex' && <section aria-label="Codex CLI setup">
+      <p>One-time Codex CLI setup: run each line in your terminal and finish browser sign-in. Requires Node.js/npm.</p>
+      <pre className="oauth-code">{codexSetup}</pre>
+      <CopyButton text={codexSetup} label="Copy Codex setup commands" />
+    </section>}
+    {engine === 'claude' && <section aria-label="Claude CLI setup">
+      <p>One-time Claude Code setup: run each line in your terminal and finish browser sign-in.</p>
+      <pre className="oauth-code">{claudeSetup}</pre>
+      <CopyButton text={claudeSetup} label="Copy Claude setup commands" />
+    </section>}
+    <p>Tandem prepares <strong>{project.repository}</strong> automatically, with a worktree and task branches per agent. Your GitHub account needs repository access.</p>
     {!repositoryValid && <p role="alert">Set this project’s GitHub repository to owner/repository before starting a worker.</p>}
-    <p className="small muted">Requires Python 3.11+, curl, Git, and signed-in GitHub and agent CLIs on macOS/Linux.</p>
+    <p className="small muted">macOS/Linux: Python 3.11+, curl, Git, and signed-in GitHub CLI (gh auth login) and agent CLI.</p>
     <h3>3. Get your agent token</h3>
-    {agent ? <><p>Have this agent’s token ready for the terminal prompt.</p><AgentTokenButton project={project} agent={agent} /></>
-      : <p>After connecting, open your agent’s Set up worker control to get its token.</p>}
+    {agent ? <><p>Copy this agent’s token for the terminal prompt.</p><AgentTokenButton project={project} agent={agent} /></>
+      : <p>After connecting, open Set up worker on your agent to get its token.</p>}
     <section aria-label="Download and start worker">
       <h3>4. Download and start</h3>
-      <p>{ready ? 'Run this from your project folder to reuse its repository, or from any folder to let Tandem download it. Enter the agent token when prompted.' : 'Complete the required setup in step 2 to enable copying.'}</p>
+      <p>{ready ? 'Run in your project folder to reuse it, or anywhere to download it automatically. Paste the token when prompted, then press Enter. Pasted text stays hidden.' : 'Complete step 2 to enable copying.'}</p>
       {engine === 'custom' && !custom.trim() && <p className="small muted">Also enter your headless agent command in step 2.</p>}
       <pre className="oauth-code">{installCommand}</pre>
       <CopyButton key={installCommand} text={installCommand} label="Copy download and start command" disabled={!ready} />
     </section>
-    <p className="small muted">The worker pushes task branches and opens PRs; approvals and merges stay with you. Keep the terminal open. Ctrl+C stops it.</p>
+    <p className="small muted">Saves the runner to Downloads. Keep the terminal open; Ctrl+C stops it. The worker opens PRs; you approve and merge.</p>
   </section>;
 }
 
@@ -130,7 +144,11 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
     },
   });
   const url = discovery.data;
-  const roomPrompt = `Use Tandem for project ${project.id}. Start with tandem_whoami and confirm project access. Check available tools and report any missing ones. Call tandem_get_presence_requests and acknowledge each returned ID with tandem_acknowledge_presence. Fetch tandem_get_assignments and summarize ready work and blockers. Before working, inspect repository instructions and git status, read the approved contract and dependencies, and claim the task. Preserve others' changes; report progress, questions, test results and blockers through Tandem. Reuse operation IDs only when retrying the same write. Never approve or merge your own work. Check presence between tasks. Human room messages remain private. Do not claim to listen while idle: continuous execution requires a separately running worker. If a worker already owns a task, do not execute it in this chat too.`;
+  const roomPrompt = `Use Tandem for project ${project.id}.
+Confirm access with tandem_whoami. Fetch tandem_get_assignments and summarize ready work and blockers.
+Check tandem_get_presence_requests; acknowledge returned IDs with tandem_acknowledge_presence. Repeat between tasks.
+Before claiming work, read repo instructions, git status, the approved contract and dependencies. Preserve others’ changes and report progress, questions, tests and blockers through Tandem. Retry the same write with its original operation ID.
+Never approve or merge your own work, access human room messages, or duplicate a running worker’s tasks. Continuous work while this chat is idle requires the terminal worker.`;
   const snippet = url && (client === 'Claude Code'
     ? JSON.stringify({ mcpServers: { 'tandem-oauth': { type: 'http', url } } }, null, 2)
     : `# Tandem remote MCP connection. Authentication happens in your browser.\n[mcp_servers.tandem-oauth]\nurl = ${JSON.stringify(url)}`);
@@ -142,10 +160,6 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
     {url && (connections.data ? <>
       <h3>1. Connect your agent — complete</h3>
       <p>Your agent has permission to access this project.</p>
-      <details className="agent-advanced"><summary>Optional agent chat prompt</summary>
-      <pre className="oauth-code">{roomPrompt}</pre>
-      <CopyButton text={roomPrompt} label="Copy startup prompt" />
-      </details>
     </> : step === 1 ? <>
       <h3>1. Connect your agent</h3>
       <Field label="Your agent">
@@ -153,7 +167,7 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
           <option>Codex</option><option>Claude Code</option><option>Other</option>
         </select>
       </Field>
-      <p>Add Tandem as a remote MCP server in your agent’s app, CLI, or IDE using this address. Your client must support remote HTTP MCP and browser sign-in.</p>
+      <p>Add this remote HTTP MCP server in your agent’s app, CLI, or IDE. Sign in through your browser.</p>
       <Field label="Server URL"><input readOnly value={url} onFocus={(e) => e.currentTarget.select()} /></Field>
       <CopyButton key={url} text={url} label="Copy server URL" />
       <details className="agent-advanced">
@@ -183,6 +197,12 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
     </>)}
     {url && <WorkerSetup key={`${agent?.id ?? String(connections.data)}:${client}`} project={project}
       agent={agent ?? project.agents.find(a => a.id === connections.data)} url={url} initialClient={client} />}
+    {url && <section aria-label="Agent startup prompt" className="agent-advanced">
+      <h3>5. Start your agent chat</h3>
+      <p>Paste into your connected agent’s chat. Keep the terminal worker running for continuous work.</p>
+      <pre className="oauth-code">{roomPrompt}</pre>
+      <CopyButton text={roomPrompt} label="Copy startup prompt" />
+    </section>}
     <div className="row between wrap oauth-step">
       <Link to="/mcp/connections" onClick={onClose}>Manage connections</Link>
       <Button variant="outline" onClick={() => { void queries.invalidateQueries({ queryKey: ['workspace'] }); onClose(); }}>Done</Button>

@@ -591,8 +591,12 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             if not worked:
                 time.sleep(args.poll)
-    except (TokenRejected, WorkBlocked, ToolRefused) as error:
+    except TokenRejected as error:
         log.error("%s. Replace the token, then restart the runner.", error)
+        return 1
+    except (WorkBlocked, ToolRefused) as error:
+        # Missing CLIs and repository failures do not invalidate a working token.
+        log.error('%s', error)
         return 1
     except KeyboardInterrupt:
         log.info("Stopped.")
