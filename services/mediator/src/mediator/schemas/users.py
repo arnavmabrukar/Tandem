@@ -1,4 +1,10 @@
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class DeleteAccountRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirmation: Literal["DELETE"]
 
 
 class UpdateProfileRequest(BaseModel):

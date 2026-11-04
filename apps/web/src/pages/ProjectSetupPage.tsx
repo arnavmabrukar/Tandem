@@ -16,7 +16,7 @@ const roleHelp: Record<Role, string> = {
 };
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
-export function ProjectSetupPage({ project }: { project: Project | null }) {
+export function ProjectSetupPage({ project, embedded = false }: { project: Project | null; embedded?: boolean }) {
   const { user } = useSession();
   const navigate = useNavigate();
   const owner = !project || roleFor(project, user!.id) === 'owner';
@@ -119,14 +119,14 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
 
   return (
     <div className="setup-stack">
-      <PageHeader
+      {!embedded && <PageHeader
         title="Project setup"
         description={`Who works on ${project.name}, and how work gets handed out.`}
-      />
+      />}
 
       <section className="panel" aria-labelledby="setup-details">
         <div className="setup-panel-head">
-          <h2 id="setup-details">Project details</h2>
+          <h2 id="setup-details" tabIndex={-1}>Project details</h2>
         </div>
         {changed && (
           <div className="notice">
@@ -257,7 +257,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
 
       <section className="panel" aria-labelledby="setup-people">
         <div className="setup-panel-head">
-          <h2 id="setup-people">People</h2>
+          <h2 id="setup-people" tabIndex={-1}>People</h2>
           <span className="muted">
             {plural(project.members.length, 'member')}
             {pendingInvitations > 0 ? ` · ${pendingInvitations} pending` : ''}
@@ -344,7 +344,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
 
       <section className="panel" aria-labelledby="setup-automation">
         <div className="setup-panel-head">
-          <h2 id="setup-automation">Agents and automation</h2>
+          <h2 id="setup-automation" tabIndex={-1}>Agents and automation</h2>
         </div>
         <div className="setting-row">
           <div>
@@ -386,7 +386,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
       {owner && (
         <section className="panel danger-zone" aria-labelledby="setup-danger">
           <div className="danger-head">
-            <h2 id="setup-danger">Danger zone</h2>
+            <h2 id="setup-danger" tabIndex={-1}>Danger zone</h2>
           </div>
           <div className="danger-body">
             <div className="setting-row">

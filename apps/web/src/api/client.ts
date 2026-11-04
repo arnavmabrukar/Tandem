@@ -289,6 +289,9 @@ export function createApiClient({
         method: 'PATCH',
         body: { name },
       }),
+    deleteAccount: (confirmation) => request(endpoints.me, z.object({ deleted: z.literal(true) }), {
+      method: 'DELETE', body: { confirmation },
+    }),
     load: (signal) => request(endpoints.workspace, workspaceSchema, { signal }),
         // The server determines the recipient from the bearer token.
     // No email address is supplied by the browser.

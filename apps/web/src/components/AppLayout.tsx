@@ -4,10 +4,9 @@ import {
   Bot,
   ChevronsUpDown,
   ListChecks,
-  FolderCog,
+  ChevronDown,
   LogOut,
   RefreshCw,
-  CircleHelp,
   LayoutDashboard,
   Mail,
   Moon,
@@ -15,7 +14,7 @@ import {
   Settings,
 } from 'lucide-react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useSession } from '../auth/session';
 import { useTheme } from '../theme';
 import { initials, label, roleFor, type Project } from '../types/domain';
@@ -45,6 +44,9 @@ export function AppLayout({
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
+  const inSettings = location.pathname === '/settings';
+  const [settingsOpen, setSettingsOpen] = useState(inSettings);
+  useEffect(() => { if (inSettings) setSettingsOpen(true); }, [inSettings]);
   const creating = location.pathname === '/projects/new';
   const id = creating ? undefined : (project?.id ?? projects[0]?.id);
   const pendingApprovals = project?.approvals.filter((a) => a.status === 'pending') ?? [];
@@ -65,6 +67,7 @@ export function AppLayout({
     if (overview) return 'Overview';
     if (path === '/invitations') return 'Invitations';
     if (path === '/settings') return 'Settings';
+    if (path === '/settings/user') return 'User settings';
     if (path === '/projects/new') return 'New project';
     const section = path.split('/')[3];
     const names: Record<string, string> = {
@@ -79,13 +82,17 @@ export function AppLayout({
     };
     return names[section] ?? '';
   })();
-  const accountPage = ['/invitations', '/settings'].includes(location.pathname);
+  const accountPage = ['/invitations', '/settings', '/settings/user'].includes(location.pathname);
   const nav = [
     { to: 'activity', text: 'Activity', icon: Activity },
     { to: 'workflow', text: 'Workflow', icon: ListChecks },
     { to: 'agents', text: 'Agents', icon: Bot },
-    { to: 'setup', text: 'Project setup', icon: FolderCog },
-    { to: 'connections', text: 'Connection guide', icon: CircleHelp },
+  ];
+  const settingsLink = (section: string) => `/settings?${new URLSearchParams({ ...(id ? { project: id } : {}), section })}`;
+  const defaultSettingsSection = id ? 'setup-details' : 'connection-guide';
+  const settingsSections = [
+    ...(id ? [{ title: project?.name ?? 'Project', items: [['setup-details', 'Project details'], ['setup-people', 'People & invitations'], ['setup-automation', 'Agents & automation'], ...(project && roleFor(project, user!.id) === 'owner' ? [['setup-danger', 'Danger zone']] : [])] }] : []),
+    { title: 'Help', items: [['connection-guide', 'Connection guide']] },
   ];
   return (
     <div className="app-shell">
@@ -133,6 +140,22 @@ export function AppLayout({
                 )}
               </NavLink>
             ))}
+          <button className={`settings-nav-toggle${inSettings ? ' active' : ''}`} aria-expanded={settingsOpen} aria-controls="settings-navigation"
+            onClick={() => {
+              setSettingsOpen(inSettings ? !settingsOpen : true);
+              if (!inSettings) navigate(settingsLink(defaultSettingsSection));
+            }}>
+            <Settings size={18} /><span>Settings</span><ChevronDown size={16} className={settingsOpen ? 'expanded' : ''} />
+          </button>
+          {settingsOpen && <div id="settings-navigation" className="settings-subnav">
+            {settingsSections.map(group => <div key={group.title}>
+              <p><strong>{group.title}</strong></p>
+              {group.items.map(([section, text]) => {
+                const active = inSettings && (new URLSearchParams(location.search).get('section') ?? defaultSettingsSection) === section;
+                return <Link key={section} to={settingsLink(section)} className={active ? 'active' : undefined} aria-current={active ? 'location' : undefined}>{text}</Link>;
+              })}
+            </div>)}
+          </div>}
         </nav>
         <div className="sidebar-bottom">
           <p>
@@ -172,10 +195,10 @@ export function AppLayout({
                 >
                   <DropdownMenu.Item
                     className="account-menu-item"
-                    onSelect={() => navigate('/settings')}
+                    onSelect={() => navigate('/settings/user')}
                   >
                     <Settings size={16} aria-hidden="true" />
-                    Settings
+                    User settings
                   </DropdownMenu.Item>
                   <DropdownMenu.CheckboxItem
                     className="account-menu-item theme-item"
