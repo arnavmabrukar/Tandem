@@ -1630,6 +1630,12 @@ td:first-child {
 .room-human { background: #eff4f8; }
 .room-agent { background: #f4f7fa; }
 .room-mediator { margin-top: 8px; }
+.room-failure { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px; }
+.room-failure p { margin: 0; color: #9d2b28; }
+.room-send-error { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 8px 12px; border: 1px solid #f4cbc7; border-radius: 8px; background: #fff4f3; color: #9d2b28; font-size: 13px; }
+.room-send-error svg { flex: none; }
+.room-send-error span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.room-send-error button { flex: none; }
 .room-message strong { font-size: 14px; }
 .room-message time { font-size: 11px; color: #536f84; }
 .room-header { flex-wrap: wrap; }
