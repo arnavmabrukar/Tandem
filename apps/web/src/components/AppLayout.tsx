@@ -10,12 +10,14 @@ import {
   RefreshCw,
   LayoutDashboard,
   Mail,
+  Moon,
   Plus,
   Settings,
 } from 'lucide-react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useSession } from '../auth/session';
+import { useTheme } from '../theme';
 import { initials, label, roleFor, type Project } from '../types/domain';
 import { Button } from './ui/button';
 import { BrandMark } from './BrandMark';
@@ -40,6 +42,7 @@ export function AppLayout({
   connectionState: 'loading' | 'connected' | 'unavailable';
 }) {
   const { user, signOut } = useSession();
+  const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
   const inSettings = location.pathname === '/settings';
@@ -200,6 +203,17 @@ export function AppLayout({
                     <Settings size={16} aria-hidden="true" />
                     User settings
                   </DropdownMenu.Item>
+                  <DropdownMenu.CheckboxItem
+                    className="account-menu-item theme-item"
+                    checked={theme === 'dark'}
+                    onCheckedChange={(on) => setTheme(on ? 'dark' : 'light')}
+                    // Keep the menu open so the change can be seen and undone.
+                    onSelect={(event) => event.preventDefault()}
+                  >
+                    <Moon size={16} aria-hidden="true" />
+                    <span className="theme-label">Dark mode</span>
+                    <span className="theme-switch" aria-hidden="true" />
+                  </DropdownMenu.CheckboxItem>
                   <DropdownMenu.Separator className="account-menu-separator" />
                   <DropdownMenu.Item
                     className="account-menu-item account-menu-danger"

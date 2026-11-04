@@ -45,6 +45,18 @@ class GitHubTests(unittest.TestCase):
         with self.database({'token_encrypted':encrypted,'expires_at':None}), patch.object(github,'cipher',return_value=key):
             self.assertEqual(github.user_token(uuid4()),'ghu_example')
 
+    def test_disconnect_removes_only_this_users_link_and_pending_authorization(self):
+        user = uuid4()
+        with self.database() as db:
+            self.assertEqual(github.disconnect(user), {'connected': False})
+        statements = [call.args for call in db.execute.call_args_list]
+        self.assertEqual(len(statements), 2)
+        for sql, params in statements:
+            self.assertIn('DELETE FROM', sql)
+            self.assertEqual(params, (user,))
+        self.assertIn('github_connections', statements[0][0])
+        self.assertIn('github_oauth_states', statements[1][0])
+
     def test_connection_reports_no_link(self):
         with self.database(None), patch.object(github, 'configured', return_value=False):
             self.assertEqual(github.connection(uuid4()), {'connected': False, 'login': None, 'installUrl': None})

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { ExternalLink } from 'lucide-react';
@@ -6,6 +6,7 @@ import { useSession } from '../auth/session';
 import type { GitHubConnection } from '../types/domain';
 import { ErrorNotice } from './common';
 import { Button } from './ui/button';
+import { Modal } from './ui/dialog';
 
 export function useGitHubConnection(enabled = true) {
   const { api, user } = useSession();
@@ -104,7 +105,19 @@ export function GitHubConnectionPanel() {
     finish.mutate({ code: params.get('github_code') ?? '', state: params.get('github_state') ?? '' });
   }, [location.search]);
 
-  const busy = connect.isPending || finish.isPending;
+  const [confirming, setConfirming] = useState(false);
+  const disconnect = useMutation({
+    mutationFn: () => api.disconnectGitHub(),
+    onSuccess: async () => {
+      setConfirming(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['github-connection'] }),
+        queryClient.invalidateQueries({ queryKey: ['github-accounts'] }),
+        queryClient.invalidateQueries({ queryKey: ['github-repos'] }),
+      ]);
+    },
+  });
+  const busy = connect.isPending || finish.isPending || disconnect.isPending;
   const state = query.data && linkState(query.data);
   return (
     <section className="panel narrow-panel" aria-labelledby="settings-github">
@@ -143,22 +156,43 @@ export function GitHubConnectionPanel() {
                   </a>
                 </Button>
               )}
-              <Button variant="ghost" disabled={busy} onClick={() => connect.mutate()}>
-                {connect.isPending ? 'Opening GitHub…' : 'Reconnect'}
+              <Button variant="destructive" disabled={busy} onClick={() => { disconnect.reset(); setConfirming(true); }}>
+                Disconnect
               </Button>
             </>
           ) : (
-            <Button disabled={busy} onClick={() => connect.mutate()}>
-              {connect.isPending ? 'Opening GitHub…' : state === 'expired' ? 'Reconnect GitHub' : 'Connect GitHub'}
-            </Button>
-          )}
-          {finish.isSuccess && state === 'linked' && (
-            <span role="status" className="settings-saved">
-              GitHub linked. <Link to="/projects/new">Create a project</Link>
-            </span>
+            <>
+              <Button disabled={busy} onClick={() => connect.mutate()}>
+                {connect.isPending ? 'Opening GitHub…' : state === 'expired' ? 'Reconnect GitHub' : 'Connect GitHub'}
+              </Button>
+              {state === 'expired' && (
+                <Button variant="destructive" disabled={busy} onClick={() => { disconnect.reset(); setConfirming(true); }}>
+                  Disconnect
+                </Button>
+              )}
+            </>
           )}
         </div>
       )}
+      <Modal
+        open={confirming}
+        onOpenChange={(open) => { if (!disconnect.isPending && !open) setConfirming(false); }}
+        title="Disconnect GitHub?"
+        description="Tandem will forget your GitHub link. You won't be able to import repositories until you connect again."
+      >
+        <p>
+          Projects you already imported keep working. This doesn’t remove the Tandem GitHub App
+          from your GitHub account; do that from GitHub’s settings if you want to revoke it
+          there too.
+        </p>
+        <ErrorNotice error={disconnect.error} />
+        <div className="row end">
+          <Button variant="outline" disabled={disconnect.isPending} onClick={() => setConfirming(false)}>Cancel</Button>
+          <Button variant="destructive" disabled={disconnect.isPending} onClick={() => disconnect.mutate()}>
+            {disconnect.isPending ? 'Disconnecting…' : 'Disconnect GitHub'}
+          </Button>
+        </div>
+      </Modal>
     </section>
   );
 }

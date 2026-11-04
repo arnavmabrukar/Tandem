@@ -130,6 +130,18 @@ def connection(user_id: UUID) -> dict:
             "installUrl": install_url() if configured() else None}
 
 
+def disconnect(user_id: UUID) -> dict:
+    """Forget the saved GitHub link and any unfinished authorization.
+
+    Projects already imported keep working: they store repository identity, not this token.
+    This doesn't revoke the App on GitHub; the person can do that from GitHub's settings.
+    """
+    with _transaction() as db:
+        db.execute("DELETE FROM public.github_connections WHERE user_id=%s", (user_id,))
+        db.execute("DELETE FROM public.github_oauth_states WHERE user_id=%s", (user_id,))
+    return {"connected": False}
+
+
 def installations(user_id: UUID, page: int) -> dict:
     data = api(user_token(user_id), f"/user/installations?per_page=30&page={page}")
     return {"items": [{"id": i["id"], "name": i["account"]["login"]} for i in data["installations"]],

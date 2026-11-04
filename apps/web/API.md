@@ -204,6 +204,7 @@ Authenticated GitHub routes (no operation envelope):
 - `GET /api/github/callback` redirects to Settings on the configured dashboard; never accepts a user-provided redirect destination.
 - `POST /api/github/complete` accepts `{code,state}` and returns `{login}`.
 - `GET /api/github/connection` returns `{connected,login,installUrl}`. `login` stays set when a saved link has expired; `installUrl` is null when GitHub isn't configured.
+- `DELETE /api/github/connection` forgets the caller's saved GitHub link and any unfinished authorization, returning `{connected:false}`. Already imported projects keep working. It doesn't revoke the GitHub App on GitHub.
 - `GET /api/github/installations?page=1` returns `{items:[{id,name}],hasMore,installUrl}`.
 - `GET /api/github/installations/:id/repositories?page=1` returns `{items:[{id,name,fullName,defaultBranch,description}],hasMore}`.
 

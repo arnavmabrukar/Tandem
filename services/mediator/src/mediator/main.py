@@ -1278,6 +1278,12 @@ def github_connection(user: dict = Depends(get_current_user)):
         return github.connection(UUID(user["id"]))
 
 
+@app.delete("/api/github/connection")
+def github_disconnect(user: dict = Depends(get_current_user)):
+    with plan_api_errors():
+        return github.disconnect(UUID(user["id"]))
+
+
 @app.get("/api/github/installations")
 def github_installations(page: int = Query(default=1, ge=1, le=1000), user: dict = Depends(get_current_user)):
     with plan_api_errors():
