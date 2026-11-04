@@ -191,6 +191,7 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
         : <p>Finish connecting your agent in step 1 to generate its token here.</p>}
     </section>
     <p className="small muted">Saves the runner to Downloads. Keep the terminal open; Ctrl+C stops it. The runner verifies, commits, and pushes only to the branch configured in Project setup; you review and accept the work.</p>
+    <p className="small muted">Startup blocked by uncommitted changes or “Use a clean, dedicated clone”? Open the <button type="button" className="text-button" onClick={() => { setTab('reconnect'); document.getElementById('setup-reconnect-tab')?.focus(); }}>Reconnecting tab</button> and choose the unfinished task under Resume saved task changes.</p>
   </section>
   <section aria-label="Agent startup prompt" className="agent-advanced">
     <h3>5. Start your agent chat</h3>
@@ -216,7 +217,8 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
     <p className="small muted"><code>mkdir</code> ensures Downloads exists; <code>curl</code> updates the runner; <code>python3</code> restarts it using your token and saved workspace.</p>
     {!ready && <p className="small muted">Complete the worker settings in First-time setup to enable copying.</p>}
     <h3>Resume saved task changes</h3>
-    <p><strong>Saved changes:</strong> If setup says “Use a clean, dedicated clone,” this agent’s workspace has uncommitted task work. Your current terminal folder is not the cause. Do not delete or reset the workspace.</p>
+    <p><strong>Saved changes:</strong> “Worker workspace has uncommitted changes” (or the older “Use a clean, dedicated clone” message) means the worker found saved edits. With the command above, these are in its separate agent worktree, even when your terminal is open in another folder. The latest runner shows the exact path; run <code>git status</code> in that folder to inspect it. Do not delete or reset unfinished work.</p>
+    <p>Select the task that owns those edits below, then copy and run its resume command. Paste your token when prompted and press Enter; the token stays hidden. On Windows, run the command in Ubuntu / WSL 2.</p>
     {workerAgent ? <>
       <Field label="Task to resume" hint="Choose the blocked or active task that owns those saved changes.">
         <select value={resumeTaskId} onChange={event => setResumeTaskId(event.target.value)}>

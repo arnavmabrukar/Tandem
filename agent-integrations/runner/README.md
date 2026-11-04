@@ -23,6 +23,11 @@ Status replies do not invent completion estimates.
 
 ### Verification and recovery
 
+On Windows, run the worker inside **Ubuntu in WSL 2**, not native PowerShell.
+Install WSL with `wsl --install -d Ubuntu` from Administrator PowerShell, then
+follow the Windows (WSL 2) setup tab inside Ubuntu, including CLI sign-in.
+Installing the sandbox npm package in Windows alone does not enable verification.
+
 Before committing, the runner checks Git whitespace and conflict markers, then runs
 root `package.json` scripts named `typecheck`, `lint`, `test` and `build` when present,
 with `CI=true`. These commands run only through Anthropic Sandbox Runtime (`srt`

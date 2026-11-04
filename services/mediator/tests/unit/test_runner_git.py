@@ -18,6 +18,30 @@ spec.loader.exec_module(runner)
 
 
 class RunnerLoginCheckTests(unittest.TestCase):
+    def test_native_windows_stops_before_credentials_or_workspace_access(self):
+        with patch.object(runner.sys, 'platform', 'win32'), \
+                patch.object(runner.getpass, 'getpass') as prompt, \
+                patch.object(runner, 'managed_clone') as clone, \
+                patch.object(runner, 'Tandem') as tandem:
+            self.assertEqual(runner.main([
+                '--project', 'project', '--repository', 'team/private', '--prompt-token',
+                '--agent', 'claude',
+            ]), 1)
+        prompt.assert_not_called()
+        clone.assert_not_called()
+        tandem.assert_not_called()
+
+    def test_dirty_workspace_reports_its_path_and_preserves_saved_work(self):
+        repo = Mock()
+        repo.path = Path('/saved/worker')
+        repo.dirty.return_value = True
+        with patch.object(runner.shutil, 'which', return_value='/usr/bin/git'):
+            with self.assertRaises(runner.WorkBlocked) as error:
+                runner.check_worker(repo, ['claude', '-p'])
+        self.assertIn('/saved/worker', str(error.exception))
+        self.assertIn('--resume-task', str(error.exception))
+        repo.git.assert_not_called()
+
     def test_login_check_launches_the_resolved_executable(self):
         # On Windows, npm installs claude as claude.cmd, which only the resolved path can launch.
         repo = Mock()

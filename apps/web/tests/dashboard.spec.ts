@@ -711,7 +711,7 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(dialog.getByRole('tab', { name: 'Reconnecting' })).toHaveAttribute('aria-selected', 'true');
   const reconnect = dialog.getByRole('region', { name: 'Reconnect your worker' });
   await expect(reconnect).toContainText('Your current terminal folder is not the cause.');
-  await expect(reconnect).toContainText('Do not delete or reset the workspace.');
+  await expect(reconnect).toContainText('Do not delete or reset unfinished work.');
   await expect(reconnect.getByRole('button', { name: 'Copy download and start command' })).toBeDisabled();
   await expect(dialog.getByRole('region', { name: 'Continuous worker setup' })).toBeHidden();
   await dialog.getByRole('tab', { name: 'First-time setup' }).click();
