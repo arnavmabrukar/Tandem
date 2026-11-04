@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
 import { useSession } from '../auth/session';
 import { ErrorNotice, Field, PageHeader } from '../components/common';
 import { Button } from '../components/ui/button';
+import { McpConnectionList } from './McpOAuthPage';
 
 export function SettingsPage() {
   const { user, api } = useSession();
@@ -32,11 +32,9 @@ export function SettingsPage() {
     if (name && name !== user!.name) save.mutate();
   };
 
-  const signIns = user!.signIns ?? [];
-
   return (
     <>
-      <PageHeader title="Settings" description="Your profile and how you sign in to Tandem." />
+      <PageHeader title="Settings" description="Your profile, connected agents and local runner." />
 
       <section className="panel narrow-panel">
         <h2>Profile</h2>
@@ -67,11 +65,7 @@ export function SettingsPage() {
             )}
           </div>
         </form>
-      </section>
-
-      <section className="panel narrow-panel">
-        <h2>Sign-in</h2>
-        <dl className="details-grid">
+        <dl className="details-grid profile-email">
           <dt>Email</dt>
           <dd className="row wrap">
             {user!.email ?? 'No email on this sign-in'}
@@ -88,19 +82,6 @@ export function SettingsPage() {
             verification email, then log out and sign in again.
           </p>
         )}
-        <h3>Ways you sign in</h3>
-        <ul className="member-list">
-          {signIns.map((signIn, index) => (
-            <li key={`${signIn.method}-${index}`}>
-              {signIn.method}
-              {signIn.current && <span className="tag">This session</span>}
-            </li>
-          ))}
-        </ul>
-        <p className="small muted">
-          Sign-ins with the same verified email share one Tandem account, with the same projects and
-          agents.
-        </p>
       </section>
 
       <section className="panel narrow-panel">
@@ -108,7 +89,7 @@ export function SettingsPage() {
         <p className="muted">
           See which agent clients can reach your projects, and disconnect them.
         </p>
-        <Link to="/mcp/connections">Manage agent connections</Link>
+        <McpConnectionList />
       </section>
       <section className="panel narrow-panel" aria-label="Remove local runner">
         <h2>Remove local runner</h2>

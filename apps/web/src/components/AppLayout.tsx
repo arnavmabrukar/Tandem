@@ -149,9 +149,7 @@ export function AppLayout({
                 </span>
                 <span className="account-name">
                   <strong>{user!.name}</strong>
-                  <small>
-                    {project ? label(roleFor(project, user!.id) ?? 'member') : 'Signed in'}
-                  </small>
+                  {project && <small>{label(roleFor(project, user!.id) ?? 'member')}</small>}
                 </span>
                 <ChevronsUpDown size={15} aria-hidden="true" />
               </DropdownMenu.Trigger>

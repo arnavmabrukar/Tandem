@@ -157,10 +157,11 @@ export function McpOAuthPage() {
   </main>;
 }
 
-export function McpConnectionsPage() {
-  const { user, signIn, error: sessionError } = useSession();
+// One line per connected agent client, with its expiry and a Disconnect button.
+export function McpConnectionList() {
+  const { user } = useSession();
   const request = useOAuthRequest();
-  const [connections, setConnections] = useState<z.infer<typeof connectionsSchema>>([]);
+  const [connections, setConnections] = useState<z.infer<typeof connectionsSchema> | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   async function load() { setConnections(connectionsSchema.parse(await request('connections'))); }
@@ -174,17 +175,28 @@ export function McpConnectionsPage() {
     catch (e) { setError(e instanceof Error ? e.message : 'Disconnect failed'); }
     finally { setBusy(false); }
   }
+  return <>
+    {connections === null && !error && <p role="status" className="muted">Loading connections…</p>}
+    {connections?.length === 0 && !error && <p className="muted">No connected agents.</p>}
+    {!!connections?.length && <ul className="connection-list">
+      {connections.map((c) => <li key={c.id}>
+        <span className="connection-name">{c.clientName || 'MCP client'} — {c.projectName} / {c.agentName}</span>
+        <span className="connection-expiry muted" title={new Date(c.expiresAt).toLocaleString()}>
+          Expires {new Date(c.expiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+        </span>
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => void disconnect(c.id)}>Disconnect</Button>
+      </li>)}
+    </ul>}
+    {error && <p role="alert" className="notice error">{error}</p>}
+  </>;
+}
+
+export function McpConnectionsPage() {
+  const { user, signIn, error: sessionError } = useSession();
   return <main className="p-8 max-w-2xl mx-auto space-y-6">
     <h1 className="text-3xl font-bold">Connected MCP clients</h1>
-    {!user ? <Button onClick={() => void signIn('/mcp/connections')}>Sign in</Button> : <>
-      {connections.map((c) => <section key={c.id} className="border rounded p-4 space-y-3">
-        <p>{c.clientName || 'MCP client'} — {c.projectName} / {c.agentName}</p>
-        <p>Expires {new Date(c.expiresAt).toLocaleString()}</p>
-        <Button disabled={busy} onClick={() => void disconnect(c.id)}>Disconnect</Button>
-      </section>)}
-      {!connections.length && !error && <p>No active OAuth connections.</p>}
-    </>}
-    {(error || sessionError) && <p role="alert">{error || sessionError?.message}</p>}
+    {!user ? <Button onClick={() => void signIn('/mcp/connections')}>Sign in</Button> : <McpConnectionList />}
+    {sessionError && <p role="alert">{sessionError.message}</p>}
     <Link to="/dashboard">Return to dashboard</Link>
   </main>;
 }
