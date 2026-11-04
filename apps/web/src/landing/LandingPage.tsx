@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import './landing.css';
 
 const FONT_LINK_ID = 'tandem-landing-font';
-const THEME_KEY = 'tandem-landing-theme';
 const DASHBOARD = '/dashboard';
 
 type Mode = 'light' | 'dark';
@@ -127,25 +126,10 @@ const tools = [
 ];
 
 export function LandingPage() {
-  const [chosen, setChosen] = useState<Mode | null>(null);
-  const [system, setSystem] = useState<Mode>('light');
+  // The page always opens in light mode. The toggle switches to dark for the current visit only.
+  const [mode, setMode] = useState<Mode>('light');
   const [audience, setAudience] = useState<'solo' | 'team'>('solo');
   const [approved, setApproved] = useState(false);
-  const mode = chosen ?? system;
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(THEME_KEY);
-      if (saved === 'light' || saved === 'dark') setChosen(saved);
-    } catch {
-      /* Storage can be blocked; the page follows the system theme instead. */
-    }
-    const query = window.matchMedia('(prefers-color-scheme: dark)');
-    const sync = () => setSystem(query.matches ? 'dark' : 'light');
-    sync();
-    query.addEventListener('change', sync);
-    return () => query.removeEventListener('change', sync);
-  }, []);
 
   useEffect(() => {
     // The dashboard doesn't bundle Inter, so only the landing page requests it.
@@ -166,17 +150,11 @@ export function LandingPage() {
   }, []);
 
   function toggleTheme() {
-    const next: Mode = mode === 'dark' ? 'light' : 'dark';
-    setChosen(next);
-    try {
-      localStorage.setItem(THEME_KEY, next);
-    } catch {
-      /* Not persisting the choice is acceptable. */
-    }
+    setMode(mode === 'dark' ? 'light' : 'dark');
   }
 
   return (
-    <div className="lp" data-theme={chosen ?? undefined}>
+    <div className="lp" data-theme={mode}>
       <header className="lp-top">
         <div className="lp-wrap">
           <a className="lp-brand" href="#/" onClick={scrollToSection('top')} aria-label="Tandem home">
