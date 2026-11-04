@@ -255,7 +255,7 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, connectNo
         <CommandBox text={installCommand} label="Copy download and start command" disabled={!ready} {...commandPlatform} />
         <p className="trust-note">This downloads Tandem’s worker script to your Downloads folder and runs it as you. It keeps its own copy of your repository under <code>~/.local/share/tandem</code>, runs your agent CLI on approved tasks, and pushes only to <code>{branch}</code>. Use it only on projects whose members you trust. <a href="/downloads/tandem_runner.py" target="_blank" rel="noreferrer">Open the script</a> to read it first.</p>
         <p>Wait until the terminal shows <code>Tandem agent token (hidden, not saved):</code>. Leave it open and continue to the next step.</p>
-        <p className="small muted">Startup blocked by uncommitted changes or “Use a clean, dedicated clone”? Open the <button type="button" className="text-button" onClick={() => { setTab('reconnect'); document.getElementById('setup-reconnect-tab')?.focus(); }}>Reconnecting tab</button> and choose the unfinished task under Resume saved task changes.</p>
+        <p className="small muted">Interrupted work resumes automatically when still assigned to this agent. If saved changes cannot be matched, open the <button type="button" className="text-button" onClick={() => { setTab('reconnect'); document.getElementById('setup-reconnect-tab')?.focus(); }}>Reconnecting tab</button> for manual recovery.</p>
       </section>
     </>}
     {workerStep === 3 && <>
