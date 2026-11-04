@@ -383,7 +383,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
                 </p>
               </div>
               {!confirmingDelete && (
-                <Button variant="outline" className="danger-outline" onClick={() => setConfirmingDelete(true)}>
+                <Button variant="destructive" className="danger-start" onClick={() => setConfirmingDelete(true)}>
                   Delete project
                 </Button>
               )}
@@ -419,7 +419,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
                       }
                     }}
                   >
-                    {removal.isPending ? 'Deleting…' : `Delete ${project.repository}`}
+                    {removal.isPending ? 'Deleting…' : `Delete ${project.name}`}
                   </Button>
                   <Button
                     variant="ghost"
