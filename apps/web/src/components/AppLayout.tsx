@@ -8,12 +8,12 @@ import {
   LogOut,
   RefreshCw,
   CircleHelp,
+  Mail,
   Settings,
 } from 'lucide-react';
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useSession } from '../auth/session';
-import { configuration } from '../config';
 import { initials, label, roleFor, type Project } from '../types/domain';
 import { Button } from './ui/button';
 import { BrandMark } from './BrandMark';
@@ -40,7 +40,37 @@ export function AppLayout({
   const navigate = useNavigate();
   const location = useLocation();
   const id = project?.id ?? projects[0]?.id;
-  const pending = project?.approvals.filter((a) => a.status === 'pending').length ?? 0;
+  const pendingApprovals = project?.approvals.filter((a) => a.status === 'pending') ?? [];
+  const pending = pendingApprovals.length;
+  // Contract approvals live in the Scope stage and result reviews in Review, as on the Activity page.
+  const approvalStage = pendingApprovals.some((a) => a.action === 'Approve contract')
+    ? 'scope'
+    : 'review';
+  const attention =
+    project?.tasks.filter((t) => t.status === 'blocked' || t.status === 'conflict').length ?? 0;
+  const online =
+    project?.agents.filter((a) => a.grant === 'active' && a.presence === 'online').length ?? 0;
+  const stale =
+    project?.agents.filter((a) => a.grant === 'active' && a.presence === 'stale').length ?? 0;
+  const pageName = (() => {
+    const path = location.pathname;
+    if (path === '/invitations') return 'Invitations';
+    if (path === '/settings') return 'Settings';
+    if (path === '/projects/new') return 'New project';
+    const section = path.split('/')[3];
+    const names: Record<string, string> = {
+      activity: 'Activity',
+      workflow: 'Workflow',
+      tasks: 'Workflow',
+      plans: 'Workflow',
+      approvals: 'Workflow',
+      agents: 'Agents',
+      setup: 'Project setup',
+      connections: 'Connection guide',
+    };
+    return names[section] ?? '';
+  })();
+  const accountPage = ['/invitations', '/settings'].includes(location.pathname);
   const nav = [
     { to: 'activity', text: 'Activity', icon: Activity },
     { to: 'workflow', text: 'Workflow', icon: ListChecks },
@@ -60,11 +90,11 @@ export function AppLayout({
       >
         Skip to content
       </a>
-      <aside className="sidebar">
+      <aside className="sidebar" aria-label="Project sidebar">
         <div className="brand">
           <BrandMark />
           <span>
-            Tandem<small>Human dashboard</small>
+            Tandem<small className="brand-project" title={project?.name}>{project?.name ?? 'No project selected'}</small>
           </span>
         </div>
         <label className="field project-switcher">
@@ -88,20 +118,14 @@ export function AppLayout({
           + Create project
         </Button>
         <nav aria-label="Main navigation">
-          {/* Keep this outside the project-specific navigation condition. */}
-          <NavLink to="/invitations">
-            <span>Invitations</span>
-          </NavLink>
           {id &&
             nav.map(({ to, text, icon: Icon }) => (
-              <NavLink key={to} aria-label={text} to={`/projects/${id}/${to}`}
+              <NavLink key={to} aria-label={to === 'workflow' && pending > 0 ? `${text}, ${pending} pending ${pending === 1 ? 'approval' : 'approvals'}` : text} to={`/projects/${id}/${to}`}
                 className={({ isActive }) => isActive || (to === 'workflow' && location.pathname.startsWith(`/projects/${id}/tasks/`)) ? 'active' : undefined}>
                 <Icon size={18} />
                 <span>{text}</span>
                 {to === 'workflow' && pending > 0 && (
-                  <span className="nav-count" aria-hidden="true">
-                    {pending}
-                  </span>
+                  <span className="nav-count">{pending}</span>
                 )}
               </NavLink>
             ))}
@@ -112,6 +136,13 @@ export function AppLayout({
             <br />
             Coordinated work.
           </p>
+          <nav aria-label="Account" className="account-nav">
+            {/* Keep this outside the project-specific navigation condition. */}
+            <NavLink to="/invitations">
+              <Mail size={18} />
+              <span>Invitations</span>
+            </NavLink>
+          </nav>
           <div className="user-row">
             <DropdownMenu.Root>
               <DropdownMenu.Trigger className="account-trigger" aria-label="Account menu">
@@ -155,26 +186,67 @@ export function AppLayout({
         </div>
       </aside>
       <div className="workspace">
-        <div className="topbar">
-          <div className="row">
-            <Badge value={connectionState} />
-            <span>{configuration.config?.apiBaseUrl}</span>
+        <header className="topbar">
+          <nav className="crumbs" aria-label="Breadcrumb">
+            {accountPage || !project ? (
+              <span>Account</span>
+            ) : (
+              <span className="crumb-project" title={project.name}>
+                {project.name}
+              </span>
+            )}
+            {pageName && (
+              <>
+                <span className="crumb-sep" aria-hidden="true">
+                  /
+                </span>
+                <strong aria-current="page">{pageName}</strong>
+              </>
+            )}
+          </nav>
+          <div className="topbar-right">
+            {id && (
+              <div className="needs-you" role="group" aria-label="Needs you">
+                {pending > 0 && (
+                  <Link
+                    className="chip chip-attention"
+                    to={`/projects/${id}/workflow?stage=${approvalStage}`}
+                  >
+                    {pending} {pending === 1 ? 'approval' : 'approvals'} pending
+                  </Link>
+                )}
+                {attention > 0 && (
+                  <Link
+                    className="chip chip-attention"
+                    to={`/projects/${id}/workflow?stage=execute&status=attention`}
+                  >
+                    {attention} {attention === 1 ? 'task needs' : 'tasks need'} attention
+                  </Link>
+                )}
+                <Link className="chip chip-plain" to={`/projects/${id}/agents`}>
+                  <span
+                    className={`dot ${online > 0 ? 'dot-online' : 'dot-off'}`}
+                    aria-hidden="true"
+                  />
+                  {online} online{stale > 0 ? ` · ${stale} stale` : ''}
+                </Link>
+              </div>
+            )}
+            <div className="freshness" title="The workspace refreshes every 15 seconds.">
+              <Badge value={connectionState} />
+              <span>
+                {connectionState === 'unavailable' && updatedAt ? 'Snapshot from ' : 'Updated '}
+                {updatedAt ? <Timestamp value={new Date(updatedAt).toISOString()} /> : 'not loaded'}
+              </span>
+            </div>
+            <Button variant="ghost" size="sm" onClick={refresh} disabled={refreshing}>
+              <RefreshCw size={15} className={refreshing ? 'spin' : undefined} />
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </Button>
           </div>
-          <Button variant="ghost" size="sm" onClick={refresh} disabled={refreshing}>
-            <RefreshCw size={15} className={refreshing ? 'spin' : undefined} />
-            {refreshing ? 'Refreshing…' : 'Refresh'}
-          </Button>
-        </div>
+        </header>
         <main id="main" tabIndex={-1}>
           {children}
-          <footer className="workspace-footer">
-            <span>
-              Last successful API refresh{' '}
-              {updatedAt ? <Timestamp value={new Date(updatedAt).toISOString()} /> : 'not loaded'}.
-              Refreshes every 15 seconds.
-            </span>
-            <span>Git holds code. The mediator holds coordination.</span>
-          </footer>
         </main>
       </div>
     </div>
