@@ -5,7 +5,7 @@ import type { Project } from '../types/domain';
 import { PageHeader, Badge, Empty, Timestamp, Field } from '../components/common';
 import { Button } from '../components/ui/button';
 
-export function ActivityPage({ project }: { project: Project }) {
+export function ActivityPage({ project, overview = false }: { project: Project; overview?: boolean }) {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const pending = project.approvals.filter((a) => a.status === 'pending').length;
@@ -50,7 +50,7 @@ export function ActivityPage({ project }: { project: Project }) {
   return (
     <>
       <PageHeader
-        title="Activity"
+        title={overview ? 'Overview' : 'Activity'}
         description={`${project.name} · ${project.description || 'Shared project coordination'}`}
         action={
           <Button asChild variant="outline">

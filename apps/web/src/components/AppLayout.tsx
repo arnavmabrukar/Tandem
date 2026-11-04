@@ -1,6 +1,7 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   Activity,
+  ArrowLeft,
   Bot,
   ChevronsUpDown,
   ListChecks,
@@ -45,7 +46,7 @@ export function AppLayout({
   const [settingsOpen, setSettingsOpen] = useState(inSettings);
   useEffect(() => { if (inSettings) setSettingsOpen(true); }, [inSettings]);
   const creating = location.pathname === '/projects/new';
-  const id = creating ? undefined : (project?.id ?? projects[0]?.id);
+  const id = creating ? undefined : project?.id;
   const pendingApprovals = project?.approvals.filter((a) => a.status === 'pending') ?? [];
   const pending = pendingApprovals.length;
   // Contract approvals live in the Scope stage and result reviews in Review, as on the Activity page.
@@ -61,13 +62,14 @@ export function AppLayout({
   const overview = location.pathname === '/dashboard';
   const pageName = (() => {
     const path = location.pathname;
-    if (overview) return 'Overview';
+    if (overview) return 'Projects';
     if (path === '/invitations') return 'Invitations';
     if (path === '/settings') return 'Settings';
     if (path === '/settings/user') return 'User settings';
     if (path === '/projects/new') return 'New project';
     const section = path.split('/')[3];
     const names: Record<string, string> = {
+      overview: 'Overview',
       activity: 'Activity',
       workflow: 'Workflow',
       tasks: 'Workflow',
@@ -119,12 +121,13 @@ export function AppLayout({
           projects={projects}
           project={project}
           online={online}
-          onSelect={(projectId) => navigate(`/projects/${projectId}/activity`)}
+          onSelect={(projectId) => navigate(`/projects/${projectId}/overview`)}
         />
         <nav aria-label="Main navigation">
-          <NavLink to="/dashboard" end>
+          {id && <Link to="/dashboard"><ArrowLeft size={18} /><span>Back to all projects</span></Link>}
+          <NavLink to={id ? `/projects/${id}/overview` : '/dashboard'} end>
             <LayoutDashboard size={18} />
-            <span>Overview</span>
+            <span>{id ? 'Overview' : 'Projects'}</span>
           </NavLink>
           {id &&
             nav.map(({ to, text, icon: Icon }) => (

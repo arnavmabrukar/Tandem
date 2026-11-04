@@ -4,7 +4,6 @@ import {
   lazy,
   Suspense,
   useEffect,
-  useState,
   type ErrorInfo,
   type ReactNode,
 } from 'react';
@@ -78,22 +77,17 @@ function Dashboard() {
   const accessDenied = query.error instanceof ApiError && [401, 403].includes(query.error.status);
   const projects = accessDenied ? [] : (query.data?.projects ?? []);
   const project = projects.find((p) => p.id === match?.params.projectId) ?? null;
-  // Settings and Invitations aren't project pages, but the sidebar and header keep showing the
-  // project the person was last working in instead of resetting to "Choose project".
-  const [lastProjectId, setLastProjectId] = useState<string | null>(null);
-  useEffect(() => {
-    if (project) setLastProjectId(project.id);
-  }, [project?.id]);
-  // Creating a project isn't work inside an existing one, so it shows no project context at all.
+  // Only project routes and explicitly scoped settings retain project navigation.
+  // Deriving this from the URL also keeps reload and browser Back consistent.
   const contextProject =
-    location.pathname === '/projects/new'
-      ? null
-      : (project ?? projects.find((p) => p.id === new URLSearchParams(location.search).get('project')) ?? projects.find((p) => p.id === lastProjectId) ?? projects[0] ?? null);
+    project ?? (location.pathname === '/settings'
+      ? projects.find((p) => p.id === new URLSearchParams(location.search).get('project')) ?? null
+      : null);
   useEffect(() => {
     document.title = project
       ? `${project.name} · Tandem`
       : location.pathname === '/dashboard'
-        ? 'Overview · Tandem'
+        ? 'Projects · Tandem'
         : 'Tandem — Coordination dashboard';
     return () => {
       document.title = 'Tandem — Coordination dashboard';
@@ -157,12 +151,14 @@ function Dashboard() {
                   path="/projects/:projectId"
                   element={
                     project ? (
-                      <Navigate to={`/projects/${project.id}/activity`} replace />
+                      <Navigate to={`/projects/${project.id}/overview`} replace />
                     ) : (
                       notFound
                     )
                   }
                 />
+                <Route path="/projects/:projectId/overview"
+                  element={project ? <ActivityPage key={project.id} project={project} overview /> : notFound} />
                 <Route
                   path="/projects/:projectId/activity"
                   element={

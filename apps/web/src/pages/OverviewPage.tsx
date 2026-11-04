@@ -61,7 +61,7 @@ function ProjectCard({ summary, now }: { summary: ProjectSummary; now: number })
       <div className="project-card-head">
         <div className="project-card-title">
           <h3>
-            <Link className="project-link" to={`/projects/${project.id}/activity`}>
+            <Link className="project-link" to={`/projects/${project.id}/overview`}>
               {project.name}
             </Link>
           </h3>
@@ -143,7 +143,7 @@ export function OverviewPage({ projects }: { projects: Project[] }) {
   return (
     <>
       <PageHeader
-        title="Overview"
+        title="Projects"
         description="Every project you can access, and what is waiting on you across them."
         action={
           <Button asChild variant="outline">

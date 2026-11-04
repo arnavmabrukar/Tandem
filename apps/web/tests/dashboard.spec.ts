@@ -2,6 +2,25 @@ import { expect, test, type Page, type Request } from '@playwright/test';
 import { testProject, testTask } from './support/data';
 import { readFileSync } from 'node:fs';
 
+test('navigation switches between all projects and a project overview', async ({ page }) => {
+  await connect(page);
+  await page.goto('/#/dashboard');
+  const nav = page.getByRole('navigation', { name: 'Main navigation' });
+  await expect(nav.getByRole('link', { name: 'Projects', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toHaveCount(0);
+  await page.locator('.project-link').first().click();
+  await expect(page).toHaveURL(/\/projects\/project-1\/overview$/);
+  await expect(nav.getByRole('link', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
+  await page.reload();
+  await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toBeVisible();
+  await nav.getByRole('link', { name: 'Back to all projects' }).click();
+  await expect(nav.getByRole('link', { name: 'Projects', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toHaveCount(0);
+  await page.goBack();
+  await expect(nav.getByRole('link', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page');
+});
+
 test('profile menu opens user settings and account deletion requires confirmation', async ({ page }) => {
   await connect(page);
   let deletion: unknown;

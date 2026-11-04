@@ -96,7 +96,7 @@ export function ProjectSwitcher({
         }}
       >
         <span className={`dot ${online > 0 ? 'dot-online' : 'dot-off'}`} aria-hidden="true" />
-        <span className="switcher-name">{project?.name ?? 'Choose project'}</span>
+        <span className="switcher-name">{project?.name ?? 'All projects'}</span>
         <kbd className="switcher-kbd" aria-hidden="true">
           {mac ? '⌘ K' : 'Ctrl K'}
         </kbd>
