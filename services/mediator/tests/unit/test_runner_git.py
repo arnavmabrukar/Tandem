@@ -17,6 +17,19 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+class RunnerLoginCheckTests(unittest.TestCase):
+    def test_login_check_launches_the_resolved_executable(self):
+        # On Windows, npm installs claude as claude.cmd, which only the resolved path can launch.
+        repo = Mock()
+        repo.dirty.return_value = False
+        repo.exists.return_value = True
+        repo.base_branch.return_value = 'main'
+        with patch.object(runner.shutil, 'which', side_effect=lambda name, **_: rf'C:\npm\{name}.CMD'), \
+                patch.object(runner.subprocess, 'run', return_value=Mock(returncode=0)) as run:
+            runner.check_worker(repo, ['claude', '-p'], False)
+        self.assertEqual(run.call_args_list[0].args[0], [r'C:\npm\claude.CMD', 'auth', 'status'])
+
+
 class RunnerGitTests(unittest.TestCase):
     def setUp(self):
         self.no_room_requests = patch.object(runner, 'worker_room_requests', return_value=[])

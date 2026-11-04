@@ -696,7 +696,9 @@ def check_worker(repo: Repo, command: list[str], allow_dirty: bool = False) -> N
     login = {'codex': ['codex', 'login', 'status'], 'claude': ['claude', 'auth', 'status']}.get(command[0])
     for check in ([login] if login else []):
         try:
-            result = subprocess.run(check, cwd=repo.path, capture_output=True, timeout=20, env=_agent_env())
+            # Windows can't launch a bare name that is really a .cmd file, such as npm's claude.cmd.
+            result = subprocess.run([shutil.which(check[0]) or check[0], *check[1:]], cwd=repo.path,
+                                    capture_output=True, timeout=20, env=_agent_env())
         except (OSError, subprocess.TimeoutExpired):
             raise WorkBlocked(f"Could not check {check[0]} login. Sign in and retry.") from None
         if result.returncode:
