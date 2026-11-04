@@ -676,6 +676,21 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(worker).not.toContainText('agent-integrations/runner/');
   await expect(worker).toContainText('No access to Tandem’s private repository is needed.');
   const cliSetup = worker.getByRole('region', { name: 'Codex CLI setup' });
+  const commandBox = cliSetup.locator('.setup-command-box');
+  await commandBox.getByRole('combobox').selectOption('windows');
+  await expect(dialog.getByRole('radio', { name: 'Windows', exact: true })).toBeChecked();
+  await expect(commandBox).toContainText('Ubuntu / WSL terminal');
+  await expect(worker.getByRole('region', { name: 'Download and start worker' }).getByRole('combobox')).toHaveValue('windows');
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      writeText: async (text: string) => { document.documentElement.dataset.copiedCommand = text; },
+    } });
+  });
+  await commandBox.getByRole('button', { name: 'Copy Codex setup commands' }).click();
+  await expect(commandBox.getByRole('status')).toHaveText('Copied to clipboard');
+  expect(await page.evaluate(() => document.documentElement.dataset.copiedCommand)).toBe(await commandBox.locator('pre').textContent());
+  await commandBox.getByRole('combobox').selectOption('macos');
+  await page.screenshot({ path: `/tmp/tandem-command-box-${page.viewportSize()!.width}.png`, animations: 'disabled' });
   await expect(cliSetup).toContainText('confirms you are signed in');
   await expect(cliSetup.locator('pre')).toHaveText('npm install -g @openai/codex@latest\ncodex login\ncodex login status');
   const verificationSetup = worker.getByRole('region', { name: 'Verification sandbox setup' });

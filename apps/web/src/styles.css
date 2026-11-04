@@ -1206,6 +1206,11 @@ td:first-child {
 .dialog-content form > .row.end {
   margin-top: 22px;
 }
+.setup-command-box { margin: 12px 0; border: 1px solid #cfdeea; border-radius: 10px; background: #f3f7fb; overflow: hidden; }
+.setup-command-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #cfdeea; font-size: 12px; }
+.setup-command-toolbar select { width: auto; max-width: 100%; padding: 5px 8px; font-size: 12px; }
+.setup-command-toolbar button { margin-left: auto; flex-shrink: 0; }
+.setup-command-box .oauth-code { margin: 0; border: 0; border-radius: 0; padding: 16px; background: transparent; }
 .dialog-content.plan-approval-dialog { width: min(860px, calc(100vw - 32px)); display: flex; flex-direction: column; overflow: hidden; }
 .plan-approval-dialog > .row, .plan-approval-dialog > p { flex-shrink: 0; }
 .plan-approval-body { overflow-y: auto; min-height: 0; padding-right: 8px; }
@@ -1636,14 +1641,15 @@ td:first-child {
 .workspace:has(.agent-room-page) { height: 100dvh; display: flex; flex-direction: column; }
 .workspace:has(.agent-room-page) > .topbar { flex-shrink: 0; padding-inline: 24px; }
 main#main:has(.agent-room-page) { padding: 0; margin: 0; max-width: none; flex: 1; min-height: 0; }
-.agent-room-page { height: 100%; display: flex; flex-direction: column; background: #fff; }
+.agent-room-page { --room-background: #f9fbfd; height: 100%; display: flex; flex-direction: column; background: var(--room-background); }
 .agent-room-layout { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 0; flex: 1; min-height: 0; }
 .agent-room-chat { min-width: 0; min-height: 0; height: 100%; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
 .room-transcript { flex: 1; min-height: 0; overflow-y: auto; }
 .agent-room-chat .chat-header, .agent-room-chat .chat-bottom { flex-shrink: 0; }
+.agent-room-chat, .agent-room-chat .chat-bottom { background: var(--room-background); }
 .agent-room-chat .chat-footnote { justify-content: flex-start; align-items: center; flex-wrap: nowrap; }
 .agent-room-chat .chat-footnote svg { flex-shrink: 0; }
-.room-roster { background: #f9fbfd; border-left: 1px solid var(--border, #dde7f0); padding: 18px; min-height: 0; overflow-y: auto; }
+.room-roster { background: var(--room-background); border-left: 1px solid var(--border, #dde7f0); padding: 18px; min-height: 0; overflow-y: auto; }
 .room-roster > button { width: 100%; }
 .room-roster h2 { font-size: 15px; margin: 24px 0 14px; }
 .room-roster h3 { font-size: 13px; color: #536f84; margin: 24px 0 12px; }
