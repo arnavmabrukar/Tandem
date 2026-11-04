@@ -631,6 +631,37 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(install.locator('pre')).toContainText("--agent-command 'my-agent --headless'");
 });
 
+test('newly connected agent can generate a worker token without leaving setup', async ({ page }) => {
+  const state = await connect(page);
+  const projectId = '11111111-1111-4111-8111-111111111111';
+  const agentId = '22222222-2222-4222-8222-222222222222';
+  const ownerId = '33333333-3333-4333-8333-333333333333';
+  state.project.id = projectId;
+  state.project.members[0].id = ownerId;
+  let connected = false;
+  await page.route('https://api.tandem.test/api/me', route => route.fulfill({ json: { id: ownerId, name: 'Test owner' } }));
+  await page.route('**/.well-known/oauth-protected-resource/mcp/', route => route.fulfill({ json: { resource: 'https://api.tandem.test/mcp/' } }));
+  await page.route('**/api/mcp/oauth/connections', route => route.fulfill({ json: connected
+    ? [{ id: 'connection-1', projectId, agentId }] : [] }));
+  await page.route(`**/api/projects/${projectId}/room`, route => route.fulfill({ json: { exchanges: [] } }));
+  await page.route(`**/api/projects/${projectId}/agents/${agentId}/token`, async route => {
+    expect(route.request().postDataJSON()).toMatchObject({ expectedVersion: 4 });
+    await route.fulfill({ json: { projectId, projectVersion: 5, entityId: agentId, token: 'tdm_test-only-token' } });
+  });
+  await page.goto(`/#/projects/${projectId}/agents`);
+  await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
+  const guide = page.getByRole('region', { name: 'Continuous worker setup' });
+  await expect(guide).toContainText('Generate its token here when access is authorized.');
+  connected = true;
+  state.project.agents.push({ id: agentId, name: 'My Codex', client: 'Codex', owner: 'Test owner',
+    ownerId, machine: '', capabilities: [], grant: 'active', presence: 'offline', lastSeen: null, session: null });
+  await expect(guide.getByRole('button', { name: 'Generate worker token' })).toBeVisible({ timeout: 10_000 });
+  await guide.getByRole('button', { name: 'Generate worker token' }).click();
+  const tokenDialog = page.getByRole('dialog', { name: 'Connection token for My Codex' });
+  await tokenDialog.getByRole('button', { name: 'Replace token' }).click();
+  await expect(tokenDialog.getByLabel('Agent token')).toHaveValue('tdm_test-only-token');
+});
+
 test('reconnecting an agent offers a task-specific resume command for saved edits', async ({ page }) => {
   const state = await connect(page);
   const ownerId = '11111111-1111-4111-8111-111111111111';

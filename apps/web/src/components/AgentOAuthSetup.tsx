@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth0 } from '@auth0/auth0-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -119,8 +119,8 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
     {!repositoryValid && <p role="alert">Set this project’s GitHub repository to owner/repository before starting a worker.</p>}
     <p className="small muted">macOS/Linux: Python 3.11+, curl, Git, and signed-in GitHub CLI (gh auth login) and agent CLI. Linux verification also requires bubblewrap and socat.</p>
     <h3>3. Get your agent token</h3>
-    {agent ? <><p>Copy this agent’s token for the terminal prompt.</p><AgentTokenButton project={project} agent={agent} /></>
-      : <p>After connecting, open Set up worker on your agent to get its token.</p>}
+    {agent ? <><p>Generate this agent’s token for the terminal prompt. A new token replaces any existing one.</p><AgentTokenButton project={project} agent={agent} buttonLabel="Generate worker token" /></>
+      : <p>Connect your agent in step 1. Generate its token here when access is authorized.</p>}
     <section aria-label="Download and start worker">
       <h3>4. Download and start</h3>
       <p>{ready ? 'Run in your project folder to reuse it, or anywhere to download it automatically. Paste the token when prompted, then press Enter. Pasted text stays hidden.' : 'Complete step 2 to enable copying.'}</p>
@@ -208,6 +208,13 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
       return sessions.find((c) => !initialConnections.current!.has(c.id))?.agentId ?? false;
     },
   });
+  useEffect(() => {
+    if (connections.data && !project.agents.some(a => a.id === connections.data)) {
+      // OAuth can register a new agent while this modal is open. Refresh the
+      // workspace so its token control appears here without closing the guide.
+      void queries.invalidateQueries({ queryKey: ['workspace', user?.id] });
+    }
+  }, [connections.data, project.agents, queries, user?.id]);
   const url = discovery.data;
   const roomPrompt = `Use Tandem for project ${project.id}.
 Confirm access with tandem_whoami. Fetch tandem_get_assignments and summarize ready work and blockers.

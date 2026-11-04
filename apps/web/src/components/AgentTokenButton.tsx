@@ -6,7 +6,7 @@ import { Button } from './ui/button';
 import { Modal } from './ui/dialog';
 import { ErrorNotice, Field } from './common';
 
-export function AgentTokenButton({ project, agent }: { project: Project; agent: Agent }) {
+export function AgentTokenButton({ project, agent, buttonLabel }: { project: Project; agent: Agent; buttonLabel?: string }) {
   const { api, user } = useSession();
   const queries = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -55,7 +55,7 @@ export function AgentTokenButton({ project, agent }: { project: Project; agent: 
 
   return <>
     <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-      {agent.grant === 'active' ? 'Replace token' : 'Generate token'}
+      {buttonLabel ?? (agent.grant === 'active' ? 'Replace token' : 'Generate token')}
     </Button>
     <Modal open={open} onOpenChange={(value) => { if (!value) close(); }}
       title={`Connection token for ${agent.name}`}
