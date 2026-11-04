@@ -8,6 +8,7 @@ import {
   LogOut,
   RefreshCw,
   CircleHelp,
+  LayoutDashboard,
   Mail,
   Plus,
   Settings,
@@ -55,8 +56,10 @@ export function AppLayout({
     project?.agents.filter((a) => a.grant === 'active' && a.presence === 'online').length ?? 0;
   const stale =
     project?.agents.filter((a) => a.grant === 'active' && a.presence === 'stale').length ?? 0;
+  const overview = location.pathname === '/dashboard';
   const pageName = (() => {
     const path = location.pathname;
+    if (overview) return 'Overview';
     if (path === '/invitations') return 'Invitations';
     if (path === '/settings') return 'Settings';
     if (path === '/projects/new') return 'New project';
@@ -112,6 +115,10 @@ export function AppLayout({
           onSelect={(projectId) => navigate(`/projects/${projectId}/activity`)}
         />
         <nav aria-label="Main navigation">
+          <NavLink to="/dashboard" end>
+            <LayoutDashboard size={18} />
+            <span>Overview</span>
+          </NavLink>
           {id &&
             nav.map(({ to, text, icon: Icon }) => (
               <NavLink key={to} aria-label={to === 'workflow' && pending > 0 ? `${text}, ${pending} pending ${pending === 1 ? 'approval' : 'approvals'}` : text} to={`/projects/${id}/${to}`}
@@ -186,6 +193,8 @@ export function AppLayout({
           <nav className="crumbs" aria-label="Breadcrumb">
             {accountPage ? (
               <span>Account</span>
+            ) : overview ? (
+              <span>Workspace</span>
             ) : !project ? (
               <span>Projects</span>
             ) : (
@@ -203,7 +212,7 @@ export function AppLayout({
             )}
           </nav>
           <div className="topbar-right">
-            {id && (
+            {id && !overview && (
               <div className="needs-you" role="group" aria-label="Needs you">
                 {pending > 0 && (
                   <Link
