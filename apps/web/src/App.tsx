@@ -1,5 +1,13 @@
 import { McpOAuthPage, McpConnectionsPage } from './pages/McpOAuthPage';
-import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactNode } from 'react';
+import {
+  Component,
+  lazy,
+  Suspense,
+  useEffect,
+  useState,
+  type ErrorInfo,
+  type ReactNode,
+} from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useMatch } from 'react-router-dom';
 import { useSession } from './auth/session';
 import { useWorkspace } from './hooks/useWorkspace';
@@ -67,6 +75,13 @@ function Dashboard() {
   const accessDenied = query.error instanceof ApiError && [401, 403].includes(query.error.status);
   const projects = accessDenied ? [] : (query.data?.projects ?? []);
   const project = projects.find((p) => p.id === match?.params.projectId) ?? null;
+  // Settings and Invitations aren't project pages, but the sidebar and header keep showing the
+  // project the person was last working in instead of resetting to "Choose project".
+  const [lastProjectId, setLastProjectId] = useState<string | null>(null);
+  useEffect(() => {
+    if (project) setLastProjectId(project.id);
+  }, [project?.id]);
+  const contextProject = project ?? projects.find((p) => p.id === lastProjectId) ?? projects[0] ?? null;
   useEffect(() => {
     document.title = project ? `${project.name} · Tandem` : 'Tandem — Coordination dashboard';
     return () => {
@@ -89,7 +104,7 @@ function Dashboard() {
   return (
     <AppLayout
       projects={projects}
-      project={project}
+      project={contextProject}
       refresh={() => void query.refetch()}
       refreshing={query.isFetching}
       updatedAt={query.dataUpdatedAt}
