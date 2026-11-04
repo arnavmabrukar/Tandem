@@ -352,6 +352,7 @@ fieldset {
 .brand {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 11px;
   padding: 0 9px 28px;
   font-size: 24px;
@@ -584,14 +585,13 @@ fieldset {
   color: var(--c-0b3954);
   background: var(--c-dcebf6);
 }
-.settings-nav-toggle { display: flex; align-items: center; gap: 11px; flex-shrink: 0; width: 100%; border: 0; border-radius: 7px; padding: 11px 12px; background: transparent; color: #536f84; font: inherit; font-weight: 550; cursor: pointer; text-align: left; }
-.settings-nav-toggle:hover { background: #f3f8fc; }
-.settings-nav-toggle.active { color: #0b3954; background: #dcebf6; }
+.settings-nav-toggle { display: flex; align-items: center; gap: 11px; flex-shrink: 0; width: 100%; border: 0; border-radius: 7px; padding: 11px 12px; background: transparent; color: var(--c-536f84); font: inherit; font-weight: 550; cursor: pointer; text-align: left; }
+.settings-nav-toggle:hover { background: var(--c-f3f8fc); }
+.settings-nav-toggle.active { color: var(--c-0b3954); background: var(--c-dcebf6); }
 .settings-nav-toggle > svg:last-child { margin-left: auto; transform: rotate(-90deg); }
 .settings-nav-toggle > svg.expanded { transform: none; }
-.settings-subnav { margin: 0 0 8px 20px; padding-left: 10px; border-left: 1px solid #dce7ef; flex-shrink: 0; }
-.settings-subnav p { margin: 14px 10px 4px; color: #536f84; font-size: 11px; font-weight: 650; overflow-wrap: anywhere; }
-.settings-subnav p strong { font-weight: 800; color: #0b3954; }
+.settings-subnav { margin: 0 0 8px 20px; padding-left: 10px; border-left: 1px solid var(--c-dce7ef); flex-shrink: 0; }
+.settings-subnav-group + .settings-subnav-group { margin-top: 12px; }
 .sidebar nav .settings-subnav a { padding: 7px 10px; font-size: 12px; }
 .settings-section, .setup-stack h2 { scroll-margin-top: 24px; }
 .nav-count {

@@ -14,41 +14,31 @@ test('navigation switches between all projects and a project overview', async ({
   await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
   await page.reload();
   await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toBeVisible();
-  await nav.getByRole('link', { name: 'Back to all projects' }).click();
+  await nav.getByRole('link', { name: 'Projects', exact: true }).click();
   await expect(nav.getByRole('link', { name: 'Projects', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toHaveCount(0);
   await page.goBack();
   await expect(nav.getByRole('link', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page');
 });
 
-test('profile menu opens user settings and account deletion requires confirmation', async ({ page }) => {
+test('profile menu opens user settings without account deletion or sign-in methods', async ({ page }) => {
   await connect(page);
-  let deletion: unknown;
-  await page.route('https://api.tandem.test/api/me', async route => {
-    if (route.request().method() === 'DELETE') {
-      deletion = route.request().postDataJSON();
-      await route.fulfill({ status: 409, json: { detail: 'Transfer ownership or delete projects where you are the only owner before deleting your account.' } });
-    } else await route.fallback();
-  });
   await page.goto('/#/projects/project-1/activity');
   await page.getByRole('button', { name: 'Account menu' }).click();
   await page.getByRole('menuitem', { name: 'User settings' }).click();
   await expect(page.getByRole('heading', { name: 'User settings', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Project details', exact: true })).toHaveCount(0);
-  const remove = page.getByRole('button', { name: 'Delete my account' });
-  await expect(remove).toBeDisabled();
-  await page.getByLabel('Type DELETE to confirm').fill('DELETE');
-  await remove.click();
-  await expect(page.locator('#delete-account').getByRole('alert')).toContainText('Transfer ownership');
-  expect(deletion).toEqual({ confirmation: 'DELETE' });
+  await expect(page.getByRole('heading', { name: 'Profile', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Sign-in methods' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delete my account' })).toHaveCount(0);
 });
 
 test('settings sidebar expands and navigates project and help sections', async ({ page }) => {
   await connect(page);
   await page.goto('/#/projects/project-1/activity');
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
-  await nav.getByRole('button', { name: 'Settings' }).click();
-  await expect(nav.getByRole('button', { name: 'Settings' })).toHaveAttribute('aria-expanded', 'true');
+  await nav.getByRole('button', { name: 'Project Settings' }).click();
+  await expect(nav.getByRole('button', { name: 'Project Settings' })).toHaveAttribute('aria-expanded', 'true');
   await nav.getByRole('link', { name: 'People & invitations' }).click();
   await expect(page).toHaveURL(/project=project-1&section=setup-people/);
   await expect(page.locator('#setup-people')).toBeFocused();
@@ -56,7 +46,7 @@ test('settings sidebar expands and navigates project and help sections', async (
   await expect(page.locator('#profile')).toHaveCount(0);
   await nav.getByRole('link', { name: 'Connection guide', exact: true }).click();
   await expect(page.locator('#connection-guide')).toBeFocused();
-  await nav.getByRole('button', { name: 'Settings' }).click();
+  await nav.getByRole('button', { name: 'Project Settings' }).click();
   await expect(nav.getByRole('link', { name: 'Project details', exact: true })).toHaveCount(0);
   await page.reload();
   await expect(nav.getByRole('link', { name: 'Connection guide', exact: true })).toHaveAttribute('aria-current', 'location');
@@ -306,10 +296,10 @@ test('the account menu stays reachable on a short screen and only opens on click
   await expect(page.getByRole('menuitem', { name: 'Log out' })).toHaveCount(0);
   await account.click();
   await expect(page.getByRole('menuitem', { name: 'Log out' })).toBeInViewport({ ratio: 1 });
-  await expect(page.getByRole('menuitem', { name: 'Settings' })).toBeInViewport({ ratio: 1 });
+  await expect(page.getByRole('menuitem', { name: 'User settings' })).toBeInViewport({ ratio: 1 });
 });
 
-test('settings saves a display name through the API and shows how you sign in', async ({
+test('settings saves a display name through the API and shows your email', async ({
   page,
 }) => {
   const user = {
@@ -332,11 +322,10 @@ test('settings saves a display name through the API and shows how you sign in', 
   });
   await page.goto('/#/projects/project-1/activity');
   await page.getByRole('button', { name: 'Account menu' }).click();
-  await page.getByRole('menuitem', { name: 'Settings' }).click();
-  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  await page.getByRole('menuitem', { name: 'User settings' }).click();
+  await expect(page.getByRole('heading', { name: 'User settings', exact: true })).toBeVisible();
   await expect(page.getByText('test@example.com')).toBeVisible();
   await expect(page.getByText('Not verified')).toBeVisible();
-  await expect(page.getByText('Email and password')).toBeVisible();
 
   const save = page.getByRole('button', { name: 'Save name' });
   await expect(save).toBeDisabled();
