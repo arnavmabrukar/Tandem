@@ -645,6 +645,57 @@ class AgentToolIntegrationTests(unittest.TestCase):
                          ["task_claimed", "task_status_changed", "task_status_changed"])
         self.assertTrue(project["activity"][0]["actor"].startswith("Agent "))
 
+    def test_task_room_updates_are_atomic_idempotent_and_reviewable(self):
+        from unittest.mock import patch
+        from uuid import UUID
+        from mediator.db.room import read_room
+        from mediator.main import app, get_current_user
+
+        task = self.make_task('Build room updates')
+        claim = self.claim(task)
+        self.ok('tandem_claim_task', **claim)
+        self.ok('tandem_claim_task', **claim)
+        self.ok('tandem_update_task', taskId=task, expectedVersion=2,
+                operationId=str(uuid4()), status='in_progress')
+        # Progress-only updates should not flood the conversation.
+        self.ok('tandem_update_task', taskId=task, expectedVersion=3,
+                operationId=str(uuid4()), progress='Running tests')
+        submit = dict(taskId=task, expectedVersion=4, operationId=str(uuid4()),
+                      status='in_review', progress='Tests passed; commit published.')
+        self.ok('tandem_update_task', **submit)
+        self.ok('tandem_update_task', **submit)
+        messages = read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges']
+        self.assertEqual([item['taskEvent']['status'] for item in messages],
+                         ['claimed', 'in_progress', 'in_review'])
+        self.assertTrue(all(item['senderAgentId'] == self.agent and item['response'] is None
+                            and item['state'] == 'complete' for item in messages))
+        self.assertEqual(messages[-1]['taskEvent']['taskVersion'], 5)
+        self.assertIn('Tests passed', messages[-1]['body'])
+        self.assertEqual(self.ok('tandem_read_room')['exchanges'], messages)
+
+        url = f'/api/projects/{self.project}/tasks/{task}/review'
+        def decide(decision, task_version, note=None):
+            operation = str(uuid4())
+            return self.http.post(url, headers={'Idempotency-Key': operation}, json={'operationId': operation,
+                'expectedVersion': self.project_version(), 'expectedTaskVersion': task_version,
+                'decision': decision, 'note': note})
+        with patch.dict(app.dependency_overrides, {get_current_user: lambda: {'id': self.owner}}):
+            self.assertEqual(decide('accept', 4).status_code, 409)
+            self.execute("UPDATE public.project_memberships SET role='viewer' WHERE project_id=%s", (self.project,))
+            self.assertEqual(decide('accept', 5).status_code, 403)
+            self.execute("UPDATE public.project_memberships SET role='owner' WHERE project_id=%s", (self.project,))
+            self.assertEqual(decide('request_changes', 5, 'Fix the empty state').status_code, 200)
+            self.assertEqual(self.ok('tandem_get_task', taskId=task)['messages'][-1]['body'], 'Fix the empty state')
+            self.ok('tandem_update_task', taskId=task, expectedVersion=6,
+                    operationId=str(uuid4()), status='in_review', progress='Fixed and verified.')
+            self.assertEqual(decide('accept', 5).status_code, 409)
+            self.assertEqual(decide('accept', 7).status_code, 200)
+
+        count = len(read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges'])
+        self.refused('cannot change', 'tandem_update_task', taskId=task, expectedVersion=8,
+                     operationId=str(uuid4()), status='in_review')
+        self.assertEqual(len(read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges']), count)
+
     def test_claim_follows_the_real_human_create_and_approve_flow(self):
         from mediator.db.approvals import decide_contract
         from mediator.db.projects import ProjectVersionConflict

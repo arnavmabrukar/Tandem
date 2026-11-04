@@ -174,7 +174,7 @@ export type Command =
     }
   | { type: 'assign-task'; taskId: string; agentId: string | null; autoSelect?: boolean }
   | { type: 'cancel-task'; taskId: string }
-  | { type: 'review-task'; taskId: string; decision: 'accept' | 'request_changes'; note: string | null }
+  | { type: 'review-task'; taskId: string; decision: 'accept' | 'request_changes'; note: string | null; expectedTaskVersion?: number }
   | { type: 'release-task'; taskId: string; note: string | null }
   | { type: 'send-message'; taskId: string; body: string; replyTo: string | null }
   | {

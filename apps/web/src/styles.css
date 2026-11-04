@@ -1606,14 +1606,19 @@ td:first-child {
 }
 @media (prefers-reduced-motion: reduce) { .chat-dots { animation: none; } }
 
-/* A project conversation with a compact, persistent agent roster. */
-.agent-room-layout { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 20px; align-items: start; }
-.agent-room-chat { min-width: 0; margin: 0; }
+/* The room fills the workspace below the actual header height, including when
+   the header wraps. Transcript and roster scroll independently on desktop. */
+.workspace:has(.agent-room-page) { height: 100dvh; display: flex; flex-direction: column; }
+.workspace:has(.agent-room-page) > .topbar { flex-shrink: 0; padding-inline: 24px; }
+main#main:has(.agent-room-page) { padding: 0; margin: 0; max-width: none; flex: 1; min-height: 0; }
+.agent-room-page { height: 100%; display: flex; flex-direction: column; background: #fff; }
+.agent-room-layout { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 0; flex: 1; min-height: 0; }
+.agent-room-chat { min-width: 0; min-height: 0; height: 100%; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
 .room-transcript { flex: 1; min-height: 0; overflow-y: auto; }
 .agent-room-chat .chat-header, .agent-room-chat .chat-bottom { flex-shrink: 0; }
 .agent-room-chat .chat-footnote { justify-content: flex-start; align-items: center; flex-wrap: nowrap; }
 .agent-room-chat .chat-footnote svg { flex-shrink: 0; }
-.room-roster { background: white; border: 1px solid var(--border, #dde7f0); border-radius: 18px; padding: 18px; }
+.room-roster { background: #f9fbfd; border-left: 1px solid var(--border, #dde7f0); padding: 18px; min-height: 0; overflow-y: auto; }
 .room-roster > button { width: 100%; }
 .room-roster h2 { font-size: 15px; margin: 24px 0 14px; }
 .room-roster h3 { font-size: 13px; color: #536f84; margin: 24px 0 12px; }
@@ -1658,7 +1663,10 @@ td:first-child {
 .mediator-tag { display: inline-flex; border-radius: 5px; padding: 2px 6px; background: #edf4f9; color: #3774a6; font-size: 10px; font-weight: 600; line-height: 1.5; }
 .room-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
 .room-change { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid #dde7f0; border-radius: 10px; margin: 8px 0; }
-.room-claims { margin-top: 20px; }
+.room-task-update { margin-top: 12px; padding-top: 12px; border-top: 1px solid #d2e1ed; }
+.room-task-update > details { margin-block: 12px; }
+.room-task-update code { overflow-wrap: anywhere; }
+.room-claims { padding: 10px 24px; border-top: 1px solid #d2e1ed; flex-shrink: 0; max-height: 30dvh; overflow: auto; }
 .workflow-completed { display: flex; align-items: center; gap: 8px; color: #42617b; font-size: 13px; white-space: nowrap; }
 .workflow-stages { margin-bottom: 20px; }
 .workflow-stages ol { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 0; margin: 0; list-style: none; }
@@ -1700,7 +1708,14 @@ td:first-child {
   .workflow-task-row { flex-wrap: wrap; }
   .workflow-task-row > div { flex-basis: 100%; }
 }
-@media (max-width: 1050px) { .agent-room-layout { grid-template-columns: minmax(0, 1fr); } .room-roster { grid-row: 1; } .room-roster h2, .room-roster h3 { margin-top: 14px; } }
+@media (max-width: 1050px) {
+  .workspace:has(.agent-room-page) { height: auto; min-height: 100dvh; }
+  .agent-room-page { height: auto; }
+  .agent-room-layout { grid-template-columns: minmax(0, 1fr); display: flex; flex-direction: column; }
+  .agent-room-chat { flex: 0 0 auto; height: max(760px, 90dvh); }
+  .room-roster { flex-shrink: 0; overflow: visible; border-left: 0; border-top: 1px solid #d2e1ed; }
+  .room-roster h2, .room-roster h3 { margin-top: 14px; }
+}
 
 /* Project setup */
 .setup-stack {

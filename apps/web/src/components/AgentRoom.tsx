@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { AlertCircle, ArrowUp, Sparkles, LockKeyhole, Trash2 } from 'lucide-react';
@@ -8,10 +8,56 @@ import { useAction } from '../hooks/useWorkspace';
 import { roleFor, type Project } from '../types/domain';
 import type { Room, RoomExchange } from '../types/room';
 import { Button } from './ui/button';
-import { Badge, ErrorNotice, Timestamp } from './common';
+import { Badge, ErrorNotice, Field, Timestamp } from './common';
 import { Modal } from './ui/dialog';
 import { DraftCard } from './PlanChat';
 import { MediatorIdentity, RoomAvatar } from './RoomIdentity';
+
+function TaskUpdate({ item, project }: { item: RoomExchange; project: Project }) {
+  const { user } = useSession();
+  const action = useAction(project);
+  const [note, setNote] = useState('');
+  const event = item.taskEvent!;
+  const task = project.tasks.find(candidate => candidate.id === event.taskId);
+  if (!task) return <p className="small muted">This task is no longer available.</p>;
+  const review = event.status === 'in_review';
+  // A historical card must never accept a newer submission after polling.
+  const current = task.status === 'in_review' && task.version === event.taskVersion
+    && task.agentId === item.senderAgentId;
+  const canReview = ['owner', 'reviewer'].includes(roleFor(project, user!.id) ?? '');
+  async function decide(decision: 'accept' | 'request_changes') {
+    try {
+      await action.mutateAsync({ type: 'review-task', taskId: event.taskId, decision,
+        expectedTaskVersion: event.taskVersion, note: note.trim() || null });
+      setNote('');
+    } catch { /* Keep the note and the same operation available for retry. */ }
+  }
+  return <section className="room-task-update" aria-label={`Task update: ${task.title}`}>
+    <div className="row wrap"><Link to={`/projects/${project.id}/tasks/${task.id}`}>{task.title}</Link><Badge value={task.status} /></div>
+    {review && <>
+      <details><summary>Review details</summary>
+        <p>{task.contract.summary}</p>
+        <ul>{task.contract.criteria.map((criterion, i) => <li key={i}>{criterion}</li>)}</ul>
+        {task.result && <><p>Commit: <code>{task.result.head}</code> · Branch: {task.result.branch}</p>
+          <ul>{task.result.evidence.map((evidence, i) => <li key={i}>{evidence}</li>)}</ul></>}
+        <Link to={`/projects/${project.id}/tasks/${task.id}`}>Open task and evidence</Link>
+      </details>
+      {current && canReview ? <>
+        <p className="small muted">Accept to finish this task. Decline returns it to the agent for changes.</p>
+        <Field label="Review note" hint="Shared with the agent in its task thread. Required to decline.">
+          <textarea value={note} maxLength={10000} disabled={action.isPending} onChange={e => setNote(e.target.value)} />
+        </Field>
+        <div className="row wrap">
+          <Button size="sm" disabled={action.isPending} onClick={() => { void decide('accept'); }}>Accept work</Button>
+          <Button size="sm" variant="outline" disabled={action.isPending || !note.trim()} onClick={() => { void decide('request_changes'); }}>Decline</Button>
+        </div>
+      </> : <p className="small muted">{['approved', 'merged'].includes(task.status) ? 'Work accepted.'
+        : !current ? 'This submission is no longer current. Open the task for its latest status.'
+        : 'Waiting for an owner or reviewer to decide.'}</p>}
+      <ErrorNotice error={action.error} />
+    </>}
+  </section>;
+}
 
 function Exchange({ item, project, mediatorModel }: { item: RoomExchange; project: Project; mediatorModel?: string }) {
   const { api, user } = useSession();
@@ -32,6 +78,7 @@ function Exchange({ item, project, mediatorModel }: { item: RoomExchange; projec
     <div className={`room-message room-${item.kind}`}>
       <div className="row wrap"><RoomAvatar kind={item.kind} client={senderClient} /><strong>{item.sender}</strong><span className="chat-caption">{legacyDirectMessage ? `Human → ${workerName} · shared with worker` : item.kind === 'human' ? 'Human → Mediator · hidden from agents' : 'Agent → Mediator'}</span><Timestamp value={item.createdAt} /></div>
       <p className="room-body">{item.body}</p>
+      {item.taskEvent && <TaskUpdate item={item} project={project} />}
     </div>
     {/* Completed messages without a response are standalone agent posts. */}
     {!(item.state === 'complete' && item.response === null) && <div className="room-message room-mediator">
@@ -89,6 +136,15 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
   const pending = useRef<{ operationId: string; body: string; uncertain?: boolean } | null>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const transcript = useRef<HTMLDivElement>(null);
+  const mentionCaret = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    // Restore the caret before another keystroke can arrive after selecting a mention.
+    if (mentionCaret.current !== null) {
+      composer.current?.focus();
+      composer.current?.setSelectionRange(mentionCaret.current, mentionCaret.current);
+      mentionCaret.current = null;
+    }
+  }, [body]);
   const canPost = ['owner', 'reviewer'].includes(roleFor(project, user!.id) ?? '');
   function completeSend() {
     const submitted = pending.current;
@@ -145,7 +201,7 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
     const caret = mention.start + inserted.length;
     setBody(current => current.slice(0, mention.start) + inserted + current.slice(mention.end));
     setMention(null);
-    requestAnimationFrame(() => { composer.current?.focus(); composer.current?.setSelectionRange(caret, caret); });
+    mentionCaret.current = caret;
   }
   return <section className="plan-chat agent-room-chat" aria-label="Project room">
     <header className="chat-header room-header"><div><h2>Project room</h2><div className="row wrap"><MediatorIdentity model={room.data?.mediatorModel} /><span className="chat-caption">{project.name}</span></div></div>

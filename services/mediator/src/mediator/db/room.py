@@ -39,10 +39,12 @@ def _history(conn, project_id, agent=False, limit=100):
 
 
 def _public(row):
+    task_event = (row['response'] or {}).get('taskEvent')
     return dict(id=str(row['id']), operationId=str(row['operation_id']), sender=row['sender_name'], senderUserId=str(row['sender_user_id']) if row['sender_user_id'] else None,
                 senderAgentId=row['sender_agent_id'],
                 kind='human' if row['sender_user_id'] else 'agent',
-                body=row['body'], response=row['response'], state=row['state'],
+                body=row['body'], response=None if task_event else row['response'], state=row['state'],
+                taskEvent=task_event,
                 createdAt=row['created_at'].isoformat())
 
 

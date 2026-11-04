@@ -20,6 +20,8 @@ class ReviewTaskRequest(BaseModel):
 
     operationId: UUID
     expectedVersion: int = Field(ge=1, strict=True)  # Project version.
+    # Room cards refer to a particular submission, even after workspace refreshes.
+    expectedTaskVersion: int | None = Field(default=None, ge=1, strict=True)
     decision: Literal["accept", "request_changes"]
     note: str | None = Field(default=None, max_length=10000)
 

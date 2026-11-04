@@ -640,7 +640,11 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(worker).not.toContainText('agent-integrations/runner/');
   await expect(worker).toContainText('No access to Tandem’s private repository is needed.');
   const cliSetup = worker.getByRole('region', { name: 'Codex CLI setup' });
-  await expect(cliSetup.locator('pre')).toHaveText('npm install -g @openai/codex@latest @anthropic-ai/sandbox-runtime@0.0.81\ncodex login\ncodex login status');
+  await expect(cliSetup.locator('pre')).toHaveText('npm install -g @openai/codex@latest\ncodex login\ncodex login status');
+  const verificationSetup = worker.getByRole('region', { name: 'Verification sandbox setup' });
+  await expect(verificationSetup).toContainText('does not run Claude or require an Anthropic account');
+  await expect(verificationSetup).toContainText('Your selected agent stays Codex');
+  await expect(verificationSetup.locator('pre')).toHaveText('npm install -g @anthropic-ai/sandbox-runtime@0.0.81');
   const download = worker.getByRole('region', { name: 'Download and start worker' });
   await expect(download.locator('pre')).toContainText('$HOME/Downloads/tandem_runner.py');
   await expect(download.locator('pre')).toContainText("--repository 'team/tandem'");
@@ -652,7 +656,7 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(startup).toBeVisible();
   await expect(startup).toContainText('Use Tandem for project project-1.');
   await expect(startup.getByRole('button', { name: 'Copy startup prompt' })).toBeEnabled();
-  await expect(worker.locator('pre')).toHaveCount(2);
+  await expect(worker.locator('pre')).toHaveCount(3);
   await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeEnabled();
   for (const name of ['Copy clone command', 'Copy setup check', 'Copy worker command', 'Copy listener command']) {
     await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
@@ -663,14 +667,14 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(install.locator('pre')).toContainText('--agent codex');
   await expect(install.locator('pre')).toContainText('--prompt-token');
   await expect(install.locator('pre')).not.toContainText('git clone');
-  await worker.getByText('Verification (optional)', { exact: true }).click();
+  await worker.getByText('Custom verification commands (optional)', { exact: true }).click();
   await worker.getByLabel('Verification commands', { exact: true }).fill('npm run test:e2e\nnpm run build');
   await expect(install.locator('pre')).toContainText("--verify-command 'npm run test:e2e' --verify-command 'npm run build'");
   await page.getByLabel('Your agent', { exact: true }).selectOption('Claude Code');
   await expect(worker.getByLabel('Worker engine')).toHaveValue('claude');
   await expect(cliSetup).toHaveCount(0);
   const claudeSetup = worker.getByRole('region', { name: 'Claude CLI setup' });
-  await expect(claudeSetup.locator('pre')).toHaveText('curl -fsSL https://claude.ai/install.sh | bash\nexport PATH="$HOME/.local/bin:$PATH"\nnpm install -g @anthropic-ai/sandbox-runtime@0.0.81\nclaude auth login\nclaude auth status');
+  await expect(claudeSetup.locator('pre')).toHaveText('curl -fsSL https://claude.ai/install.sh | bash\nexport PATH="$HOME/.local/bin:$PATH"\nclaude auth login\nclaude auth status');
   await expect(claudeSetup.getByRole('button', { name: 'Copy Claude setup commands' })).toBeEnabled();
   await expect(install.locator('pre')).toContainText('--agent claude');
   await worker.getByLabel('Worker engine').selectOption('custom');
@@ -805,6 +809,64 @@ test('agent room sends private human messages and opens connection onboarding', 
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Continuous worker setup' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Copy listener command', exact: true })).toHaveCount(0);
+});
+
+for (const decision of ['accept', 'request_changes'] as const) test(`room review can ${decision} a submitted task`, async ({ page }) => {
+  const state = await connect(page);
+  const task = state.project.tasks[0];
+  task.agentId = 'agent-1';
+  state.project.agents.push({ id: 'agent-1', name: 'My Codex', client: 'Codex', owner: 'Test owner',
+    machine: 'Laptop', capabilities: [], grant: 'active', presence: 'online', lastSeen: null, session: null });
+  const exchanges = ['claimed', 'in_review'].map((status, index) => ({
+    id: `event-${index}`, operationId: `operation-${index}`, senderUserId: null, senderAgentId: 'agent-1',
+    sender: 'My Codex', kind: 'agent', body: index ? 'I finished the task and submitted it for review.' : 'I claimed the task.',
+    state: 'complete', response: null, createdAt: '2026-11-04T12:00:00Z',
+    taskEvent: { taskId: task.id, taskVersion: index + 1, status },
+  }));
+  await page.route('**/api/projects/project-1/room', route => route.fulfill({ json: { exchanges } }));
+  await page.route('**/api/projects/project-1/tasks/task-1/review', async route => {
+    expect(route.request().postDataJSON()).toMatchObject({ expectedVersion: 4, expectedTaskVersion: 2,
+      decision, note: decision === 'accept' ? null : 'Fix the empty state' });
+    task.status = decision === 'accept' ? 'approved' : 'in_progress';
+    task.version++;
+    state.project.version++;
+    await route.fulfill({ json: { projectId: 'project-1', projectVersion: 5, entityId: task.id } });
+  });
+  await page.goto('/#/projects/project-1/agents');
+  const transcript = page.getByRole('log', { name: 'Room conversation' });
+  await expect(transcript).toContainText('I claimed the task.');
+  await expect(transcript).not.toContainText('Waiting for the mediator');
+  const review = transcript.getByRole('region', { name: `Task update: ${task.title}` }).last();
+  await review.getByText('Review details', { exact: true }).click();
+  await expect(review).toContainText('Checks passed');
+  await expect(review.getByRole('button', { name: 'Decline', exact: true })).toBeDisabled();
+  // The conversation spans the workspace rather than sitting inside a card.
+  const main = await page.locator('#main').boundingBox();
+  const layout = await page.locator('.agent-room-layout').boundingBox();
+  expect(Math.abs(main!.width - layout!.width)).toBeLessThan(2);
+  await page.screenshot({ path: `/tmp/tandem-room-review-${decision}-${page.viewportSize()!.width}.png`, fullPage: true });
+  if (decision === 'request_changes') await review.getByLabel('Review note', { exact: true }).fill('Fix the empty state');
+  await review.getByRole('button', { name: decision === 'accept' ? 'Accept work' : 'Decline', exact: true }).click();
+  await expect(review).toContainText(decision === 'accept' ? 'Work accepted.' : 'This submission is no longer current.');
+  await expect(review.getByRole('button', { name: 'Accept work' })).toHaveCount(0);
+});
+
+test('room review excludes viewers and stale submissions', async ({ page }) => {
+  const state = await connect(page);
+  state.project.tasks[0].agentId = 'agent-1';
+  state.project.members[0].role = 'viewer';
+  const event = { id: 'event-1', operationId: 'operation-1', senderUserId: null, senderAgentId: 'agent-1',
+    sender: 'My Codex', kind: 'agent', body: 'Ready for review', state: 'complete', response: null,
+    createdAt: '2026-11-04T12:00:00Z', taskEvent: { taskId: 'task-1', taskVersion: 2, status: 'in_review' } };
+  await page.route('**/api/projects/project-1/room', route => route.fulfill({ json: { exchanges: [event] } }));
+  await page.goto('/#/projects/project-1/agents');
+  await expect(page.getByRole('log')).toContainText('Waiting for an owner or reviewer');
+  await expect(page.getByRole('button', { name: 'Accept work' })).toHaveCount(0);
+  state.project.members[0].role = 'owner';
+  state.project.tasks[0].version = 3;
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByRole('log')).toContainText('This submission is no longer current.');
+  await expect(page.getByRole('button', { name: 'Accept work' })).toHaveCount(0);
 });
 
 test('humans speak through the mediator and see authenticated worker replies', async ({ page }) => {

@@ -61,10 +61,10 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
   const ownedAgents = project.agents.filter(candidate => candidate.ownerId === user?.id && candidate.grant !== 'revoked');
   const workerAgent = agent ?? ownedAgents.find(candidate => candidate.id === selectedAgentId);
   const sandboxSetup = 'npm install -g @anthropic-ai/sandbox-runtime@0.0.81';
-  const codexSetup = 'npm install -g @openai/codex@latest @anthropic-ai/sandbox-runtime@0.0.81\ncodex login\ncodex login status';
+  const codexSetup = 'npm install -g @openai/codex@latest\ncodex login\ncodex login status';
   // The native installer uses ~/.local/bin; make it available in this terminal
   // immediately so the login commands and runner can find the new executable.
-  const claudeSetup = `curl -fsSL https://claude.ai/install.sh | bash\nexport PATH="$HOME/.local/bin:$PATH"\n${sandboxSetup}\nclaude auth login\nclaude auth status`;
+  const claudeSetup = `curl -fsSL https://claude.ai/install.sh | bash\nexport PATH="$HOME/.local/bin:$PATH"\nclaude auth login\nclaude auth status`;
   const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
   const repositoryValid = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(project.repository)
     && project.repository.split('/').every(part => part !== '.' && part !== '..');
@@ -101,21 +101,22 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
     {engine === 'custom' && <Field label="Agent command"><input value={custom} onChange={e => setCustom(e.target.value)} placeholder="Your headless command" /></Field>}
     {engine === 'custom' && <p className="small muted">Accept tasks on stdin, run without prompts, and leave edits for the runner to verify and commit. Sign in before starting.</p>}
     {engine === 'codex' && <section aria-label="Codex CLI setup">
-      <p>Install Codex and the verification sandbox, then finish browser sign-in. Requires Node.js/npm.</p>
+      <p>Install Codex, then sign in with your OpenAI account. Requires Node.js/npm.</p>
       <pre className="oauth-code">{codexSetup}</pre>
       <CopyButton text={codexSetup} label="Copy Codex setup commands" />
     </section>}
     {engine === 'claude' && <section aria-label="Claude CLI setup">
-      <p>Install Claude Code and the verification sandbox, then finish browser sign-in. Requires Node.js/npm.</p>
+      <p>Install Claude Code, then sign in with your Anthropic account.</p>
       <pre className="oauth-code">{claudeSetup}</pre>
       <CopyButton text={claudeSetup} label="Copy Claude setup commands" />
     </section>}
-    {engine === 'custom' && <section aria-label="Verification sandbox setup">
-      <p>Install the verification sandbox. Requires Node.js/npm.</p>
+    <section aria-label="Verification sandbox setup">
+      <h4>Install Tandem’s shared verification utility</h4>
+      <p className="small muted">Required for post-task tests with any worker. This Anthropic-maintained utility isolates test commands; it does not run Claude or require an Anthropic account. Your selected agent stays {engine === 'codex' ? 'Codex' : engine === 'claude' ? 'Claude Code' : 'unchanged'}. Requires Node.js/npm.</p>
       <pre className="oauth-code">{sandboxSetup}</pre>
       <CopyButton text={sandboxSetup} label="Copy sandbox setup command" />
-    </section>}
-    <details className="agent-advanced"><summary>Verification (optional)</summary>
+    </section>
+    <details className="agent-advanced"><summary>Custom verification commands (optional)</summary>
       <p className="small muted">Runs root typecheck, lint, test and build scripts in an OS sandbox with an isolated environment and no network access. Other commands below replace these checks. Missing sandbox, denied access or failed checks stop the push; checks never fall back to the host.</p>
       <Field label="Verification commands"><textarea value={verification} onChange={e => setVerification(e.target.value)} placeholder="npm run test:e2e" /></Field>
     </details>

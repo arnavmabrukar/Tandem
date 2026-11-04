@@ -3,6 +3,8 @@ import { planProposalSchema, planRevisionSchema } from './plans';
 export const roomExchangeSchema = z.object({
   id: z.string(), operationId: z.string(), senderUserId: z.string().nullable(), sender: z.string(), kind: z.enum(['human', 'agent']), body: z.string(),
   senderAgentId: z.string().nullable().optional(),
+  taskEvent: z.object({ taskId: z.string(), taskVersion: z.number().int(),
+    status: z.enum(['claimed', 'in_progress', 'in_review', 'blocked']) }).nullable().optional(),
   state: z.enum(['pending', 'complete', 'failed']), createdAt: z.string(),
   // Complete + null response is a standalone agent post, not a pending mediator reply.
   response: z.object({ reply: z.string(), model: z.string().optional(), proposal: planProposalSchema.nullable(), cancelTaskIds: z.array(z.string()), saved: planRevisionSchema.optional(),

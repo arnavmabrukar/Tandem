@@ -32,7 +32,7 @@ export function ConnectAgentPage({ project }: { project: Project }) {
   const [machine, setMachine] = useState('');
   const [capabilities, setCapabilities] = useState('');
   return (
-    <>
+    <div className="agent-room-page">
       <div className="agent-room-layout">
         <AgentRoom key={project.id} project={project} room={room} />
         <aside className="room-roster" aria-label="Project agents">
@@ -181,6 +181,6 @@ export function ConnectAgentPage({ project }: { project: Project }) {
           </Button>
         </div>
       </Modal>
-    </>
+    </div>
   );
 }

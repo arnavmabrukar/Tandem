@@ -209,6 +209,31 @@ def _record_activity(connection, identity: dict, project_id: UUID, task_id: UUID
     )
 
 
+def _post_task_update(connection, identity: dict, project_id: UUID, task: dict,
+                      version: int, status: str, progress: str | None = None) -> None:
+    """Publish a lifecycle message inside the authenticated task transaction.
+
+    Operation replay skips apply(), so retries cannot duplicate these messages.
+    Metadata lives in the existing JSON column; it is not a model reply.
+    """
+    messages = {
+        'claimed': f"I claimed “{task['title']}”.",
+        'in_progress': f"I'm working on “{task['title']}”.",
+        'in_review': f"I finished “{task['title']}” and submitted it for review.",
+        'blocked': f"I'm blocked on “{task['title']}”.",
+    }
+    body = messages[status]
+    if progress:
+        body += '\n\n' + progress[:7000]
+    connection.execute("""INSERT INTO public.agent_room_exchanges
+        (project_id, sender_agent_id, sender_name, operation_id, body, response,
+         state, lease, lease_until, completed_at)
+        VALUES (%s,%s,%s,%s,%s,%s,'complete',%s,now(),now())""",
+        (project_id, identity['agentId'], identity['name'], uuid4(), body,
+         Jsonb({'taskEvent': {'taskId': str(task['id']), 'taskVersion': version,
+                             'status': status}}), uuid4()))
+
+
 def _run_operation(identity: dict, project_id: UUID, operation_type: str,
                    operation_id: UUID, request: dict,
                    apply: Callable[[Any, int], dict]) -> dict:
@@ -326,6 +351,7 @@ def claim_task(identity: dict, project_id: UUID, task_id: UUID,
         ).fetchone()
         _record_activity(connection, identity, project_id, task_id, "task_claimed",
                          f"Claimed task: {task['title']}")
+        _post_task_update(connection, identity, project_id, task, updated['version'], 'claimed')
         return {"projectId": str(project_id), "projectVersion": project_version,
                 "taskId": str(task_id), "taskVersion": updated["version"],
                 "status": "claimed"}
@@ -368,6 +394,8 @@ def update_task(identity: dict, project_id: UUID, task_id: UUID, expected_versio
         if updated["status"] != task["status"]:
             _record_activity(connection, identity, project_id, task_id, "task_status_changed",
                              f"Moved task to {updated['status']}: {task['title']}")
+            _post_task_update(connection, identity, project_id, task, updated['version'],
+                              updated['status'], progress)
         return {"projectId": str(project_id), "projectVersion": project_version,
                 "taskId": str(task_id), "taskVersion": updated["version"],
                 "status": updated["status"]}
