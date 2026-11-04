@@ -220,13 +220,14 @@ def update_project(
         )
 
         original = connection.execute(
-            """SELECT name, repository, tracked_branch,
+            """SELECT repository, tracked_branch,
                       github_repository_id, github_installation_id
                FROM public.projects WHERE id=%s""",
             (project_id,),
         ).fetchone()
-        if original is None or original["repository"] != request.repository or original["name"] != request.name:
-            raise ProjectAccessDenied("Project name and repository cannot be changed after import")
+        # The name and description can be edited. The repository is fixed when it is imported.
+        if original is None or original["repository"] != request.repository:
+            raise ProjectAccessDenied("Project repository cannot be changed after import")
 
         # Verify modern imported projects against GitHub before changing the
         # destination branch. Legacy projects without import IDs still use the
@@ -321,6 +322,7 @@ def update_project(
                 """
                 UPDATE public.projects
                 SET
+                    name = %s,
                     description = %s,
                     tracked_branch = NULLIF(%s, ''),
                     version = version + 1
@@ -328,6 +330,7 @@ def update_project(
                 RETURNING id, version
                 """,
                 (
+                    request.name,
                     request.description,
                     requested_branch,
                     project_id,

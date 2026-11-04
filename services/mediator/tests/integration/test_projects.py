@@ -151,6 +151,16 @@ class ProjectTests(unittest.TestCase):
                 self.body['operationId'] = str(uuid4())
                 self.body['githubRepositoryId'] += 1
 
+    def test_rename_persists_and_repository_stays_fixed(self):
+        project = self.create()
+        response = self.send(self.edit(name='Renamed project'), project)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.scalar('SELECT name FROM projects WHERE id=%s', (project,)), 'Renamed project')
+        self.assertEqual(self.scalar('SELECT version FROM projects WHERE id=%s', (project,)), 2)
+        # The repository is still fixed after import.
+        self.assertEqual(self.send(self.edit(expectedVersion=2, repository='other/repo'), project).status_code, 403)
+        self.assertEqual(self.scalar('SELECT version FROM projects WHERE id=%s', (project,)), 2)
+
     def test_concurrent_edits_only_one_wins(self):
         project = self.create()
         bodies = [self.edit(description='A'), self.edit(description='B')]
@@ -197,10 +207,9 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(self.scalar('SELECT count(*) FROM operations WHERE operation_id=%s', (body['operationId'],)), 0)
         self.assertEqual(self.send(body, project).status_code, 200)
 
-    def test_import_identity_is_immutable(self):
+    def test_import_repository_is_immutable(self):
         project = self.create()
-        for change in [{'name': 'Renamed'}, {'repository': 'other/repo'}]:
-            self.assertEqual(self.send(self.edit(**change), project).status_code, 403)
+        self.assertEqual(self.send(self.edit(repository='other/repo'), project).status_code, 403)
         self.assertEqual(self.scalar('SELECT version FROM projects WHERE id=%s', (project,)), 1)
 
     def invitation(self, project, **changes):

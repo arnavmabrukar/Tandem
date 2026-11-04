@@ -143,6 +143,7 @@ test('project edits persist after reload and stale tabs cannot overwrite them', 
         await route.fulfill({ status: 409, json: { detail: 'Project version changed' } });
         return;
       }
+      state.project.name = body.name;
       state.project.description = body.description;
       state.project.trackedBranch = body.trackedBranch || null;
       state.project.version++;
@@ -152,20 +153,22 @@ test('project edits persist after reload and stale tabs cannot overwrite them', 
       } });
     });
     await tab.goto('/#/projects/project-1/setup');
-    await expect(tab.getByRole('button', { name: 'Save project', exact: true })).toBeEnabled();
+    await expect(tab.getByRole('button', { name: 'Save changes', exact: true })).toBeDisabled();
   }
   await second.getByLabel('Description', { exact: true }).fill('Stale tab draft');
+  await page.getByLabel('Project name', { exact: true }).fill('Renamed project');
   await page.getByLabel('Agent push branch', { exact: true }).fill('agents/integration');
   await page.getByLabel('Description', { exact: true }).fill('Saved owner description');
-  await page.getByRole('button', { name: 'Save project', exact: true }).click();
-  await expect(page.getByText('Project saved by the backend.')).toBeVisible();
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await expect(page.getByText('Saved.', { exact: true })).toBeVisible();
   await page.reload();
+  await expect(page.getByLabel('Project name', { exact: true })).toHaveValue('Renamed project');
   await expect(page.getByLabel('Description', { exact: true })).toHaveValue('Saved owner description');
   await expect(page.getByLabel('Agent push branch', { exact: true })).toHaveValue('agents/integration');
   // Refresh exercises the same workspace update that polling delivers.
   await second.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(second.getByText('Newer project data is available.')).toBeVisible();
-  await expect(second.getByRole('button', { name: 'Save project', exact: true })).toBeDisabled();
+  await expect(second.getByRole('button', { name: 'Save changes', exact: true })).toBeDisabled();
   await expect(second.getByLabel('Description', { exact: true })).toHaveValue('Stale tab draft');
   await second.getByRole('button', { name: 'Reload details', exact: true }).click();
   await expect(second.getByLabel('Description', { exact: true })).toHaveValue('Saved owner description');
