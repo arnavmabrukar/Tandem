@@ -54,6 +54,56 @@ class RunnerLoginCheckTests(unittest.TestCase):
         self.assertEqual(run.call_args_list[0].args[0], [r'C:\npm\claude.CMD', 'auth', 'status'])
 
 
+class LinuxHelperTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.package = self.root / 'home/.local/lib/node_modules/@anthropic-ai/sandbox-runtime'
+        self.runtime = self.package / 'dist/cli.js'
+        self.runtime.parent.mkdir(parents=True)
+        self.runtime.write_text('trusted runtime fixture')
+        (self.package / 'package.json').write_text(json.dumps({'name': '@anthropic-ai/sandbox-runtime', 'version': '0.0.81'}))
+        self.helper = self.package / 'vendor/seccomp/x64/apply-seccomp'
+        self.helper.parent.mkdir(parents=True)
+        self.helper.write_text('trusted helper fixture')
+        self.helper.chmod(0o755)
+
+    def test_user_local_helper_is_located_without_allowing_home(self):
+        with patch.object(runner.platform, 'machine', return_value='x86_64'):
+            found = runner.linux_seccomp_helper(str(self.runtime), self.root / 'project')
+        self.assertEqual(found, self.helper.resolve())
+
+    def test_missing_or_nonexecutable_helper_fails_closed(self):
+        with patch.object(runner.platform, 'machine', return_value='x86_64'):
+            self.helper.chmod(0o644)
+            with self.assertRaisesRegex(runner.WorkBlocked, 'Reinstall'):
+                runner.linux_seccomp_helper(str(self.runtime), self.root / 'project')
+            self.helper.unlink()
+            with self.assertRaises(runner.WorkBlocked):
+                runner.linux_seccomp_helper(str(self.runtime), self.root / 'project')
+
+    def test_project_helpers_and_symlink_escapes_are_rejected(self):
+        with patch.object(runner.platform, 'machine', return_value='x86_64'):
+            with self.assertRaises(runner.WorkBlocked):
+                runner.linux_seccomp_helper(str(self.runtime), self.package)
+            outside = self.root / 'untrusted-helper'
+            outside.write_text('outside')
+            outside.chmod(0o755)
+            self.helper.unlink()
+            self.helper.symlink_to(outside)
+            with self.assertRaises(runner.WorkBlocked):
+                runner.linux_seccomp_helper(str(self.runtime), self.root / 'project')
+
+    def test_arm64_uses_its_own_helper(self):
+        arm = self.package / 'vendor/seccomp/arm64/apply-seccomp'
+        arm.parent.mkdir(parents=True)
+        arm.write_text('arm fixture')
+        arm.chmod(0o755)
+        with patch.object(runner.platform, 'machine', return_value='aarch64'):
+            self.assertEqual(runner.linux_seccomp_helper(str(self.runtime), self.root / 'project'), arm.resolve())
+
+
 class RunnerGitTests(unittest.TestCase):
     def setUp(self):
         self.no_room_requests = patch.object(runner, 'worker_room_requests', return_value=[])
@@ -487,6 +537,10 @@ class RunnerGitTests(unittest.TestCase):
                 self.assertEqual(policy['network']['allowedDomains'], [])
                 self.assertFalse(policy['network']['allowLocalBinding'])
                 self.assertFalse(policy['enableWeakerNestedSandbox'])
+                self.assertEqual(policy['seccomp'], {'applyPath': str(self.root / 'trusted-helper')})
+                self.assertIn(str(self.root / 'trusted-helper'), policy['filesystem']['allowRead'])
+                self.assertNotIn(str(Path.home()), policy['filesystem']['allowRead'])
+                self.assertFalse(policy['network']['allowAllUnixSockets'])
                 self.assertNotIn('TANDEM_AGENT_TOKEN', kw['env'])
                 self.assertNotIn('OPENAI_API_KEY', kw['env'])
                 self.assertNotIn('NPM_TOKEN', kw['env'])
@@ -494,7 +548,9 @@ class RunnerGitTests(unittest.TestCase):
                 self.assertNotEqual(kw['env']['HOME'], str(Path.home()))
                 return Mock(returncode=126, stdout='', stderr='sandbox denied')
             return actual_run(command, **kw)
-        with patch.object(runner.shutil, 'which', side_effect=lambda cmd, **kw: '/tmp/trusted-srt' if cmd == 'srt' else actual_which(cmd, **kw)), \
+        with patch.object(runner.sys, 'platform', 'linux'), \
+             patch.object(runner, 'linux_seccomp_helper', return_value=self.root / 'trusted-helper'), \
+             patch.object(runner.shutil, 'which', side_effect=lambda cmd, **kw: '/tmp/trusted-srt' if cmd == 'srt' else actual_which(cmd, **kw)), \
              patch.object(runner.subprocess, 'run', side_effect=run), \
              patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'secret', 'OPENAI_API_KEY': 'secret', 'NPM_TOKEN': 'secret', 'NODE_OPTIONS': '--require malicious'}):
             result = worker._sandboxed_check(['npm', 'test'])

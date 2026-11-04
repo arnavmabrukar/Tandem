@@ -12,6 +12,7 @@ import json
 import logging
 import math
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -219,6 +220,28 @@ def push_branch(value: object) -> str:
     ):
         raise WorkBlocked("Tandem returned an invalid agent push branch; update Project setup.")
     return branch
+
+
+def linux_seccomp_helper(runtime: str, workspace: Path) -> Path:
+    """Locate only the pinned npm runtime's own executable, never a project helper."""
+    root = Path(runtime).resolve().parent.parent
+    try:
+        manifest = json.loads((root / 'package.json').read_text())
+        if (not isinstance(manifest, dict) or manifest.get('name') != '@anthropic-ai/sandbox-runtime'
+                or manifest.get('version') != '0.0.81'):
+            raise ValueError('Unrecognized runtime package')
+        arch = {'x86_64': 'x64', 'amd64': 'x64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(platform.machine().lower())
+        if not arch:
+            raise ValueError('Unsupported CPU architecture')
+        helper = (root / 'vendor' / 'seccomp' / arch / 'apply-seccomp').resolve()
+        if (not helper.is_relative_to(root) or helper.is_relative_to(workspace.resolve())
+                or not helper.is_file() or not os.access(helper, os.X_OK)):
+            raise ValueError('Missing or unsafe seccomp executable')
+        return helper
+    except (OSError, ValueError):
+        raise WorkBlocked('Linux verification needs the executable apply-seccomp helper bundled with '
+                          '@anthropic-ai/sandbox-runtime@0.0.81. Reinstall that npm package in Linux/WSL '
+                          'and retry. Nothing was run outside the sandbox or pushed.') from None
 
 
 def build_prompt(task: dict, branch: str) -> str:
@@ -629,6 +652,11 @@ class Runner:
                      '/private/var/select/sh',
                      '/dev', '/etc/ld.so.cache',
                      '/etc/ld.so.conf', '/etc/ld.so.conf.d', '/etc/nsswitch.conf']
+            seccomp = linux_seccomp_helper(runtime, workspace) if sys.platform == 'linux' else None
+            if seccomp:
+                # Linux invokes this binary AFTER hiding the user's home. Grant
+                # its exact file, not ~/.local or the runtime's whole prefix.
+                reads.append(str(seccomp))
             if sys.platform == 'darwin':
                 # Homebrew language binaries link to libraries in other package
                 # prefixes. dyld must stat the opt symlink itself, not just its
@@ -669,6 +697,8 @@ class Runner:
                 'enableWeakerNestedSandbox': False, 'enableWeakerNetworkIsolation': False,
                 'allowPty': False,
             }
+            if seccomp:
+                policy['seccomp'] = {'applyPath': str(seccomp)}
             settings_path = control / 'policy.json'
             settings_path.write_text(json.dumps(policy))
             return subprocess.run([runtime, '--settings', str(settings_path), '--', *command],

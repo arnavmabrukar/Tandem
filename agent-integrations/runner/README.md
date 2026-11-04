@@ -46,6 +46,10 @@ with `CI=true`. These commands run only through Anthropic Sandbox Runtime (`srt`
 The same verification boundary applies to Codex, Claude and custom agents. Install
 the pinned runtime with `npm install -g @anthropic-ai/sandbox-runtime@0.0.81`;
 Linux also needs bubblewrap and socat. The runner never installs these automatically.
+For Linux/WSL user-local npm installations, verification grants read/execute access
+to the pinned runtime's exact bundled `apply-seccomp` helper. It does not grant
+access to the home directory or npm prefix. Missing or non-executable helpers stop
+verification with a reinstall instruction.
 
 Verification has an ephemeral HOME/cache, an allowlisted environment without host
 credentials, no network or local sockets, read access to the project and required
