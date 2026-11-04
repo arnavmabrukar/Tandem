@@ -573,17 +573,26 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText('--agent codex');
   await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText('--prompt-token');
   await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText('python3 tandem_runner.py');
+  const install = worker.getByRole('region', { name: 'Download and start worker' });
+  await expect(install.locator('pre')).toContainText("curl -fLsS 'http://127.0.0.1:4173/downloads/tandem_runner.py'");
+  await expect(install.locator('pre')).toContainText('--project \'project-1\'');
+  await expect(install.locator('pre')).toContainText('--agent codex');
+  await expect(install.locator('pre')).toContainText('--prompt-token');
   await expect(worker.locator('pre').filter({ hasText: 'git clone' })).toContainText('https://github.com/team/tandem.git');
   await page.getByLabel('Your IDE agent').selectOption('Claude Code');
   await expect(worker.getByLabel('Worker engine')).toHaveValue('claude');
   await worker.getByLabel('Worker clone path').fill("../worker's clone");
   await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText('--agent claude');
   await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText("'../worker'\\''s clone'");
+  await expect(install.locator('pre')).toContainText("'../worker'\\''s clone'");
+  await expect(install.locator('pre')).toContainText('--agent claude');
   await worker.getByLabel('Worker engine').selectOption('custom');
   await expect(worker.getByRole('button', { name: 'Copy worker command' })).toHaveCount(0);
+  await expect(install).toHaveCount(0);
   await worker.getByLabel('Agent command', { exact: true }).fill('my-agent --headless');
   await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText("--agent-command 'my-agent --headless'");
   await expect(worker.getByRole('button', { name: 'Copy worker command' })).toBeVisible();
+  await expect(install.locator('pre')).toContainText("--agent-command 'my-agent --headless'");
 });
 
 test('agent room sends private human messages and opens connection onboarding', async ({ page }) => {

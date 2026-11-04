@@ -56,7 +56,11 @@ function WorkerSetup({ project, agent, url, initialClient }: { project: Project;
   const [custom, setCustom] = useState('');
   const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
   const ready = !!repo.trim() && (engine !== 'custom' || !!custom.trim());
-  const command = `python3 tandem_runner.py --prompt-token --project ${quote(project.id)} --url ${quote(url)} --repo ${quote(repo.trim())}${agent ? ` --agent-id ${quote(agent.id)}` : ''} ${engine === 'custom' ? `--agent-command ${quote(custom)}` : `--agent ${engine}`}`;
+  const argumentsText = `--prompt-token --project ${quote(project.id)} --url ${quote(url)} --repo ${quote(repo.trim())}${agent ? ` --agent-id ${quote(agent.id)}` : ''} ${engine === 'custom' ? `--agent-command ${quote(custom)}` : `--agent ${engine}`}`;
+  const command = `python3 tandem_runner.py ${argumentsText}`;
+  // Download from this deployment, not the MCP host; preserve the caller's
+  // working directory so relative clone paths mean the same thing in both commands.
+  const installCommand = `mkdir -p "$HOME/.local/share/tandem" &&\ncurl -fLsS ${quote(new URL('/downloads/tandem_runner.py', window.location.origin).href)} \\\n  -o "$HOME/.local/share/tandem/tandem_runner.py" &&\npython3 "$HOME/.local/share/tandem/tandem_runner.py" ${argumentsText}`;
   // Only construct a clone URL from a GitHub repository identifier, never arbitrary shell text.
   const repository = /^[\w.-]+\/[\w.-]+$/.test(project.repository) ? `https://github.com/${project.repository}.git` : null;
   return <section aria-label="Continuous worker setup" className="agent-advanced">
@@ -84,6 +88,13 @@ function WorkerSetup({ project, agent, url, initialClient }: { project: Project;
         {ready && <><pre className="oauth-code">{command}</pre><CopyButton text={command} label="Copy worker command" /></>}
       </li>
     </ol>
+    {ready && <section aria-label="Download and start worker">
+      <h4>Or download and start in one command</h4>
+      <p>After preparing your dedicated clone and signing in to the required CLIs, paste this into a macOS/Linux terminal. No manual download is needed. It uses the project, engine, and clone path selected above; relative paths start from your terminal’s current folder.</p>
+      <pre className="oauth-code">{installCommand}</pre>
+      <CopyButton key={installCommand} text={installCommand} label="Copy download and start command" />
+      <p className="small muted">This installs or updates the runner in ~/.local/share/tandem, asks for your token privately, and starts continuous work, including task-branch pushes and pull requests. Append --check to validate setup without starting tasks.</p>
+    </section>}
     <p className="small muted">Keep the terminal open. Ctrl+C stops the worker; rerun the command to resume. Assign tasks in Workflow and approve their scope. Blocked tasks and review decisions need a person; the worker never approves or merges its own work. No work ready? It checks again every 20 seconds.</p>
   </section>;
 }
