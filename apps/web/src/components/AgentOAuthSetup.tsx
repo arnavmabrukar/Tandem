@@ -53,6 +53,7 @@ function CopyButton({ text, label, disabled = false }: { text: string; label: st
 function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTimeIntro }: { project: Project; agent?: Agent; url: string; initialClient: string; roomPrompt: string; firstTimeIntro: ReactNode }) {
   const { user } = useSession();
   const [tab, setTab] = useState<'first' | 'reconnect'>('first');
+  const [platform, setPlatform] = useState<'macos' | 'linux' | 'windows'>('macos');
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [engine, setEngine] = useState(initialClient === 'Claude Code' ? 'claude' : initialClient === 'Codex' ? 'codex' : 'custom');
   const [custom, setCustom] = useState('');
@@ -80,6 +81,40 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
     && ['blocked', 'claimed', 'in_progress'].includes(task.status)) : [];
   const resumeCommand = resumeTaskId ? `${installCommand} --resume-task ${quote(resumeTaskId)}` : '';
   return <>
+  <fieldset className="agent-advanced">
+    <legend>Choose your operating system</legend>
+    <div className="row wrap">
+      {(['macos', 'linux', 'windows'] as const).map(value => <label key={value} className="row">
+        <input type="radio" name="worker-platform" value={value} checked={platform === value} onChange={() => setPlatform(value)} />
+        {value === 'macos' ? 'macOS' : value === 'linux' ? 'Linux' : 'Windows'}
+      </label>)}
+    </div>
+  </fieldset>
+  <section aria-label="Platform instructions">
+    {platform === 'macos' ? <p>Use Terminal on your Mac for the commands below.</p>
+      : platform === 'linux' ? <p>Use your Linux terminal. Install Python 3.11+, Node.js/npm, curl, Git, GitHub CLI, bubblewrap and socat with your distribution’s package manager.</p>
+      : <>
+        <p>Use Ubuntu in WSL 2 for this worker. Native PowerShell cannot run Tandem’s verification sandbox.</p>
+        {tab === 'first' && <>
+          <p>In PowerShell as Administrator, install WSL and Ubuntu:</p>
+          <pre className="oauth-code">wsl --install -d Ubuntu</pre>
+          <CopyButton text="wsl --install -d Ubuntu" label="Copy WSL install command" />
+          <p className="small muted">Restart if prompted, open Ubuntu, and create your Linux username. <a href="https://learn.microsoft.com/en-us/windows/wsl/install" target="_blank" rel="noreferrer">WSL installation help</a>.</p>
+        </>}
+        <p>Run all commands below in the Ubuntu terminal. Install and sign in to your agent and GitHub CLI inside Ubuntu, even if they are installed on Windows. Downloads means your Linux home’s Downloads folder.</p>
+      </>}
+    {tab === 'first' && <>
+      {platform === 'macos' ? <p className="small muted">Install Python 3.11+, Node.js/npm, curl, Git and GitHub CLI before continuing.</p> : <>
+        <p>Ubuntu/Debian: refresh the package list and install the runner’s system tools. Other Linux distributions use their own package manager.</p>
+        <pre className="oauth-code">{'sudo apt update && sudo apt install -y python3 curl git gh bubblewrap socat'}</pre>
+        <CopyButton text="sudo apt update && sudo apt install -y python3 curl git gh bubblewrap socat" label="Copy Linux prerequisites command" />
+        <p className="small muted">Also install Node.js/npm and confirm Python is version 3.11 or newer.</p>
+      </>}
+      <p>Sign in to GitHub so the worker can access your repository and push commits:</p>
+      <pre className="oauth-code">gh auth login</pre>
+      <CopyButton text="gh auth login" label="Copy GitHub login command" />
+    </>}
+  </section>
   <div className="setup-tabs" role="tablist" aria-label="Agent setup guide" onKeyDown={event => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
@@ -103,17 +138,20 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
     {engine === 'codex' && <section aria-label="Codex CLI setup">
       <p>Install Codex, then sign in with your OpenAI account. Requires Node.js/npm.</p>
       <pre className="oauth-code">{codexSetup}</pre>
+      <ul className="small muted"><li><code>npm install</code> installs or updates Codex.</li><li><code>codex login</code> starts sign-in.</li><li><code>codex login status</code> confirms you are signed in.</li></ul>
       <CopyButton text={codexSetup} label="Copy Codex setup commands" />
     </section>}
     {engine === 'claude' && <section aria-label="Claude CLI setup">
       <p>Install Claude Code, then sign in with your Anthropic account.</p>
       <pre className="oauth-code">{claudeSetup}</pre>
+      <ul className="small muted"><li><code>curl … | bash</code> downloads and runs Claude’s installer.</li><li><code>export PATH</code> makes Claude available in this terminal.</li><li><code>claude auth login</code> starts sign-in.</li><li><code>claude auth status</code> confirms you are signed in.</li></ul>
       <CopyButton text={claudeSetup} label="Copy Claude setup commands" />
     </section>}
     <section aria-label="Verification sandbox setup">
       <h4>Install Tandem’s shared verification utility</h4>
       <p className="small muted">Required for post-task tests with any worker. This Anthropic-maintained utility isolates test commands; it does not run Claude or require an Anthropic account. Your selected agent stays {engine === 'codex' ? 'Codex' : engine === 'claude' ? 'Claude Code' : 'unchanged'}. Requires Node.js/npm.</p>
       <pre className="oauth-code">{sandboxSetup}</pre>
+      <p className="small muted"><code>npm install</code> installs the tested sandbox version used to isolate project checks.</p>
       <CopyButton text={sandboxSetup} label="Copy sandbox setup command" />
     </section>
     <details className="agent-advanced"><summary>Custom verification commands (optional)</summary>
@@ -122,16 +160,20 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
     </details>
     <p>Tandem prepares <strong>{project.repository}</strong> automatically with a separate worktree per agent. Verified commits are pushed only to <strong>{project.trackedBranch?.trim() || 'main'}</strong>, as configured in Project setup.</p>
     {!repositoryValid && <p role="alert">Set this project’s GitHub repository to owner/repository before starting a worker.</p>}
-    <p className="small muted">macOS/Linux: Python 3.11+, curl, Git, and signed-in GitHub CLI (gh auth login) and agent CLI. Linux verification also requires bubblewrap and socat.</p>
-    <h3>3. Get your agent token</h3>
-    {agent ? <><p>Generate this agent’s token for the terminal prompt. A new token replaces any existing one.</p><AgentTokenButton project={project} agent={agent} buttonLabel="Generate worker token" /></>
-      : <p>Connect your agent in step 1. Generate its token here when access is authorized.</p>}
     <section aria-label="Download and start worker">
-      <h3>4. Download and start</h3>
-      <p>{ready ? 'Run in your project folder to reuse it, or anywhere to download it automatically. Paste the token when prompted, then press Enter. Pasted text stays hidden.' : 'Complete step 2 to enable copying.'}</p>
+      <h3>3. Download and start</h3>
+      <p>{ready ? 'Copy the command below, paste it into your terminal, and press Enter. Run it in your project folder to reuse it, or anywhere to download the project automatically.' : 'Complete step 2 to enable copying.'}</p>
       {engine === 'custom' && !custom.trim() && <p className="small muted">Also enter your headless agent command in step 2.</p>}
       <pre className="oauth-code">{installCommand}</pre>
+      <p className="small muted"><code>mkdir</code> creates Downloads if needed; <code>curl</code> downloads the latest runner; <code>python3</code> starts it for this project and asks for your token.</p>
       <CopyButton key={installCommand} text={installCommand} label="Copy download and start command" disabled={!ready} />
+      <p>Wait until the terminal shows <code>Tandem agent token (hidden, not saved):</code>. Leave it open and continue to step 4.</p>
+    </section>
+    <section aria-label="Authorize your worker">
+      <h3>4. Generate and paste your token</h3>
+      <p>Generate a token below and copy it. Return to the waiting terminal, paste the token, and press Enter. Pasted text stays hidden—no letters or dots will appear. The worker then checks your setup and starts looking for tasks.</p>
+      {agent ? <><p className="small muted">A new token replaces this agent’s existing token. If you already saved a valid token, use it instead.</p><AgentTokenButton project={project} agent={agent} buttonLabel="Generate worker token" /></>
+        : <p>Finish connecting your agent in step 1 to generate its token here.</p>}
     </section>
     <p className="small muted">Saves the runner to Downloads. Keep the terminal open; Ctrl+C stops it. The runner verifies, commits, and pushes only to the branch configured in Project setup; you review and accept the work.</p>
   </section>
@@ -157,6 +199,7 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
       <AgentTokenButton project={project} agent={workerAgent} buttonLabel="Generate replacement token" /></>
       : <p className="small muted">Select an agent to get its token and restart command.</p>}
     <pre className="oauth-code">{installCommand}</pre>
+    <p className="small muted"><code>mkdir</code> ensures Downloads exists; <code>curl</code> updates the runner; <code>python3</code> restarts it using your token and saved workspace.</p>
     <CopyButton key={installCommand} text={installCommand} label="Copy download and start command" disabled={!ready || !workerAgent} />
     {!ready && <p className="small muted">Complete the worker settings in First-time setup to enable copying.</p>}
     <h3>Resume saved task changes</h3>
@@ -172,6 +215,7 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
       {resumeTaskId && <>
         <p>Run this command to continue that task and preserve its saved edits:</p>
         <pre className="oauth-code">{resumeCommand}</pre>
+        <p className="small muted">Downloads the latest runner and starts it with <code>--resume-task</code> to continue the selected task’s saved work.</p>
         <CopyButton key={resumeCommand} text={resumeCommand} label="Copy resume command" disabled={!ready} />
       </>}
     </> : <p className="small muted">After connecting, open Set up worker for this agent to choose a task and get its resume command.</p>}

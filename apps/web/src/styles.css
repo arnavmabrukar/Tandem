@@ -1206,6 +1206,31 @@ td:first-child {
 .dialog-content form > .row.end {
   margin-top: 22px;
 }
+.dialog-content.plan-approval-dialog { width: min(860px, calc(100vw - 32px)); display: flex; flex-direction: column; overflow: hidden; }
+.plan-approval-dialog > .row, .plan-approval-dialog > p { flex-shrink: 0; }
+.plan-approval-body { overflow-y: auto; min-height: 0; padding-right: 8px; }
+.plan-approval-overview { padding: 16px; background: #f3f7fb; border: 1px solid #cfdeea; border-radius: 8px; margin-bottom: 20px; }
+.plan-approval-overview h3 { font-size: 17px; line-height: 1.4; margin: 6px 0 10px; }
+.plan-approval-overview p { font-size: 14px; line-height: 1.6; }
+.plan-approval-section-title { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
+.plan-approval-tasks { display: grid; gap: 10px; margin-bottom: 20px; }
+.plan-approval-task { border: 1px solid #cfdeea; border-radius: 8px; }
+.plan-approval-task summary { cursor: pointer; padding: 12px; font-size: 14px; line-height: 1.5; }
+.plan-approval-number { display: inline-block; text-align: center; min-width: 24px; margin-right: 8px; border-radius: 4px; background: #e4edf5; font-weight: 700; }
+.plan-approval-task-body { border-top: 1px solid #cfdeea; padding: 14px 16px; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.plan-approval-task-body dl { margin-top: 12px; }
+.plan-approval-task-body dt { font-size: 12px; font-weight: 700; color: #526c82; margin-top: 12px; }
+.plan-approval-task-body dd { margin: 3px 0 0; }
+.plan-approval-task-body code { display: block; }
+.plan-approval-task-body ul { list-style: disc; padding-left: 20px; }
+.plan-approval-task-body li + li { margin-top: 4px; }
+.plan-approval-footer { flex-shrink: 0; border-top: 1px solid #cfdeea; margin-top: 16px; padding-top: 12px; }
+.plan-approval-footer p { font-size: 12px; line-height: 1.5; color: #526c82; margin-bottom: 12px; }
+@media (max-width: 600px) {
+  .dialog-content.plan-approval-dialog { padding: 16px; }
+  .plan-approval-footer .row { gap: 8px; }
+  .plan-approval-footer button { flex: 1 1 auto; }
+}
 .sign-in {
   min-height: 100dvh;
   display: grid;

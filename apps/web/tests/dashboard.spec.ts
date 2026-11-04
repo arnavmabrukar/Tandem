@@ -31,12 +31,26 @@ async function connect(page: Page) {
 }
 const thread = '/#/projects/project-1/tasks/task-1';
 
+test('open planning reveals the panel even when Plan is already selected', async ({ page }) => {
+  const state = await connect(page);
+  state.project.tasks = [];
+  state.project.approvals = [];
+  await page.goto('/#/projects/project-1/workflow?stage=plan');
+  const panel = page.locator('#workflow-plan');
+  for (let i = 0; i < 2; i++) {
+    await page.getByRole('button', { name: 'Open planning', exact: true }).click();
+    await expect(panel).toBeFocused();
+    await expect(panel.getByRole('heading', { name: 'Plan the work', exact: true })).toBeInViewport();
+  }
+  expect(state.writes).toHaveLength(0);
+});
+
 test('workflow combines stages, preserves drafts and task filters, and keeps task links', async ({ page }) => {
   await connect(page);
   await page.goto('/#/projects/project-1/tasks?status=in_review&q=API');
   await expect(page).toHaveURL(/workflow\?status=in_review&q=API&stage=execute$/);
   const navigation = page.getByRole('navigation', { name: 'Main navigation' });
-  await expect(navigation.getByRole('link', { name: 'Workflow', exact: true })).toBeVisible();
+  await expect(navigation.getByRole('link', { name: /^Workflow(?:,|$)/ })).toBeVisible();
   for (const name of ['Tasks', 'Plans', 'Approvals']) await expect(navigation.getByRole('link', { name, exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Task status', { exact: true })).toHaveValue('in_review');
   const stages = page.getByRole('navigation', { name: 'Workflow stages' });
@@ -51,7 +65,7 @@ test('workflow combines stages, preserves drafts and task filters, and keeps tas
   await expect(page.getByRole('region', { name: 'Submitted work' })).toContainText('Task returned by test API');
   await page.getByRole('region', { name: 'Submitted work' }).getByRole('link').click();
   await expect(page).toHaveURL(/tasks\/task-1$/);
-  await expect(navigation.getByRole('link', { name: 'Workflow', exact: true })).toHaveClass('active');
+  await expect(navigation.getByRole('link', { name: /^Workflow(?:,|$)/ })).toHaveClass('active');
   await page.getByRole('link', { name: 'Back to workflow' }).click();
   await expect(page).toHaveURL(/workflow\?stage=execute$/);
 });
@@ -104,6 +118,14 @@ test('approving a plan hands off to scope review without bypassing confirmation'
   await page.goto(`/#/projects/${projectId}/plans`);
   await expect(page).toHaveURL(/workflow\?stage=plan$/);
   await page.getByRole('button', { name: 'Review and create tasks', exact: true }).click();
+  const approvalDialog = page.getByRole('dialog', { name: 'Review and approve plan' });
+  await expect(approvalDialog.locator('.plan-approval-task')).toHaveCount(1);
+  await expect(approvalDialog.locator('.plan-approval-task-body')).toContainText('It works');
+  await approvalDialog.locator('summary').click();
+  await expect(approvalDialog.locator('.plan-approval-task-body')).toBeHidden();
+  await approvalDialog.locator('summary').click();
+  await expect(approvalDialog.getByRole('button', { name: 'Approve and run', exact: true })).toBeInViewport();
+  await page.screenshot({ path: `/tmp/tandem-plan-approval-${page.viewportSize()!.width}.png`, animations: 'disabled' });
   await expect(page.getByRole('button', { name: 'Approve and create tasks', exact: true })).toBeDisabled();
   await page.getByLabel('Review note', { exact: true }).fill('Reviewed the scope');
   await page.getByRole('checkbox').check();
@@ -634,12 +656,27 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(dialog.getByRole('region', { name: 'Continuous worker setup' })).toBeHidden();
   await dialog.getByRole('tab', { name: 'First-time setup' }).click();
   const worker = page.getByRole('region', { name: 'Continuous worker setup' });
+  const platformGuide = dialog.getByRole('region', { name: 'Platform instructions' });
+  await expect(platformGuide).toContainText('Use Terminal on your Mac');
+  await dialog.getByRole('radio', { name: 'Linux', exact: true }).check();
+  await expect(platformGuide).toContainText('bubblewrap and socat');
+  await expect(platformGuide.getByRole('button', { name: 'Copy Linux prerequisites command' })).toBeVisible();
+  await dialog.getByRole('radio', { name: 'Windows', exact: true }).check();
+  await expect(platformGuide).toContainText('Native PowerShell cannot run');
+  await expect(platformGuide).toContainText('wsl --install -d Ubuntu');
+  await dialog.getByRole('tab', { name: 'Reconnecting' }).click();
+  await expect(dialog.getByRole('radio', { name: 'Windows', exact: true })).toBeChecked();
+  await expect(platformGuide).toContainText('Ubuntu terminal');
+  await expect(platformGuide.getByRole('button', { name: 'Copy WSL install command' })).toHaveCount(0);
+  await dialog.getByRole('tab', { name: 'First-time setup' }).click();
+  await dialog.getByRole('radio', { name: 'macOS', exact: true }).check();
   const script = await page.request.get('/downloads/tandem_runner.py');
   expect(script.status()).toBe(200);
   expect(await script.text()).toBe(readFileSync(new URL('../../../agent-integrations/runner/tandem_runner.py', import.meta.url), 'utf8'));
   await expect(worker).not.toContainText('agent-integrations/runner/');
   await expect(worker).toContainText('No access to Tandem’s private repository is needed.');
   const cliSetup = worker.getByRole('region', { name: 'Codex CLI setup' });
+  await expect(cliSetup).toContainText('confirms you are signed in');
   await expect(cliSetup.locator('pre')).toHaveText('npm install -g @openai/codex@latest\ncodex login\ncodex login status');
   const verificationSetup = worker.getByRole('region', { name: 'Verification sandbox setup' });
   await expect(verificationSetup).toContainText('does not run Claude or require an Anthropic account');
@@ -648,10 +685,11 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   const download = worker.getByRole('region', { name: 'Download and start worker' });
   await expect(download.locator('pre')).toContainText('$HOME/Downloads/tandem_runner.py');
   await expect(download.locator('pre')).toContainText("--repository 'team/tandem'");
-  await expect(download).toContainText('Pasted text stays hidden.');
+  await expect(download).toContainText('Leave it open and continue to step 4.');
+  await expect(worker.getByRole('region', { name: 'Authorize your worker' })).toContainText('no letters or dots will appear');
   await expect(worker.getByLabel('Project folder', { exact: true })).toHaveCount(0);
   const headings = page.getByRole('dialog').getByRole('heading', { level: 3 });
-  await expect(headings).toHaveText(['1. Connect your agent', '2. Choose your worker', '3. Get your agent token', '4. Download and start', '5. Start your agent chat']);
+  await expect(headings).toHaveText(['1. Connect your agent', '2. Choose your worker', '3. Download and start', '4. Generate and paste your token', '5. Start your agent chat']);
   const startup = page.getByRole('region', { name: 'Agent startup prompt' });
   await expect(startup).toBeVisible();
   await expect(startup).toContainText('Use Tandem for project project-1.');
