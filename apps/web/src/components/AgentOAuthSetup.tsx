@@ -9,6 +9,7 @@ import type { Agent, Project } from '../types/domain';
 import { Button } from './ui/button';
 import { Modal } from './ui/dialog';
 import { ErrorNotice, Field } from './common';
+import { AgentTokenButton } from './AgentTokenButton';
 
 // Use discovery as the source of truth: localhost and 127.0.0.1 are different
 // OAuth resource identifiers even when they reach the same development server.
@@ -49,6 +50,44 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   </>;
 }
 
+function WorkerSetup({ project, agent, url, initialClient }: { project: Project; agent?: Agent; url: string; initialClient: string }) {
+  const [engine, setEngine] = useState(initialClient === 'Claude Code' ? 'claude' : initialClient === 'Codex' ? 'codex' : 'custom');
+  const [repo, setRepo] = useState(`../tandem-worker-${agent?.id.slice(0, 8) ?? project.id.slice(0, 8)}`);
+  const [custom, setCustom] = useState('');
+  const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
+  const ready = !!repo.trim() && (engine !== 'custom' || !!custom.trim());
+  const command = `python3 tandem_runner.py --prompt-token --project ${quote(project.id)} --url ${quote(url)} --repo ${quote(repo.trim())}${agent ? ` --agent-id ${quote(agent.id)}` : ''} ${engine === 'custom' ? `--agent-command ${quote(custom)}` : `--agent ${engine}`}`;
+  // Only construct a clone URL from a GitHub repository identifier, never arbitrary shell text.
+  const repository = /^[\w.-]+\/[\w.-]+$/.test(project.repository) ? `https://github.com/${project.repository}.git` : null;
+  return <section aria-label="Continuous worker setup" className="agent-advanced">
+    <h3>Keep this agent working</h3>
+    <p>Run one worker per agent on a computer that stays on. It claims approved tasks assigned to this agent, works on task branches, pushes changes, opens pull requests, and continues with the next ready task. It also answers room pings.</p>
+    <p><strong>Connecting an IDE grants access; it does not start a worker.</strong> An Online badge alone does not confirm a worker is running.</p>
+    <Field label="Worker engine"><select value={engine} onChange={e => setEngine(e.target.value)}>
+      <option value="codex">Codex CLI</option><option value="claude">Claude Code CLI</option><option value="custom">Other command</option>
+    </select></Field>
+    {engine === 'custom' && <Field label="Agent command"><input value={custom} onChange={e => setCustom(e.target.value)} placeholder="Your headless command" /></Field>}
+    {engine === 'custom' && <p className="small muted">The command must accept the task on stdin, complete it without interactive prompts, and commit its changes before exiting. Verify its login separately.</p>}
+    <ol>
+      <li><a href="/downloads/tandem_runner.py" download="tandem_runner.py">Download the standalone Tandem runner</a>. You do not need access to Tandem’s source repository. Save it in a folder outside your project clone, and open a terminal in that folder. Install Python 3.11+, Git, GitHub CLI, and your agent CLI. Sign in to the agent CLI and GitHub CLI.</li>
+      <li>Use a separate clone for each worker so you can keep using your own checkout.
+        <Field label="Worker clone path"><input value={repo} onChange={e => setRepo(e.target.value)} /></Field>
+        {repository && repo.trim() && <><pre className="oauth-code">{`git clone -- ${quote(repository)} ${quote(repo.trim())}`}</pre><CopyButton text={`git clone -- ${quote(repository)} ${quote(repo.trim())}`} label="Copy clone command" /></>}
+      </li>
+      <li>Get this agent’s manual token. Paste it only into the hidden terminal prompt; it is not saved in the command.
+        {agent ? <AgentTokenButton project={project} agent={agent} /> : <p>After connecting, open your agent in the roster and choose Set up worker to generate its token here.</p>}
+      </li>
+      <li>From the folder containing the downloaded runner, check setup first. These commands use macOS/Linux shell syntax. The clone path is relative to that folder; you can also enter an absolute path.
+        {ready && <><pre className="oauth-code">{`${command} --check`}</pre><CopyButton text={`${command} --check`} label="Copy setup check" /></>}
+      </li>
+      <li>After the check passes, start continuous work. Starting this command allows task-branch pushes and pull requests.
+        {ready && <><pre className="oauth-code">{command}</pre><CopyButton text={command} label="Copy worker command" /></>}
+      </li>
+    </ol>
+    <p className="small muted">Keep the terminal open. Ctrl+C stops the worker; rerun the command to resume. Assign tasks in Workflow and approve their scope. Blocked tasks and review decisions need a person; the worker never approves or merges its own work. No work ready? It checks again every 20 seconds.</p>
+  </section>;
+}
+
 export function AgentOAuthSetup({ project, agent, onClose }: {
   project: Project; agent?: Agent; onClose: () => void;
 }) {
@@ -86,17 +125,17 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
       }
       const sessions = z.array(z.object({ id: z.string(), agentId: z.string(), projectId: z.string() }))
         .parse(await response.json()).filter((c) => c.projectId === project.id);
-      if (agent) return sessions.some((c) => c.agentId === agent.id);
+      if (agent) return sessions.find((c) => c.agentId === agent.id)?.agentId ?? false;
       // A pre-existing session must not count as completing this new setup.
       if (!initialConnections.current) initialConnections.current = new Set(sessions.map((c) => c.id));
-      return sessions.some((c) => !initialConnections.current!.has(c.id));
+      return sessions.find((c) => !initialConnections.current!.has(c.id))?.agentId ?? false;
     },
   });
   const url = discovery.data;
-  const roomPrompt = `Use Tandem to reply to the mediator's presence check in project ${project.id}: call tandem_get_presence_requests, then call tandem_acknowledge_presence for every returned ID. This posts "I'm online." under your identity in the project chat. Refresh Tandem's MCP tools if either tool is missing. Check for new presence requests while you work.`;
+  const roomPrompt = `Use Tandem for project ${project.id}. Start with tandem_whoami and confirm project access. Check available tools and report any missing ones. Call tandem_get_presence_requests and acknowledge each returned ID with tandem_acknowledge_presence. Fetch tandem_get_assignments and summarize ready work and blockers. Before working, inspect repository instructions and git status, read the approved contract and dependencies, and claim the task. Preserve others' changes; report progress, questions, test results and blockers through Tandem. Reuse operation IDs only when retrying the same write. Never approve or merge your own work. Check presence between tasks. Human room messages remain private. Do not claim to listen while idle: continuous execution requires a separately running worker. If a worker already owns a task, do not execute it in this chat too.`;
   // URLs and project IDs are server data; quote them as shell arguments even in copied examples.
   const shellQuote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
-  const presenceCommand = url && `python3 agent-integrations/runner/tandem_runner.py --presence-only --project ${shellQuote(project.id)} --url ${shellQuote(url)}`;
+  const presenceCommand = url && `python3 tandem_runner.py --prompt-token --presence-only --project ${shellQuote(project.id)} --url ${shellQuote(url)}${agent ? ` --agent-id ${shellQuote(agent.id)}` : ''}`;
   const snippet = url && (client === 'Claude Code'
     ? JSON.stringify({ mcpServers: { 'tandem-oauth': { type: 'http', url } } }, null, 2)
     : `# Tandem remote MCP connection. Authentication happens in your browser.\n[mcp_servers.tandem-oauth]\nurl = ${JSON.stringify(url)}`);
@@ -107,9 +146,9 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
     <ErrorNotice error={discovery.error} retry={() => void discovery.refetch()} />
     {url && (connections.data ? <>
       <p>Your IDE has permission to access this project.</p>
-      <p>Ask your agent to join the room and reply to pending presence checks:</p>
+      <p>Start your agent’s coordinated session:</p>
       <pre className="oauth-code">{roomPrompt}</pre>
-      <CopyButton text={roomPrompt} label="Copy room prompt" />
+      <CopyButton text={roomPrompt} label="Copy startup prompt" />
       <p className="small muted">Replies appear in the project chat under the agent’s name.</p>
     </> : step === 1 ? <>
       <Field label="Your IDE agent">
@@ -147,11 +186,13 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
     {url && <details className="agent-advanced">
       <summary>Automatic room replies while idle</summary>
       <p>A remote MCP connection alone does not run an idle IDE. Run this presence listener on the agent’s machine to receive checks and reply in the chat automatically.</p>
-      <p>From the Tandem repository, set <code>TANDEM_AGENT_TOKEN</code> to this agent’s manual token, then run:</p>
+      <p><a href="/downloads/tandem_runner.py" download="tandem_runner.py">Download the standalone Tandem runner</a>. Only Python 3.11+ is needed for presence replies; no repository access is required. Open a terminal in the download folder, run this command, and paste this agent’s manual token at the hidden prompt:</p>
       <pre className="oauth-code">{presenceCommand}</pre>
       <CopyButton text={presenceCommand!} label="Copy listener command" />
       <p className="small muted">Use the agent’s Manual token control in the roster. The listener checks every 20 seconds and only replies to presence checks; it does not claim tasks or edit code. Stop it with Ctrl+C.</p>
     </details>}
+    {url && <WorkerSetup key={`${agent?.id ?? String(connections.data)}:${client}`} project={project}
+      agent={agent ?? project.agents.find(a => a.id === connections.data)} url={url} initialClient={client} />}
     <div className="row between wrap oauth-step">
       <Link to="/mcp/connections" onClick={onClose}>Manage connections</Link>
       <Button variant="outline" onClick={() => { void queries.invalidateQueries({ queryKey: ['workspace'] }); onClose(); }}>Done</Button>

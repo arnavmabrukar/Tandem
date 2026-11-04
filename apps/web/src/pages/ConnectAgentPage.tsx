@@ -51,6 +51,7 @@ export function ConnectAgentPage({ project }: { project: Project }) {
             <dl className="details-grid"><dt>Machine</dt><dd>{agent.machine}</dd><dt>Last seen</dt><dd><Timestamp value={agent.lastSeen} /></dd><dt>Tasks</dt><dd>{project.tasks.filter(t => t.agentId === agent.id && !['merged', 'cancelled'].includes(t.status)).length}</dd></dl>
             {owner && agent.ownerId === user!.id && agent.grant !== 'revoked' && <>
               <Button size="sm" onClick={() => setSetupId(agent.id)}>Connect</Button>
+              <Button size="sm" variant="outline" onClick={() => setSetupId(agent.id)}>Set up worker</Button>
               <details><summary>Manual token</summary><AgentTokenButton project={project} agent={agent} /></details>
             </>}
             {owner && agent.grant !== 'revoked' && <Button size="sm" variant="outline" onClick={() => { revoke.reset(); setRevoking(agent); }}>Revoke access</Button>}

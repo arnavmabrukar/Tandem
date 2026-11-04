@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { testProject, testTask } from './support/data';
+import { readFileSync } from 'node:fs';
 
 async function connect(page: Page) {
   const state = { project: testProject(), readStatus: 200, writes: [] as Request[], reads: 0 };
@@ -552,6 +553,37 @@ test('agent room retries an uncertain send with its original operation and body'
   expect(requests).toHaveLength(2);
   expect(requests[1]).toEqual(requests[0]);
   await expect(composer).toHaveValue('My next question');
+});
+
+test('worker onboarding generates isolated setup and continuous commands for each engine', async ({ page }) => {
+  await connect(page);
+  await page.route('**/.well-known/oauth-protected-resource/mcp/', route => route.fulfill({ json: { resource: 'https://api.tandem.test/mcp/' } }));
+  await page.route('**/api/mcp/oauth/connections', route => route.fulfill({ json: [] }));
+  await page.route('**/api/projects/project-1/room', route => route.fulfill({ json: { exchanges: [] } }));
+  await page.goto('/#/projects/project-1/agents');
+  await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
+  const worker = page.getByRole('region', { name: 'Continuous worker setup' });
+  const download = worker.getByRole('link', { name: 'Download the standalone Tandem runner' });
+  await expect(download).toHaveAttribute('download', 'tandem_runner.py');
+  const script = await page.request.get((await download.getAttribute('href'))!);
+  expect(script.status()).toBe(200);
+  expect(await script.text()).toBe(readFileSync(new URL('../../../agent-integrations/runner/tandem_runner.py', import.meta.url), 'utf8'));
+  await expect(worker).not.toContainText('agent-integrations/runner/');
+  await expect(worker).toContainText('Connecting an IDE grants access; it does not start a worker.');
+  await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText('--agent codex');
+  await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText('--prompt-token');
+  await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText('python3 tandem_runner.py');
+  await expect(worker.locator('pre').filter({ hasText: 'git clone' })).toContainText('https://github.com/team/tandem.git');
+  await page.getByLabel('Your IDE agent').selectOption('Claude Code');
+  await expect(worker.getByLabel('Worker engine')).toHaveValue('claude');
+  await worker.getByLabel('Worker clone path').fill("../worker's clone");
+  await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText('--agent claude');
+  await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText("'../worker'\\''s clone'");
+  await worker.getByLabel('Worker engine').selectOption('custom');
+  await expect(worker.getByRole('button', { name: 'Copy worker command' })).toHaveCount(0);
+  await worker.getByLabel('Agent command', { exact: true }).fill('my-agent --headless');
+  await expect(worker.locator('pre').filter({ hasText: '--check' })).toContainText("--agent-command 'my-agent --headless'");
+  await expect(worker.getByRole('button', { name: 'Copy worker command' })).toBeVisible();
 });
 
 test('agent room sends private human messages and opens connection onboarding', async ({ page }) => {

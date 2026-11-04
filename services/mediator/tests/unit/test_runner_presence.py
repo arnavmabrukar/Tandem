@@ -12,6 +12,69 @@ spec.loader.exec_module(runner_module)
 
 
 class RunnerPresenceTests(unittest.TestCase):
+    def test_worker_continues_between_ready_tasks_and_waits_when_empty(self):
+        with patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'test-token'}), \
+             patch.object(runner_module.Path, 'exists', return_value=True), \
+             patch.object(runner_module, 'Tandem') as tandem_class, \
+             patch.object(runner_module, 'check_worker'), \
+             patch.object(runner_module.Runner, 'run_once', side_effect=[True, True, False]) as work, \
+             patch.object(runner_module.time, 'sleep', side_effect=KeyboardInterrupt) as sleep:
+            tandem_class.return_value.call.return_value = {'name': 'Agent', 'projects': [{'projectId': 'project'}]}
+            self.assertEqual(runner_module.main(['--project', 'project', '--repo', '/tmp/worker']), 0)
+            self.assertEqual(work.call_count, 3)
+            sleep.assert_called_once_with(20)
+
+    def test_check_validates_worker_without_claiming_work(self):
+        with patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'test-token'}), \
+             patch.object(runner_module.Path, 'exists', return_value=True), \
+             patch.object(runner_module, 'Tandem') as tandem_class, \
+             patch.object(runner_module, 'check_worker') as check, \
+             patch.object(runner_module.Runner, 'run_once') as work:
+            tandem_class.return_value.call.return_value = {'agentId': 'agent', 'name': 'Agent', 'projects': [{'projectId': 'project'}]}
+            self.assertEqual(runner_module.main(['--project', 'project', '--repo', '/tmp/worker', '--agent-id', 'agent', '--check']), 0)
+            check.assert_called_once()
+            work.assert_not_called()
+            tandem_class.return_value.project_call.assert_not_called()
+
+    def test_wrong_agent_token_cannot_start_worker(self):
+        with patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'test-token'}), \
+             patch.object(runner_module, 'Tandem') as tandem_class:
+            tandem_class.return_value.call.return_value = {'agentId': 'other', 'name': 'Other', 'projects': [{'projectId': 'project'}]}
+            with self.assertRaisesRegex(SystemExit, 'different agent'):
+                runner_module.main(['--presence-only', '--project', 'project', '--agent-id', 'agent', '--check'])
+            tandem_class.return_value.project_call.assert_not_called()
+
+    def test_hidden_token_prompt_overrides_environment_without_saving(self):
+        with patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'old-token'}), \
+             patch.object(runner_module.sys.stdin, 'isatty', return_value=True), \
+             patch.object(runner_module.getpass, 'getpass', return_value='new-token'), \
+             patch.object(runner_module, 'Tandem') as tandem_class:
+            tandem_class.return_value.call.return_value = {'name': 'Agent', 'projects': [{'projectId': 'project'}]}
+            self.assertEqual(runner_module.main(['--presence-only', '--project', 'project', '--prompt-token', '--check']), 0)
+            self.assertEqual(tandem_class.call_args.args[1], 'new-token')
+            self.assertEqual(os.environ['TANDEM_AGENT_TOKEN'], 'old-token')
+
+    def test_preflight_fails_before_work_when_cli_missing_or_clone_dirty(self):
+        repo = Mock()
+        with patch.object(runner_module.shutil, 'which', return_value=None):
+            with self.assertRaisesRegex(runner_module.WorkBlocked, 'Install'):
+                runner_module.check_worker(repo, ['codex'], True)
+        with patch.object(runner_module.shutil, 'which', return_value='/bin/tool'):
+            repo.dirty.return_value = True
+            with self.assertRaisesRegex(runner_module.WorkBlocked, 'dedicated clone'):
+                runner_module.check_worker(repo, ['codex'], True)
+
+    def test_preflight_checks_logins_without_exposing_token_to_process(self):
+        repo = Mock()
+        repo.dirty.return_value = False
+        with patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'secret'}), \
+             patch.object(runner_module.shutil, 'which', return_value='/bin/tool'), \
+             patch.object(runner_module.subprocess, 'run', return_value=Mock(returncode=0)) as run:
+            runner_module.check_worker(repo, ['codex'], True)
+            self.assertEqual([c.args[0] for c in run.call_args_list], [['codex', 'login', 'status'], ['gh', 'auth', 'status']])
+            for invocation in run.call_args_list:
+                self.assertNotIn('TANDEM_AGENT_TOKEN', invocation.kwargs['env'])
+
     def test_presence_only_never_constructs_a_repo_or_runs_tasks(self):
         with patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'test-token'}), \
              patch.object(runner_module, 'Tandem') as tandem_class, \

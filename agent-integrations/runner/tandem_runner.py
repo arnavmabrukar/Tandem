@@ -7,6 +7,7 @@ and moves the task to in_review. A person then merges and accepts the work, whic
 unlocks the next task. See README.md in this folder.
 """
 import argparse
+import getpass
 import json
 import logging
 import math
@@ -33,7 +34,9 @@ AGENT_PRESETS = {
                "Read,Edit,Write,Glob,Grep,Bash(git add:*),Bash(git commit:*),Bash(git status:*),"
                "Bash(git diff:*),Bash(git log:*),Bash(npm:*),Bash(npx:*),Bash(node:*),"
                "Bash(python:*),Bash(pytest:*)"],
-    "codex": ["codex", "exec", "--full-auto", "-"],
+    # Explicit options work with current Codex versions that removed --full-auto.
+    # Deny actions requiring escalation; never disable the sandbox for unattended work.
+    "codex": ["codex", "exec", "--sandbox", "workspace-write", "-c", 'approval_policy="never"', "-"],
 }
 # Tandem's limits for task progress and thread messages.
 PROGRESS_LIMIT = 2000
@@ -355,11 +358,38 @@ def validate_url(url: str) -> None:
         raise SystemExit("--url must use HTTPS, or HTTP to localhost")
 
 
+def check_worker(repo: Repo, command: list[str], open_pull_requests: bool) -> None:
+    """Fail setup before claiming tasks; these checks never edit the checkout."""
+    for executable in ['git', command[0], *(['gh'] if open_pull_requests else [])]:
+        if shutil.which(executable) is None:
+            raise WorkBlocked(f"Install and sign in to {executable}, then run setup again.")
+    if repo.dirty():
+        raise WorkBlocked('Use a clean, dedicated clone for this worker, not your active checkout.')
+    if not repo.git('remote', 'get-url', 'origin'):
+        raise WorkBlocked('The worker clone needs an origin remote.')
+    for field in ('user.name', 'user.email'):
+        if not repo.git('config', '--get', field, check=False):
+            raise WorkBlocked(f'Set git {field} in the worker clone before starting.')
+    # Check provider login without launching an agent or spending model tokens.
+    login = {'codex': ['codex', 'login', 'status'], 'claude': ['claude', 'auth', 'status']}.get(command[0])
+    checks = ([login] if login else []) + ([['gh', 'auth', 'status']] if open_pull_requests else [])
+    for check in checks:
+        try:
+            result = subprocess.run(check, cwd=repo.path, capture_output=True, timeout=20, env=_agent_env())
+        except (OSError, subprocess.TimeoutExpired):
+            raise WorkBlocked(f"Could not check {check[0]} login. Sign in and retry.") from None
+        if result.returncode:
+            raise WorkBlocked(f"{check[0]} is not signed in. Sign in and retry.")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run assigned Tandem tasks with a coding agent.")
     parser.add_argument("--project", required=True, help="Project ID, shown by tandem_whoami")
     parser.add_argument("--repo", type=Path, help="A clone used only by this runner (required for task execution)")
     parser.add_argument("--presence-only", action="store_true", help="Reply to room presence checks without running tasks")
+    parser.add_argument('--prompt-token', action='store_true', help='Ask for a hidden token instead of placing it in shell history')
+    parser.add_argument('--check', action='store_true', help='Check identity and worker prerequisites without claiming or executing tasks')
+    parser.add_argument('--agent-id', help='Require this agent identity, preventing a token for another worker from being used')
     parser.add_argument("--agent", choices=sorted(AGENT_PRESETS), default="claude")
     parser.add_argument("--agent-command", help="Custom command; it receives the prompt on stdin")
     parser.add_argument("--base", help="Branch to start from (default: the repository's default)")
@@ -372,6 +402,10 @@ def main(argv: list[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     token = os.environ.get("TANDEM_AGENT_TOKEN", "").strip()
+    if args.prompt_token:
+        if not sys.stdin.isatty():
+            parser.error('--prompt-token needs an interactive terminal')
+        token = getpass.getpass('Tandem agent token (hidden, not saved): ').strip()
     if not token:
         parser.error("Set the TANDEM_AGENT_TOKEN environment variable")
     validate_url(args.url)
@@ -381,6 +415,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{args.repo} is not a git clone")
     if not math.isfinite(args.poll) or not 0 < args.poll <= 90:
         parser.error('--poll must be greater than zero and at most 90 seconds')
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error('--timeout must be a positive number of minutes')
+    if not parse_command(args):
+        parser.error('--agent-command cannot be empty')
 
     tandem = Tandem(args.url, token, args.project)
     # Presence mode never constructs a repository or launches a coding process.
@@ -389,8 +427,15 @@ def main(argv: list[str] | None = None) -> int:
         args.timeout * 60, open_pull_requests=not args.no_pr)
     try:
         identity = tandem.call("tandem_whoami")
+        if args.agent_id and identity['agentId'] != args.agent_id:
+            raise SystemExit('This token belongs to a different agent. Use the selected agent’s token.')
         if args.project not in {project["projectId"] for project in identity["projects"]}:
             raise SystemExit("This agent token has no access to that project")
+        if runner is not None:
+            check_worker(runner.repo, runner.command, runner.open_pull_requests)
+        if args.check:
+            log.info('Setup checks passed for %s. No task was claimed or executed. Remove --check to keep working.', identity['name'])
+            return 0
         log.info("%s as %s. Press Ctrl+C to stop.",
                  'Listening for room presence checks' if args.presence_only else 'Running', identity['name'])
         while True:
@@ -407,7 +452,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             if not worked:
                 time.sleep(args.poll)
-    except TokenRejected as error:
+    except (TokenRejected, WorkBlocked, ToolRefused) as error:
         log.error("%s. Replace the token, then restart the runner.", error)
         return 1
     except KeyboardInterrupt:
