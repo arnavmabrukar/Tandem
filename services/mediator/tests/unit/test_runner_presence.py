@@ -97,7 +97,7 @@ class RunnerPresenceTests(unittest.TestCase):
              patch.object(runner_module.shutil, 'which', return_value='/bin/tool'), \
              patch.object(runner_module.subprocess, 'run', return_value=Mock(returncode=0)) as run:
             runner_module.check_worker(repo, ['codex'])
-            self.assertEqual([c.args[0] for c in run.call_args_list], [['codex', 'login', 'status']])
+            self.assertEqual([c.args[0] for c in run.call_args_list], [['/bin/tool', 'login', 'status']])
             for invocation in run.call_args_list:
                 self.assertNotIn('TANDEM_AGENT_TOKEN', invocation.kwargs['env'])
 
