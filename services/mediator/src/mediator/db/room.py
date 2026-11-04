@@ -1,15 +1,17 @@
 """Project room: agents can never read human exchanges, even through model context."""
 from uuid import UUID, uuid4
 from psycopg.types.json import Jsonb
+from mediator.config import settings
 from mediator.db.agent_tasks import _transaction, _current_role, AgentAccessDenied, AgentOperationConflict
 from mediator.meta_planner import generate_plan
 from mediator.schemas.plans import PlanChatRequest
 from mediator.schemas.room import RoomMessageRequest, RoomReply
 
 
-def _authorize(conn, project_id, *, user_id=None, identity=None, write=False):
+def _authorize(conn, project_id, *, user_id=None, identity=None, write=False, lock_project=True):
     # Also serialize final publication with project disconnection.
-    project = conn.execute("SELECT name, repository, version FROM public.projects WHERE id=%s AND disconnected_at IS NULL FOR SHARE", (project_id,)).fetchone()
+    project = conn.execute("SELECT name, repository, version FROM public.projects WHERE id=%s AND disconnected_at IS NULL"
+                           + (' FOR SHARE' if lock_project else ''), (project_id,)).fetchone()
     if not project:
         raise AgentAccessDenied("Project is unavailable")
     if identity is not None:
@@ -37,9 +39,55 @@ def _history(conn, project_id, agent=False, limit=100):
 
 def _public(row):
     return dict(id=str(row['id']), operationId=str(row['operation_id']), sender=row['sender_name'], senderUserId=str(row['sender_user_id']) if row['sender_user_id'] else None,
+                senderAgentId=row['sender_agent_id'],
                 kind='human' if row['sender_user_id'] else 'agent',
                 body=row['body'], response=row['response'], state=row['state'],
                 createdAt=row['created_at'].isoformat())
+
+
+def pending_presence(project_id: UUID, identity):
+    """Expose only mediator-generated challenges, never their source exchanges."""
+    with _transaction() as conn:
+        _authorize(conn, project_id, identity=identity)
+        rows = conn.execute("""SELECT response->>'presenceCheckId' AS id
+            FROM public.agent_room_exchanges r
+            WHERE project_id=%s AND state='complete'
+              AND completed_at > now()-interval '5 minutes'
+              AND response->>'presenceCheckId' IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM public.agent_room_exchanges a
+                  WHERE a.project_id=r.project_id AND a.sender_agent_id=%s
+                    AND a.operation_id=(r.response->>'presenceCheckId')::uuid)
+            ORDER BY completed_at, id""", (project_id, identity['agentId'])).fetchall()
+        return {'presenceRequests': [{'id': r['id'], 'message': "Who's online?"} for r in rows]}
+
+
+def acknowledge_presence(project_id: UUID, check_id: UUID, identity):
+    with _transaction() as conn:
+        # A presence acknowledgement is available to all connected roles, but
+        # still requires a live grant and membership on every call.
+        _, _, name = _authorize(conn, project_id, identity=identity)
+        conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                     (f"room:{project_id}:{identity['agentId']}",))
+        existing = conn.execute("""SELECT * FROM public.agent_room_exchanges
+            WHERE project_id=%s AND sender_agent_id=%s AND operation_id=%s""",
+            (project_id, identity['agentId'], check_id)).fetchone()
+        if existing:
+            if existing['response'] is not None or existing['state'] != 'complete':
+                raise AgentOperationConflict('Presence operation ID is already in use')
+            return _public(existing)
+        check = conn.execute("""SELECT 1 FROM public.agent_room_exchanges
+            WHERE project_id=%s AND state='complete'
+              AND completed_at > now()-interval '5 minutes'
+              AND response->>'presenceCheckId'=%s""", (project_id, str(check_id))).fetchone()
+        if not check:
+            raise AgentOperationConflict('Presence check is unavailable or expired')
+        # NULL response + complete represents a standalone message. The request
+        # UUID is also the operation UUID, enforcing one reply per agent/check.
+        row = conn.execute("""INSERT INTO public.agent_room_exchanges
+            (project_id,sender_agent_id,sender_name,operation_id,body,state,lease,lease_until,completed_at)
+            VALUES (%s,%s,%s,%s,%s,'complete',%s,now(),now()) RETURNING *""",
+            (project_id, identity['agentId'], name, check_id, "I'm online.", uuid4())).fetchone()
+        return _public(row)
 
 
 def read_room(project_id: UUID, *, user_id=None, identity=None):
@@ -52,7 +100,30 @@ def read_room(project_id: UUID, *, user_id=None, identity=None):
             saved = (row['response'] or {}).get('saved')
             if saved:
                 saved['approvedPlanVersion'] = approvals.get(saved['planId'])
-        return {'exchanges': [_public(row) for row in rows]}
+        return {'exchanges': [_public(row) for row in rows], 'mediatorModel': settings.meta_model}
+
+
+def clear_room(project_id: UUID, through_id: UUID, user_id: UUID):
+    """Delete shared history through the captured boundary; retain later messages."""
+    with _transaction() as conn:
+        # Deletion publishes nothing and does not update the project. Avoid a
+        # project lock while waiting for room rows: saving a draft locks its room
+        # row before updating the project. The membership lock still protects authority.
+        _, role, _ = _authorize(conn, project_id, user_id=user_id, lock_project=False)
+        if role != 'owner':
+            raise AgentAccessDenied('Only the project owner can clear the room')
+        # Use the same ordering as history. A retry whose boundary was already
+        # deleted is a no-op, never a request to delete newly arrived messages.
+        conn.execute("""WITH boundary AS (
+                SELECT created_at, id FROM public.agent_room_exchanges
+                WHERE project_id=%s AND id=%s
+            )
+            DELETE FROM public.agent_room_exchanges
+            WHERE project_id=%s AND (created_at, id) <= (SELECT created_at, id FROM boundary)""",
+            (project_id, through_id, project_id))
+        # Saved plans, tasks and their approval records are independent of room
+        # rows and remain intact. Pending model replies cannot recreate a row.
+        return {'cleared': True}
 
 
 def _context(conn, project_id, project, role, agent):
@@ -70,8 +141,9 @@ def _conversation(rows, current_id):
         if row['id'] == current_id:
             continue
         if row['state'] == 'complete':
-            messages.extend([{'role': 'user', 'content': f"{row['sender_name']}: {row['body']}"[:8000]},
-                             {'role': 'assistant', 'content': row['response']['reply'][:8000]}])
+            messages.append({'role': 'user', 'content': f"{row['sender_name']}: {row['body']}"[:8000]})
+            if (row['response'] or {}).get('reply'):
+                messages.append({'role': 'assistant', 'content': row['response']['reply'][:8000]})
     current = next(row for row in rows if row['id'] == current_id)
     messages = messages[-4:] + [{'role': 'user', 'content': current['body']}]
     # 4 * 8000 + 8000 meets the existing provider request cap.
@@ -125,10 +197,17 @@ def post_message(project_id: UUID, request: RoomMessageRequest, *, user_id=None,
                 # Model output cannot introduce arbitrary task IDs or change active work.
                 allowed = {str(t['id']) for t in context['tasks'] if t['status'] == 'open'}
                 reply.cancelTaskIds = [i for i in reply.cancelTaskIds if str(i) in allowed]
+            response = reply.model_dump(mode='json')
+            # Attribute replies to the configured model, never a name supplied
+            # by the model itself. Persist it so future config changes keep history accurate.
+            response['model'] = settings.meta_model
+            if reply.requestPresence:
+                # Independent random ID: agents cannot infer the private source ID.
+                response['presenceCheckId'] = str(uuid4())
             updated = conn.execute("""UPDATE public.agent_room_exchanges
                 SET response=%s,state='complete',completed_at=now()
                 WHERE id=%s AND lease=%s RETURNING *""",
-                (Jsonb(reply.model_dump(mode='json')), row['id'], lease)).fetchone()
+                (Jsonb(response), row['id'], lease)).fetchone()
             if not updated:
                 raise AgentOperationConflict('A newer retry is handling this message')
             return _public(updated)

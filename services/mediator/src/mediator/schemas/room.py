@@ -17,6 +17,12 @@ class RoomMessageRequest(BaseModel):
         return value.strip()
 
 
+class ClearRoomRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    throughId: UUID
+
+
 class RoomReply(PlanChatResponse):
+    requestPresence: bool = False
     # Suggestions only; existing cancellation permissions/version checks still apply.
     cancelTaskIds: list[UUID] = Field(default_factory=list, max_length=20)

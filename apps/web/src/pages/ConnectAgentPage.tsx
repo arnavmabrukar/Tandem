@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Bot, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useSession } from '../auth/session';
 import { useAction } from '../hooks/useWorkspace';
 import { roleFor, type Agent, type Project } from '../types/domain';
@@ -10,9 +11,13 @@ import { Modal } from '../components/ui/dialog';
 import { AgentOAuthSetup } from '../components/AgentOAuthSetup';
 import { AgentRoom } from '../components/AgentRoom';
 import { AgentTokenButton } from '../components/AgentTokenButton';
+import { MediatorIdentity, RoomAvatar } from '../components/RoomIdentity';
 
 export function ConnectAgentPage({ project }: { project: Project }) {
-  const { user } = useSession();
+  const { user, api } = useSession();
+  // Share one poll between the transcript and roster so both show the same model.
+  const room = useQuery({ queryKey: ['agent-room', user!.id, project.id],
+    queryFn: ({ signal }) => api.readRoom(project.id, signal), refetchInterval: 5000 });
   const owner = roleFor(project, user!.id) === 'owner';
   const [open, setOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
@@ -29,24 +34,32 @@ export function ConnectAgentPage({ project }: { project: Project }) {
   return (
     <>
       <div className="agent-room-layout">
-        <AgentRoom key={project.id} project={project} />
+        <AgentRoom key={project.id} project={project} room={room} />
         <aside className="room-roster" aria-label="Project agents">
           <Button onClick={() => setConnectOpen(true)}><Plus size={17} />Connect agent</Button>
           <h2>In this project</h2>
-          <div className="roster-member"><span className="agent-icon"><Bot size={20} /></span><div><strong>Mediator</strong><small>Plans & coordination · on request</small></div></div>
+          <div className="row wrap"><MediatorIdentity model={room.data?.mediatorModel} /></div>
+          <p className="small muted">Plans & coordination · on request</p>
           <h3>Agents · {project.agents.length}</h3>
           {project.agents.length === 0 && <p className="small muted">Connect an IDE agent to join the room.</p>}
-          {project.agents.map(agent => <details className="roster-agent" key={agent.id}>
-            <summary><span className="roster-member"><span className="agent-icon"><Bot size={18} /></span><span><strong>{agent.name}</strong><small>{agent.client}</small></span><Badge value={agent.grant === 'active' ? agent.presence : agent.grant} /></span></summary>
+          {(['online', 'stale', 'offline'] as const).map(presence => {
+            const agents = project.agents.filter(agent => (agent.grant === 'active' ? agent.presence : 'offline') === presence);
+            return <section key={presence} aria-label={`${presence} agents`}>
+              <h3>{presence[0].toUpperCase() + presence.slice(1)} · {agents.length}</h3>
+              {agents.map(agent => <details className="roster-agent" key={agent.id}>
+            <summary><span className="roster-member"><RoomAvatar kind="agent" client={agent.client} /><span><strong>{agent.name}</strong><small>{agent.client}</small></span><Badge value={agent.grant === 'active' ? agent.presence : agent.grant} /></span></summary>
             <dl className="details-grid"><dt>Machine</dt><dd>{agent.machine}</dd><dt>Last seen</dt><dd><Timestamp value={agent.lastSeen} /></dd><dt>Tasks</dt><dd>{project.tasks.filter(t => t.agentId === agent.id && !['merged', 'cancelled'].includes(t.status)).length}</dd></dl>
             {owner && agent.ownerId === user!.id && agent.grant !== 'revoked' && <>
               <Button size="sm" onClick={() => setSetupId(agent.id)}>Connect</Button>
+              <Button size="sm" variant="outline" onClick={() => setSetupId(agent.id)}>Set up worker</Button>
               <details><summary>Manual token</summary><AgentTokenButton project={project} agent={agent} /></details>
             </>}
             {owner && agent.grant !== 'revoked' && <Button size="sm" variant="outline" onClick={() => { revoke.reset(); setRevoking(agent); }}>Revoke access</Button>}
           </details>)}
+            </section>;
+          })}
           {owner && <details className="agent-advanced"><summary>Advanced</summary><Button variant="ghost" size="sm" onClick={() => { add.reset(); setOpen(true); }}>Add agent manually</Button></details>}
-          <p className="small muted">Agents talk to the mediator through MCP. An online status does not mean an agent is working.</p>
+          <p className="small muted">Online means recent agent activity. Presence replies appear in this chat after the agent receives the check. Open Connect for room participation and automatic replies.</p>
         </aside>
       </div>
       {connectOpen && <AgentOAuthSetup project={project} onClose={() => setConnectOpen(false)} />}

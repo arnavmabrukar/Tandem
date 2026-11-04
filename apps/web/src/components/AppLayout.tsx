@@ -2,17 +2,15 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   Activity,
   Bot,
-  CheckCheck,
   ChevronsUpDown,
-  ClipboardList,
+  ListChecks,
   FolderCog,
-  Layers2,
   LogOut,
   RefreshCw,
   CircleHelp,
   Settings,
 } from 'lucide-react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useSession } from '../auth/session';
 import { configuration } from '../config';
@@ -40,14 +38,13 @@ export function AppLayout({
 }) {
   const { user, signOut } = useSession();
   const navigate = useNavigate();
+  const location = useLocation();
   const id = project?.id ?? projects[0]?.id;
   const pending = project?.approvals.filter((a) => a.status === 'pending').length ?? 0;
   const nav = [
     { to: 'activity', text: 'Activity', icon: Activity },
-    { to: 'tasks', text: 'Tasks', icon: ClipboardList },
-    { to: 'plans', text: 'Plans', icon: Layers2 },
+    { to: 'workflow', text: 'Workflow', icon: ListChecks },
     { to: 'agents', text: 'Agents', icon: Bot },
-    { to: 'approvals', text: 'Approvals', icon: CheckCheck },
     { to: 'setup', text: 'Project setup', icon: FolderCog },
     { to: 'connections', text: 'Connection guide', icon: CircleHelp },
   ];
@@ -97,10 +94,11 @@ export function AppLayout({
           </NavLink>
           {id &&
             nav.map(({ to, text, icon: Icon }) => (
-              <NavLink key={to} aria-label={text} to={`/projects/${id}/${to}`}>
+              <NavLink key={to} aria-label={text} to={`/projects/${id}/${to}`}
+                className={({ isActive }) => isActive || (to === 'workflow' && location.pathname.startsWith(`/projects/${id}/tasks/`)) ? 'active' : undefined}>
                 <Icon size={18} />
                 <span>{text}</span>
-                {to === 'approvals' && pending > 0 && (
+                {to === 'workflow' && pending > 0 && (
                   <span className="nav-count" aria-hidden="true">
                     {pending}
                   </span>

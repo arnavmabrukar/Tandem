@@ -48,7 +48,7 @@ export function DraftCard({ proposal, project, disabled, message, onUpdate, save
       <p>Depends on: {task.dependencies.map(key => proposal.tasks.find(t => t.key === key)?.title ?? key).join(', ') || 'None'}</p>
     </details>)}
     <ErrorNotice error={save.error} />
-    {approved ? <p>Tasks created. <Link to={`/projects/${project.id}/tasks`}>View tasks</Link></p> : saved ? <>
+    {approved ? <p>Tasks created. <Link to={`/projects/${project.id}/workflow?stage=execute`}>View tasks</Link></p> : saved ? <>
       <p>Draft saved. Review its exact scope before creating tasks.</p>
       <PlanApproval plan={saved} projectVersion={project.version} disabled={disabled} onApproved={() => { setApproved(true); onUpdate({ approved: true }); }} />
     </> : <Button disabled={disabled || save.isPending} onClick={() => save.mutate()}>

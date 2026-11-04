@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { testProject, testTask } from './support/data';
+import { readFileSync } from 'node:fs';
 
 async function connect(page: Page) {
   const state = { project: testProject(), readStatus: 200, writes: [] as Request[], reads: 0 };
@@ -16,6 +17,10 @@ async function connect(page: Page) {
       await route.fulfill({ json: { id: 'user-1', name: 'Test owner' } });
       return;
     }
+    if (path.endsWith('/plans')) {
+      await route.fulfill({ json: [] });
+      return;
+    }
     state.reads++;
     await route.fulfill({
       status: state.readStatus,
@@ -25,6 +30,87 @@ async function connect(page: Page) {
   return state;
 }
 const thread = '/#/projects/project-1/tasks/task-1';
+
+test('workflow combines stages, preserves drafts and task filters, and keeps task links', async ({ page }) => {
+  await connect(page);
+  await page.goto('/#/projects/project-1/tasks?status=in_review&q=API');
+  await expect(page).toHaveURL(/workflow\?status=in_review&q=API&stage=execute$/);
+  const navigation = page.getByRole('navigation', { name: 'Main navigation' });
+  await expect(navigation.getByRole('link', { name: 'Workflow', exact: true })).toBeVisible();
+  for (const name of ['Tasks', 'Plans', 'Approvals']) await expect(navigation.getByRole('link', { name, exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Task status', { exact: true })).toHaveValue('in_review');
+  const stages = page.getByRole('navigation', { name: 'Workflow stages' });
+  await stages.getByRole('button', { name: /1 Plan/ }).click();
+  await page.getByRole('button', { name: 'Write a plan manually' }).click();
+  await page.getByLabel('Goal', { exact: true }).fill('Keep this unsaved goal');
+  await stages.getByRole('button', { name: /3 Execute/ }).click();
+  await page.getByLabel('Search tasks', { exact: true }).fill('Task returned');
+  await stages.getByRole('button', { name: /1 Plan/ }).click();
+  await expect(page.getByLabel('Goal', { exact: true })).toHaveValue('Keep this unsaved goal');
+  await stages.getByRole('button', { name: /4 Review & finish/ }).click();
+  await expect(page.getByRole('region', { name: 'Submitted work' })).toContainText('Task returned by test API');
+  await page.getByRole('region', { name: 'Submitted work' }).getByRole('link').click();
+  await expect(page).toHaveURL(/tasks\/task-1$/);
+  await expect(navigation.getByRole('link', { name: 'Workflow', exact: true })).toHaveClass('active');
+  await page.getByRole('link', { name: 'Back to workflow' }).click();
+  await expect(page).toHaveURL(/workflow\?stage=execute$/);
+});
+
+test('workflow separates scope approvals from result reviews and respects viewer permissions', async ({ page }) => {
+  const state = await connect(page);
+  state.project.approvals.push({ ...state.project.approvals[0], id: 'scope-1', action: 'Approve contract', head: null });
+  await page.goto('/#/projects/project-1/approvals?status=pending');
+  await expect(page).toHaveURL(/workflow\?approvalStatus=pending&stage=scope$/);
+  const stages = page.getByRole('navigation', { name: 'Workflow stages' });
+  await expect(stages.getByRole('button', { name: /2 Approve scope/ })).toContainText('1 pending');
+  await expect(page.locator('#workflow-scope .approval-card')).toHaveCount(1);
+  await expect(page.locator('#workflow-scope .approval-card')).toContainText('Approve contract');
+  await page.getByRole('button', { name: 'Review target', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Approve contract');
+  await expect(page.getByRole('button', { name: 'Record approval', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.locator('#workflow-scope').getByLabel('Approval status', { exact: true }).selectOption('all');
+  await expect(page).toHaveURL(/stage=scope/);
+  await stages.getByRole('button', { name: /4 Review & finish/ }).click();
+  await expect(page.locator('#workflow-review .approval-card')).toHaveCount(1);
+  await expect(page.locator('#workflow-review .approval-card')).toContainText('Review result');
+  await expect(stages.locator('[aria-current="step"]')).toHaveCount(1);
+  await page.screenshot({ path: `/tmp/tandem-workflow-${page.viewportSize()!.width}.png`, fullPage: true, animations: 'disabled' });
+  state.project.members[0].role = 'viewer';
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Review target', exact: true })).toBeDisabled();
+  await stages.getByRole('button', { name: /1 Plan/ }).click();
+  await expect(page.getByRole('button', { name: 'Write a plan manually' })).toBeDisabled();
+});
+
+test('approving a plan hands off to scope review without bypassing confirmation', async ({ page }) => {
+  const state = await connect(page);
+  const projectId = '11111111-1111-4111-8111-111111111111';
+  const planId = '22222222-2222-4222-8222-222222222222';
+  state.project.id = projectId;
+  state.project.tasks = [];
+  state.project.approvals = [];
+  const plan = { projectId, planId, projectVersion: 4, planVersion: 1, approvedPlanVersion: null as number | null,
+    createdBy: '33333333-3333-4333-8333-333333333333', createdAt: '2026-11-03T12:00:00Z',
+    proposal: { goal: 'Ship the new feature', summary: 'One small task', tasks: [{ key: 'build', title: 'Build it', description: '', contractSummary: 'Small scope', paths: [], criteria: ['It works'], dependencies: [] }] } };
+  await page.route(`**/api/projects/${projectId}/plans`, route => route.fulfill({ json: [plan] }));
+  await page.route(`**/api/projects/${projectId}/plans/${planId}/approve`, async route => {
+    const body = route.request().postDataJSON();
+    expect(body).toMatchObject({ expectedVersion: 4, expectedPlanVersion: 1, startNow: false, note: 'Reviewed the scope' });
+    plan.approvedPlanVersion = 1;
+    state.project.version = 5;
+    await route.fulfill({ json: { projectId, planId, projectVersion: 5, planVersion: 1, taskIds: {} } });
+  });
+  await page.goto(`/#/projects/${projectId}/plans`);
+  await expect(page).toHaveURL(/workflow\?stage=plan$/);
+  await page.getByRole('button', { name: 'Review and create tasks', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Approve and create tasks', exact: true })).toBeDisabled();
+  await page.getByLabel('Review note', { exact: true }).fill('Reviewed the scope');
+  await page.getByRole('checkbox').check();
+  await page.getByRole('button', { name: 'Approve and create tasks', exact: true }).click();
+  await expect(page).toHaveURL(/workflow\?stage=scope$/);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
 
 test('delayed session restoration preserves the task route across reload', async ({ page }) => {
   const state = await connect(page);
@@ -359,17 +445,173 @@ test('viewer permissions come from the server membership', async ({ page }) => {
   expect(state.writes).toHaveLength(0);
 });
 
+test('clear chat confirms deletion, retries the same boundary, and keeps newer messages', async ({ page }) => {
+  const state = await connect(page);
+  const old = { id: 'old', operationId: 'check-1', senderUserId: null, sender: 'Agent', kind: 'agent',
+    body: 'Previous message', state: 'complete', createdAt: new Date().toISOString(), response: null };
+  let exchanges = [old];
+  const deleted: string[] = [];
+  await page.route('**/api/projects/project-1/room', async route => {
+    if (route.request().method() === 'DELETE') {
+      deleted.push(route.request().postDataJSON().throughId);
+      if (deleted.length === 1) {
+        await route.fulfill({ status: 503, json: { detail: 'Room unavailable' } });
+      } else {
+        exchanges = exchanges.filter(item => item.id !== 'old');
+        await route.fulfill({ json: { cleared: true } });
+      }
+    } else await route.fulfill({ json: { exchanges } });
+  });
+  await page.goto('/#/projects/project-1/agents');
+  await expect(page.getByText('Previous message', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Clear chat', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('permanently deletes');
+  expect(deleted).toEqual([]);
+  exchanges.push({ ...old, id: 'new', operationId: 'check-2', body: 'New arrival' });
+  await page.getByRole('button', { name: 'Delete messages', exact: true }).click();
+  await expect(page.getByRole('dialog').getByRole('alert')).toBeVisible();
+  await expect(page.getByText('Previous message', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Delete messages', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('Previous message', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('New arrival', { exact: true })).toBeVisible();
+  expect(deleted).toEqual(['old', 'old']);
+  await page.reload();
+  await expect(page.getByText('Previous message', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('New arrival', { exact: true })).toBeVisible();
+  state.project.members[0].role = 'viewer';
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Clear chat', exact: true })).toHaveCount(0);
+});
+
+test('agent room renders standalone acknowledgements and groups presence counts', async ({ page }) => {
+  const state = await connect(page);
+  state.project.agents = (['online', 'stale', 'offline'] as const).map((presence, index) => ({
+    id: `agent-${index}`, name: `Agent ${presence}`, client: 'Codex', owner: 'Test owner',
+    machine: 'Laptop', capabilities: [], grant: 'active', presence, lastSeen: null, session: null,
+  }));
+  state.project.agents.push({ ...state.project.agents[0], id: 'revoked', name: 'Revoked agent', grant: 'revoked' });
+  await page.route('**/api/projects/project-1/room', route => route.fulfill({ json: { mediatorModel: 'muse-spark-1.3-contributor', exchanges: [{
+    id: 'ack-1', operationId: 'check-1', senderUserId: null, senderAgentId: 'agent-0', sender: 'Agent online', kind: 'agent',
+    body: "I'm online.", state: 'complete', createdAt: new Date().toISOString(), response: null,
+  }] } }));
+  await page.goto('/#/projects/project-1/agents');
+  await expect(page.getByText("I'm online.", { exact: true })).toBeVisible();
+  await expect(page.locator('.room-mediator')).toHaveCount(0);
+  await expect(page.getByRole('log').getByRole('img', { name: 'Codex', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Online · 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Stale · 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Offline · 2', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'offline agents' }).getByText('Revoked agent')).toBeVisible();
+});
+
+for (const editDraft of [false, true]) test(`agent room reconciles its completed operation (${editDraft ? 'edited' : 'unchanged'} draft)`, async ({ page }) => {
+  await connect(page);
+  let request: { operationId: string; body: string } | undefined;
+  let confirmed = false;
+  await page.route('**/api/projects/project-1/room', async route => {
+    if (route.request().method() === 'POST') {
+      request = route.request().postDataJSON();
+      await route.fulfill({ status: 503 });
+    } else {
+      const exchange = { id: 'saved-message', operationId: 'older-operation', senderUserId: 'user-1', sender: 'Test owner', kind: 'human', body: 'ping agents', state: 'complete', createdAt: new Date().toISOString(),
+        response: { reply: 'Presence requested.', proposal: null, cancelTaskIds: [] } };
+      await route.fulfill({ json: { exchanges: [exchange, ...(request ? [{ ...exchange, id: 'matching-operation', operationId: request.operationId, senderUserId: confirmed ? 'user-1' : 'another-user' }] : [])] } });
+    }
+  });
+  await page.goto('/#/projects/project-1/agents');
+  const composer = page.getByRole('textbox', { name: 'Message mediator' });
+  await composer.fill('ping agents');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(page.getByText('The API could not complete the request (HTTP 503).')).toBeVisible();
+  // Neither repeated text nor another sender's operation proves this send succeeded.
+  await expect(composer).toHaveValue('ping agents');
+  if (editDraft) await composer.fill('My next question');
+  confirmed = true;
+  await expect(page.getByText('The API could not complete the request (HTTP 503).')).toHaveCount(0, { timeout: 12000 });
+  await expect(composer).toHaveValue(editDraft ? 'My next question' : '');
+  await expect(page.getByRole('button', { name: 'Retry previous message' })).toHaveCount(0);
+});
+
+test('agent room retries an uncertain send with its original operation and body', async ({ page }) => {
+  await connect(page);
+  const requests: { operationId: string; body: string }[] = [];
+  await page.route('**/api/projects/project-1/room', async route => {
+    if (route.request().method() !== 'POST') return route.fulfill({ json: { exchanges: [] } });
+    requests.push(route.request().postDataJSON());
+    if (requests.length === 1) return route.fulfill({ status: 503 });
+    await route.fulfill({ json: { id: 'saved', ...requests[0], senderUserId: 'user-1', sender: 'Test owner', kind: 'human', state: 'complete', createdAt: new Date().toISOString(), response: { reply: 'Done.', proposal: null, cancelTaskIds: [] } } });
+  });
+  await page.goto('/#/projects/project-1/agents');
+  const composer = page.getByRole('textbox', { name: 'Message mediator' });
+  await composer.fill('ping agents');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Retry previous message' })).toBeVisible();
+  await composer.fill('My next question');
+  await page.getByRole('button', { name: 'Retry previous message' }).click();
+  await expect(page.getByRole('button', { name: 'Retry previous message' })).toHaveCount(0);
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toEqual(requests[0]);
+  await expect(composer).toHaveValue('My next question');
+});
+
+test('worker onboarding generates isolated setup and continuous commands for each engine', async ({ page }) => {
+  await connect(page);
+  await page.route('**/.well-known/oauth-protected-resource/mcp/', route => route.fulfill({ json: { resource: 'https://api.tandem.test/mcp/' } }));
+  await page.route('**/api/mcp/oauth/connections', route => route.fulfill({ json: [] }));
+  await page.route('**/api/projects/project-1/room', route => route.fulfill({ json: { exchanges: [] } }));
+  await page.goto('/#/projects/project-1/agents');
+  await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
+  const worker = page.getByRole('region', { name: 'Continuous worker setup' });
+  const script = await page.request.get('/downloads/tandem_runner.py');
+  expect(script.status()).toBe(200);
+  expect(await script.text()).toBe(readFileSync(new URL('../../../agent-integrations/runner/tandem_runner.py', import.meta.url), 'utf8'));
+  await expect(worker).not.toContainText('agent-integrations/runner/');
+  await expect(worker).toContainText('No access to Tandem’s private repository is needed.');
+  await expect(worker.locator('pre')).toHaveCount(1);
+  await expect(worker.locator('pre')).toContainText('$HOME/Downloads/tandem_runner.py');
+  await expect(worker.locator('pre')).toContainText("--repository 'team/tandem'");
+  await expect(worker.getByLabel('Project folder', { exact: true })).toHaveCount(0);
+  const headings = page.getByRole('dialog').getByRole('heading', { level: 3 });
+  await expect(headings).toHaveText(['1. Connect your agent', '2. Choose your worker', '3. Get your agent token', '4. Download and start']);
+  await expect(worker.locator('pre')).toHaveCount(1);
+  await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeEnabled();
+  for (const name of ['Copy clone command', 'Copy setup check', 'Copy worker command', 'Copy listener command']) {
+    await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
+  }
+  const install = worker.getByRole('region', { name: 'Download and start worker' });
+  await expect(install.locator('pre')).toContainText("curl -fLsS 'http://127.0.0.1:4173/downloads/tandem_runner.py'");
+  await expect(install.locator('pre')).toContainText('--project \'project-1\'');
+  await expect(install.locator('pre')).toContainText('--agent codex');
+  await expect(install.locator('pre')).toContainText('--prompt-token');
+  await expect(install.locator('pre')).not.toContainText('git clone');
+  await page.getByLabel('Your agent', { exact: true }).selectOption('Claude Code');
+  await expect(worker.getByLabel('Worker engine')).toHaveValue('claude');
+  await expect(install.locator('pre')).toContainText('--agent claude');
+  await worker.getByLabel('Worker engine').selectOption('custom');
+  await expect(worker.getByRole('button', { name: 'Copy worker command' })).toHaveCount(0);
+  await expect(install.locator('pre')).toContainText('YOUR_AGENT_COMMAND');
+  await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeDisabled();
+  await worker.getByLabel('Agent command', { exact: true }).fill('my-agent --headless');
+  await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeEnabled();
+  await expect(install.locator('pre')).toContainText("--agent-command 'my-agent --headless'");
+});
+
 test('agent room sends private human messages and opens connection onboarding', async ({ page }) => {
   await connect(page);
+  await page.route('**/.well-known/oauth-protected-resource/mcp/', route => route.fulfill({
+    json: { resource: 'https://api.tandem.test/mcp/' },
+  }));
+  await page.route('**/api/mcp/oauth/connections', route => route.fulfill({ json: [] }));
   const exchanges: Record<string, unknown>[] = [];
   await page.route('**/api/projects/project-1/room', async route => {
     if (route.request().method() === 'POST') {
       const request = route.request().postDataJSON();
       const exchange = { id: 'exchange-1', operationId: request.operationId, senderUserId: 'user-1', sender: 'Test owner', kind: 'human', body: request.body, state: 'complete', createdAt: new Date().toISOString(),
-        response: { reply: 'Let’s review the next tasks together.', proposal: null, cancelTaskIds: [] } };
+        response: { reply: 'Let’s review the next tasks together.', model: 'muse-spark-1.3-contributor', proposal: null, cancelTaskIds: [] } };
       exchanges.push(exchange);
       await route.fulfill({ json: exchange });
-    } else await route.fulfill({ json: { exchanges } });
+    } else await route.fulfill({ json: { exchanges, mediatorModel: 'muse-spark-1.3-contributor' } });
   });
   await page.goto('/#/projects/project-1/agents');
   await expect(page.getByRole('heading', { name: 'Project room', exact: true })).toBeVisible();
@@ -377,9 +619,14 @@ test('agent room sends private human messages and opens connection onboarding', 
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByText('Let’s review the next tasks together.')).toBeVisible();
   await expect(page.getByText('Human · hidden from agents', { exact: true })).toBeVisible();
+  await expect(page.getByRole('log').getByRole('img', { name: 'Human profile', exact: true })).toBeVisible();
+  await expect(page.locator('.room-mediator strong')).toHaveText('muse-spark-1.3-contributor');
+  await expect(page.locator('.room-mediator .mediator-tag')).toHaveText('Mediator');
   await page.screenshot({ path: '/tmp/tandem-agent-room-' + page.viewportSize()!.width + '.png', fullPage: true });
   await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Continuous worker setup' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Copy listener command', exact: true })).toHaveCount(0);
 });
 
 test('the site root is the public landing page and never waits for the session', async ({ page }) => {

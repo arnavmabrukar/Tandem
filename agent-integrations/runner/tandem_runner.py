@@ -7,8 +7,11 @@ and moves the task to in_review. A person then merges and accepts the work, whic
 unlocks the next task. See README.md in this folder.
 """
 import argparse
+import getpass
+import hashlib
 import json
 import logging
+import math
 import os
 import re
 import shlex
@@ -16,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -32,7 +36,9 @@ AGENT_PRESETS = {
                "Read,Edit,Write,Glob,Grep,Bash(git add:*),Bash(git commit:*),Bash(git status:*),"
                "Bash(git diff:*),Bash(git log:*),Bash(npm:*),Bash(npx:*),Bash(node:*),"
                "Bash(python:*),Bash(pytest:*)"],
-    "codex": ["codex", "exec", "--full-auto", "-"],
+    # Explicit options work with current Codex versions that removed --full-auto.
+    # Deny actions requiring escalation; never disable the sandbox for unattended work.
+    "codex": ["codex", "exec", "--sandbox", "workspace-write", "-c", 'approval_policy="never"', "-"],
 }
 # Tandem's limits for task progress and thread messages.
 PROGRESS_LIMIT = 2000
@@ -104,7 +110,7 @@ class Tandem:
 
 
 class Repo:
-    """Git operations in the runner's dedicated clone."""
+    """Git operations in the runner's clone or linked worktree."""
 
     def __init__(self, path: Path, base: str | None = None):
         self.path, self.base = path, base
@@ -130,6 +136,11 @@ class Repo:
 
     def dirty(self) -> bool:
         return bool(self.git("status", "--porcelain"))
+
+    def contains(self, ref: str) -> bool:
+        done = subprocess.run(['git', 'merge-base', '--is-ancestor', ref, 'HEAD'],
+                              cwd=self.path, capture_output=True, env=_agent_env())
+        return done.returncode == 0
 
     def prepare(self, branch: str) -> str:
         """Check out the task's branch, continuing earlier work if there is any."""
@@ -228,6 +239,18 @@ def _pull_request(repo: Repo, branch: str, base: str, task: dict, summary: str) 
     return created.stdout.strip().splitlines()[-1]
 
 
+def acknowledge_presence(tandem: Tandem):
+    """The client must receive each challenge before sending an explicit reply."""
+    pending = tandem.project_call('tandem_get_presence_requests')
+    for request in pending['presenceRequests']:
+        try:
+            tandem.project_call('tandem_acknowledge_presence', checkId=request['id'])
+        except ToolRefused:
+            # A check can expire between polling and replying. Continue to newer
+            # challenges; revoked credentials still stop the loop via TokenRejected.
+            log.info('Presence check no longer available')
+
+
 class Runner:
     def __init__(self, tandem: Tandem, repo: Repo, command: list[str], timeout: float,
                  open_pull_requests: bool = True):
@@ -236,11 +259,28 @@ class Runner:
 
     def next_task(self) -> dict | None:
         """Pick work to start or resume. Tasks waiting on a person are skipped."""
+        self.acknowledge_presence()
         tasks = self.tandem.project_call("tandem_get_assignments")["tasks"]
         for task in tasks:
             if task["status"] in ("claimed", "in_progress") or (task["status"] == "open" and task["claimable"]):
                 return task
+        # A teammate's merged PR can conflict with work already awaiting review.
+        # Only reopen an open, conflicting PR; never revive a merged/closed PR.
+        if self.open_pull_requests:
+            for task in tasks:
+                if task['status'] == 'in_review' and self._pr_conflicting(task):
+                    return task
         return None
+
+    def _pr_conflicting(self, task: dict) -> bool:
+        try:
+            result = subprocess.run(['gh', 'pr', 'view', branch_name(task), '--json', 'state,mergeable'],
+                                    cwd=self.repo.path, capture_output=True, text=True,
+                                    timeout=20, env=_agent_env())
+            status = json.loads(result.stdout) if result.returncode == 0 else {}
+            return status.get('state') == 'OPEN' and status.get('mergeable') == 'CONFLICTING'
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            return False
 
     def _update(self, task_id: str, version: int, **fields) -> int:
         done = self.tandem.project_call("tandem_update_task", taskId=task_id, expectedVersion=version,
@@ -274,7 +314,7 @@ class Runner:
                 version = self._update(task_id, version, status="in_progress",
                                        progress="The runner is preparing the task.")
             detail = self.tandem.project_call("tandem_get_task", taskId=task_id)
-            result = self._execute(detail)
+            result = self._execute(detail, review_refresh=task['status'] == 'in_review')
         except WorkBlocked as error:
             log.warning("Task %s is blocked: %s", task_id, error)
             detail = self.tandem.project_call("tandem_get_task", taskId=task_id)
@@ -286,24 +326,64 @@ class Runner:
         self._update(task_id, detail["version"], status="in_review", progress=result["progress"][:PROGRESS_LIMIT])
         log.info("Task %s is ready for review", task_id)
 
-    def _execute(self, task: dict) -> dict:
+    def _execute(self, task: dict, review_refresh: bool = False) -> dict:
         branch = branch_name(task)
         base = self.repo.prepare(branch)
+        self._integrate_base(task, branch, base)
         before = self.repo.git("rev-parse", "HEAD")
-        code, output = self._run_agent_with_keepalive(build_prompt(task, branch))
+        if review_refresh:
+            # The implementation was already submitted; only refresh and validate it.
+            prompt = build_prompt(task, branch) + '\nReview update: preserve the submitted implementation, validate its integration with the base branch, and run relevant tests. Commit only if further fixes are needed.'
+        else:
+            prompt = build_prompt(task, branch)
+        code, output = self._run_agent_with_keepalive(prompt)
         summary = output.strip()[-4000:]
         if code != 0:
             raise WorkBlocked(f"The agent exited with code {code}. Last output:\n{summary[-1500:]}")
         if self.repo.dirty():
             raise WorkBlocked("The agent left uncommitted changes in the clone. Last output:\n"
                               + summary[-1500:])
-        if self.repo.git("rev-parse", "HEAD") == before:
+        if not review_refresh and self.repo.git("rev-parse", "HEAD") == before:
             raise WorkBlocked("The agent finished without committing anything. Last output:\n"
                               + summary[-1500:])
+        # Fetch again because another agent may have finished while this one worked.
+        self._integrate_base(task, branch, base)
+        if self.repo.git('branch', '--show-current') != branch:
+            raise WorkBlocked('The agent switched away from its assigned task branch.')
         self.repo.git("push", "-u", "origin", branch)
         url = _pull_request(self.repo, branch, base, task, summary) if self.open_pull_requests else None
         where = f"Pull request: {url}" if url else f"Pushed to branch {branch}; no pull request was opened."
         return {"message": f"{where}\n\nAgent summary:\n{summary}", "progress": where}
+
+    def _integrate_base(self, task: dict, branch: str, base: str) -> None:
+        """Merge teammates' published work into this task, without rewriting history."""
+        if self.repo.git('branch', '--show-current') != branch:
+            raise WorkBlocked('The agent switched away from its assigned task branch.')
+        self.repo.git('fetch', 'origin', '--prune')
+        target = self.repo.git('rev-parse', f'refs/remotes/origin/{base}')
+        if self.repo.contains(target):
+            return
+        self.repo.git('merge', '--no-edit', target, check=False)
+        merging = self.repo.exists('MERGE_HEAD')
+        if not merging and not self.repo.contains(target):
+            raise WorkBlocked('Could not merge the base branch into the task branch.')
+        conflicts = self.repo.git('diff', '--name-only', '--diff-filter=U')
+        instruction = (
+            'The runner has started merging the latest base branch into your task branch. '
+            'Resolve the conflicted files, preserve both the task requirements and teammates\' changes, '
+            'stage the resolutions and commit the merge. Do not abort the merge or discard either side wholesale. '
+            f'Conflicted files:\n{conflicts}' if merging else
+            'The runner merged the latest base branch into your task branch. Validate the combined changes, '
+            'run relevant tests, and commit any fixes needed.'
+        )
+        code, output = self._run_agent_with_keepalive(build_prompt(task, branch) + '\n\nIntegration step:\n' + instruction)
+        if (code or self.repo.dirty() or self.repo.exists('MERGE_HEAD')
+                or self.repo.git('branch', '--show-current') != branch or not self.repo.contains(target)):
+            raise WorkBlocked('The agent could not finish and validate integration with the base branch. '
+                              'Work was preserved for inspection. Last output:\n' + output.strip()[-1500:])
+
+    def acknowledge_presence(self):
+        acknowledge_presence(self.tandem)
 
     def _run_agent_with_keepalive(self, prompt: str) -> tuple[int, str]:
         """Keep the agent showing Online for the whole run, however long it takes."""
@@ -312,7 +392,7 @@ class Runner:
         def keep_alive():
             while not finished.wait(KEEPALIVE_SECONDS):
                 try:
-                    self.tandem.call("tandem_status")
+                    self.acknowledge_presence()
                 except (WorkBlocked, ToolRefused, TokenRejected) as error:
                     log.info("Check-in failed: %s", type(error).__name__)
 
@@ -338,10 +418,113 @@ def validate_url(url: str) -> None:
         raise SystemExit("--url must use HTTPS, or HTTP to localhost")
 
 
+def check_worker(repo: Repo, command: list[str], open_pull_requests: bool) -> None:
+    """Fail setup before claiming tasks; these checks never edit the checkout."""
+    for executable in ['git', command[0], *(['gh'] if open_pull_requests else [])]:
+        if shutil.which(executable) is None:
+            raise WorkBlocked(f"Install and sign in to {executable}, then run setup again.")
+    if repo.dirty():
+        raise WorkBlocked('Use a clean, dedicated clone for this worker, not your active checkout.')
+    if not repo.git('remote', 'get-url', 'origin'):
+        raise WorkBlocked('The worker clone needs an origin remote.')
+    for field in ('user.name', 'user.email'):
+        if not repo.git('config', '--get', field, check=False):
+            raise WorkBlocked(f'Set git {field} in the worker clone before starting.')
+    # Check provider login without launching an agent or spending model tokens.
+    login = {'codex': ['codex', 'login', 'status'], 'claude': ['claude', 'auth', 'status']}.get(command[0])
+    checks = ([login] if login else []) + ([['gh', 'auth', 'status']] if open_pull_requests else [])
+    for check in checks:
+        try:
+            result = subprocess.run(check, cwd=repo.path, capture_output=True, timeout=20, env=_agent_env())
+        except (OSError, subprocess.TimeoutExpired):
+            raise WorkBlocked(f"Could not check {check[0]} login. Sign in and retry.") from None
+        if result.returncode:
+            raise WorkBlocked(f"{check[0]} is not signed in. Sign in and retry.")
+
+
+def managed_clone(repository: str, project_id: str, agent_id: str) -> Path:
+    """Share one repository locally, with an independent worktree for each agent."""
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository) or any(
+            part in ('.', '..') for part in repository.split('/')):
+        raise WorkBlocked('Project repository must be a GitHub owner/repository name.')
+    if not shutil.which('gh') or not shutil.which('git'):
+        raise WorkBlocked('Install Git and GitHub CLI, then sign in with gh auth login.')
+    metadata = {'repository': repository, 'projectId': project_id, 'agentId': agent_id}
+    # Include identity and project so independent workers never share working files.
+    key = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode()).hexdigest()[:24]
+    root = Path.home() / '.local/share/tandem/workspaces'
+    destination = root / key
+    marker = destination / '.git/tandem-worker.json'
+    if destination.exists():
+        try:
+            # Linked worktrees store .git as a file; their metadata lives in the
+            # common repository. Also accept earlier dedicated-clone installations.
+            git_dir = Path(Repo(destination).git('rev-parse', '--absolute-git-dir'))
+            marker = git_dir / 'tandem-worker.json'
+            owned = json.loads(marker.read_text()) == metadata
+        except (OSError, ValueError):
+            owned = False
+        if not owned or destination.is_symlink() or (destination / '.git').is_symlink():
+            raise WorkBlocked('Managed workspace already exists but does not belong to this worker. Nothing was changed.')
+        origin = Repo(destination).git('config', '--get', 'remote.origin.url')
+        allowed = {f'https://github.com/{repository}', f'https://github.com/{repository}.git',
+                   f'git@github.com:{repository}', f'git@github.com:{repository}.git'}
+        if origin not in allowed:
+            raise WorkBlocked('Managed workspace origin changed. Nothing was changed.')
+        return destination
+    root.mkdir(parents=True, exist_ok=True)
+    allowed = {f'https://github.com/{repository}', f'https://github.com/{repository}.git',
+               f'git@github.com:{repository}', f'git@github.com:{repository}.git'}
+    current = Repo(Path.cwd())
+    # Running setup inside the user's project reuses its object database without
+    # switching their branch or touching their working files.
+    if current.git('config', '--get', 'remote.origin.url', check=False) in allowed:
+        shared = Path(current.git('rev-parse', '--show-toplevel'))
+    else:
+        repository_key = hashlib.sha256(f'{project_id}:{repository}'.encode()).hexdigest()[:24]
+        shared = root.parent / 'repositories' / repository_key
+        if not shared.exists():
+            _clone_repository(repository, shared)
+        elif shared.is_symlink() or Repo(shared).git('config', '--get', 'remote.origin.url') not in allowed:
+            raise WorkBlocked('Managed repository origin changed. Nothing was changed.')
+    common = Repo(shared)
+    common.git('fetch', 'origin', '--prune')
+    base = common.base_branch()
+    common.git('worktree', 'add', '--detach', str(destination), f'origin/{base}')
+    git_dir = Path(Repo(destination).git('rev-parse', '--absolute-git-dir'))
+    (git_dir / 'tandem-worker.json').write_text(json.dumps(metadata))
+    log.info('Prepared agent worktree: %s', destination)
+    return destination
+
+
+def _clone_repository(repository: str, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    # Clone in a temporary sibling and publish only after success. Failed or
+    # interrupted downloads cannot leave a partial checkout that looks ready.
+    with tempfile.TemporaryDirectory(prefix='setup-', dir=destination.parent) as temporary:
+        checkout = Path(temporary) / 'repo'
+        try:
+            result = subprocess.run(['gh', 'repo', 'clone', repository, str(checkout)],
+                                    capture_output=True, timeout=300, env=_agent_env())
+        except (OSError, subprocess.TimeoutExpired):
+            raise WorkBlocked('Could not clone the project. Check GitHub login and repository access, then retry.') from None
+        if result.returncode:
+            raise WorkBlocked('Could not clone the project. Sign in with gh auth login using an account with access to this repository.')
+        try:
+            checkout.rename(destination)
+        except OSError:
+            raise WorkBlocked('Could not finish workspace setup. Another worker may be starting; retry.') from None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run assigned Tandem tasks with a coding agent.")
     parser.add_argument("--project", required=True, help="Project ID, shown by tandem_whoami")
-    parser.add_argument("--repo", required=True, type=Path, help="A clone used only by this runner")
+    parser.add_argument("--repo", type=Path, help="Existing dedicated clone (alternative to --repository)")
+    parser.add_argument('--repository', help='GitHub owner/repository to clone automatically into a dedicated workspace')
+    parser.add_argument("--presence-only", action="store_true", help="Reply to room presence checks without running tasks")
+    parser.add_argument('--prompt-token', action='store_true', help='Ask for a hidden token instead of placing it in shell history')
+    parser.add_argument('--check', action='store_true', help='Check identity and worker prerequisites without claiming or executing tasks')
+    parser.add_argument('--agent-id', help='Require this agent identity, preventing a token for another worker from being used')
     parser.add_argument("--agent", choices=sorted(AGENT_PRESETS), default="claude")
     parser.add_argument("--agent-command", help="Custom command; it receives the prompt on stdin")
     parser.add_argument("--base", help="Branch to start from (default: the repository's default)")
@@ -354,33 +537,61 @@ def main(argv: list[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     token = os.environ.get("TANDEM_AGENT_TOKEN", "").strip()
+    if args.prompt_token:
+        if not sys.stdin.isatty():
+            parser.error('--prompt-token needs an interactive terminal')
+        token = getpass.getpass('Tandem agent token (hidden, not saved): ').strip()
     if not token:
         parser.error("Set the TANDEM_AGENT_TOKEN environment variable")
     validate_url(args.url)
-    if not (args.repo / ".git").exists():
+    if args.repo and args.repository:
+        parser.error('Use --repo or --repository, not both')
+    if not args.presence_only and args.repo is None and not args.repository:
+        parser.error('--repo or --repository is required unless --presence-only is set')
+    if not args.presence_only and args.repo is not None and not (args.repo / ".git").exists():
         parser.error(f"{args.repo} is not a git clone")
-    if args.poll > 90:
-        parser.error("--poll must be 90 seconds or less, or the agent will stop showing Online")
+    if not math.isfinite(args.poll) or not 0 < args.poll <= 90:
+        parser.error('--poll must be greater than zero and at most 90 seconds')
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error('--timeout must be a positive number of minutes')
+    if not parse_command(args):
+        parser.error('--agent-command cannot be empty')
 
     tandem = Tandem(args.url, token, args.project)
-    runner = Runner(tandem, Repo(args.repo.resolve(), args.base), parse_command(args),
-                    args.timeout * 60, open_pull_requests=not args.no_pr)
+    runner = None
     try:
         identity = tandem.call("tandem_whoami")
+        if args.agent_id and identity['agentId'] != args.agent_id:
+            raise SystemExit('This token belongs to a different agent. Use the selected agent’s token.')
         if args.project not in {project["projectId"] for project in identity["projects"]}:
             raise SystemExit("This agent token has no access to that project")
-        log.info("Running as %s. Press Ctrl+C to stop.", identity["name"])
+        # Authenticate and check project scope before accessing any repository.
+        if not args.presence_only:
+            path = managed_clone(args.repository, args.project, identity['agentId']) if args.repository else args.repo.resolve()
+            runner = Runner(tandem, Repo(path, args.base), parse_command(args),
+                            args.timeout * 60, open_pull_requests=not args.no_pr)
+        if runner is not None:
+            check_worker(runner.repo, runner.command, runner.open_pull_requests)
+        if args.check:
+            log.info('Setup checks passed for %s. No task was claimed or executed. Remove --check to keep working.', identity['name'])
+            return 0
+        log.info("%s as %s. Press Ctrl+C to stop.",
+                 'Listening for room presence checks' if args.presence_only else 'Running', identity['name'])
         while True:
             try:
-                worked = runner.run_once()
+                if args.presence_only:
+                    acknowledge_presence(tandem)
+                    worked = False
+                else:
+                    worked = runner.run_once()
             except (WorkBlocked, ToolRefused) as error:
-                log.warning("Could not check for work: %s", error)
+                log.warning("Could not check Tandem: %s", error)
                 worked = False
             if args.once:
                 return 0
             if not worked:
                 time.sleep(args.poll)
-    except TokenRejected as error:
+    except (TokenRejected, WorkBlocked, ToolRefused) as error:
         log.error("%s. Replace the token, then restart the runner.", error)
         return 1
     except KeyboardInterrupt:

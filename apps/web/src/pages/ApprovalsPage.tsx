@@ -6,22 +6,24 @@ import { Badge, Empty, Field, PageHeader, Timestamp } from '../components/common
 import { ApprovalDialog } from '../components/ApprovalDialog';
 import { Button } from '../components/ui/button';
 
-export function ApprovalsPage({ project }: { project: Project }) {
+export function ApprovalsPage({ project, kind, embedded = false }: { project: Project; kind?: 'contract' | 'result'; embedded?: boolean }) {
   const { user } = useSession();
   const writable = canEdit(roleFor(project, user!.id));
   const [params, setParams] = useSearchParams();
-  const status = params.get('status') ?? 'all';
+  const status = params.get('approvalStatus') ?? 'pending';
   const [selected, setSelected] = useState<Approval | null>(null);
   const approvals = [...project.approvals]
     .reverse()
+    .filter(a => !kind || a.action === (kind === 'contract' ? 'Approve contract' : 'Review result'))
     .filter((a) => status === 'all' || a.status === status);
   return (
     <>
       <PageHeader
-        title="Human approvals"
-        description="Review the exact action, contract version and code head. Approval is separate from merging."
+        level={embedded ? 2 : 1}
+        title={kind === 'contract' ? 'Approve scope' : 'Result approvals'}
+        description={kind === 'contract' ? 'Review task contracts and acceptance criteria before agents begin work.' : 'Review the exact submitted code and record a decision. Acceptance remains in the task.'}
       />
-      <div className="notice">
+      {!embedded && <div className="notice">
         <div>
           <strong>Decisions apply to one exact target.</strong>
           <p>
@@ -29,15 +31,17 @@ export function ApprovalsPage({ project }: { project: Project }) {
             Recording an approval does not merge the pull request.
           </p>
         </div>
-      </div>
+      </div>}
       <section className="panel">
         <div className="filters">
           <Field label="Approval status">
             <select
               value={status}
-              onChange={(e) =>
-                setParams(e.target.value === 'all' ? {} : { status: e.target.value })
-              }
+              onChange={(e) => {
+                const next = new URLSearchParams(params);
+                next.set('approvalStatus', e.target.value);
+                setParams(next, { replace: true });
+              }}
             >
               <option value="all">All decisions and requests</option>
               {['pending', 'approved', 'rejected', 'stale'].map((s) => (
@@ -48,7 +52,7 @@ export function ApprovalsPage({ project }: { project: Project }) {
         </div>
         {approvals.length === 0 ? (
           <Empty title="No matching reviews">
-            Result and contract review requests will appear here.
+            {kind === 'contract' ? 'Contracts requiring a decision appear here. Choose all decisions to see approved scope.' : 'Result review requests appear here when agents submit work. Choose all decisions to see past reviews.'}
           </Empty>
         ) : (
           <div className="approval-list">

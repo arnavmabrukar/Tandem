@@ -22,21 +22,21 @@ export function ActivityPage({ project }: { project: Project }) {
       title: 'Active tasks',
       count: project.tasks.filter((t) => !['merged', 'cancelled'].includes(t.status)).length,
       icon: ClipboardList,
-      to: 'tasks',
+      to: 'workflow?stage=execute',
       hint: 'Assignments and progress',
     },
     {
       title: 'Awaiting review',
       count: pending,
       icon: CheckCheck,
-      to: 'approvals',
+      to: `workflow?stage=${project.approvals.some(a => a.status === 'pending' && a.action === 'Approve contract') ? 'scope' : 'review'}`,
       hint: 'Human decisions needed',
     },
     {
       title: 'Needs attention',
       count: attention.length,
       icon: TriangleAlert,
-      to: 'tasks?status=attention',
+      to: 'workflow?stage=execute&status=attention',
       hint: 'Blocked or conflicting work',
     },
     {
@@ -54,7 +54,7 @@ export function ActivityPage({ project }: { project: Project }) {
         description={`${project.name} · ${project.description || 'Shared project coordination'}`}
         action={
           <Button asChild variant="outline">
-            <Link to={`/projects/${project.id}/tasks`}>
+            <Link to={`/projects/${project.id}/workflow?stage=execute`}>
               View tasks <ArrowUpRight size={16} />
             </Link>
           </Button>

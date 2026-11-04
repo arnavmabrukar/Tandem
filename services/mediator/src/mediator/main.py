@@ -202,7 +202,7 @@ app.add_middleware(
     allow_credentials=False,
 
     # HTTP methods used by our dashboard
-    allow_methods = ["GET", "POST", "PATCH", "OPTIONS"],
+    allow_methods = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
 
     # headers the frontend may send 
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
@@ -1286,7 +1286,7 @@ def delete_project(project_id: UUID, request: DeleteProjectRequest,
 
 # Human room endpoints use dashboard authentication, never agent credentials.
 from mediator.db import room as project_room
-from mediator.schemas.room import RoomMessageRequest
+from mediator.schemas.room import ClearRoomRequest, RoomMessageRequest
 
 
 @contextmanager
@@ -1316,6 +1316,13 @@ def post_project_room(project_id: UUID, request: RoomMessageRequest,
                       user=Depends(get_current_user)):
     with room_api_errors():
         return project_room.post_message(project_id, request, user_id=UUID(user['id']))
+
+
+@app.delete('/api/projects/{project_id}/room')
+def clear_project_room(project_id: UUID, request: ClearRoomRequest,
+                       user=Depends(get_current_user)):
+    with room_api_errors():
+        return project_room.clear_room(project_id, request.throughId, UUID(user['id']))
 
 
 @app.post('/api/projects/{project_id}/room/{exchange_id}/draft')

@@ -210,7 +210,8 @@ export const mutationResultSchema = z.object({
 export interface GitHubRepository { id: number; name: string; fullName: string; defaultBranch: string; description: string }
 export interface DashboardApi {
   saveRoomDraft(projectId: string, exchangeId: string): Promise<import('./plans').PlanRevision>;
-  readRoom(projectId: string, signal?: AbortSignal): Promise<{exchanges: import('./room').RoomExchange[]}>;
+  readRoom(projectId: string, signal?: AbortSignal): Promise<import('./room').Room>;
+  clearRoom(projectId: string, throughId: string): Promise<{ cleared: boolean }>;
   postRoom(projectId: string, body: {operationId: string; body: string}): Promise<import('./room').RoomExchange>;
   connectGitHub(): Promise<{url: string}>;
   completeGitHub(code: string, state: string): Promise<{login: string}>;

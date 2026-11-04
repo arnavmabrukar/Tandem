@@ -8,7 +8,7 @@ import { Badge, Empty, ErrorNotice, Field, PageHeader } from '../components/comm
 import { Button } from '../components/ui/button';
 import { Modal } from '../components/ui/dialog';
 
-export function TasksPage({ project }: { project: Project }) {
+export function TasksPage({ project, embedded = false }: { project: Project; embedded?: boolean }) {
   const { user } = useSession();
   const writable = canEdit(roleFor(project, user!.id));
   const [params, setParams] = useSearchParams();
@@ -48,8 +48,9 @@ export function TasksPage({ project }: { project: Project }) {
   return (
     <>
       <PageHeader
-        title="Tasks"
-        description="Receipt, acceptance, work progress and human review stay separate."
+        level={embedded ? 2 : 1}
+        title="Execute tasks"
+        description="Open a task to approve its scope, assign an agent, track dependencies, and follow progress."
         action={
           <Button
             disabled={!writable}

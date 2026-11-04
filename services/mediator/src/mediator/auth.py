@@ -1,5 +1,10 @@
 # cache the public-key client so we reuse it accross the requests
 from functools import lru_cache
+from collections import OrderedDict
+from hashlib import sha256
+from threading import Lock
+import math
+import time
 
 import jwt
 
@@ -115,6 +120,13 @@ def require_access_token(
 
 
 # USER PROFILE
+# Bounded, process-local shards serialize concurrent lookups for one token.
+# Keep token digests only; these entries contain profile data, never permissions.
+_profile_shards = [(Lock(), OrderedDict()) for _ in range(16)]
+_PROFILE_TTL = 300
+_PROFILE_SHARD_SIZE = 64
+
+
 def require_user_profile(
     # Verify the access token before requesting or trusting a profile.
     claims: dict = Depends(require_access_token),
@@ -123,6 +135,42 @@ def require_user_profile(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
 ) -> dict[str, str]:
     """Return a verified identity and its Auth0 display name."""
+
+    if credentials is None:
+        raise HTTPException(401, 'Missing access token', headers={'WWW-Authenticate': 'Bearer'})
+    # FastAPI still verifies signature, issuer, audience and expiry on EVERY
+    # request before this dependency. A cache hit must never bypass that check.
+    digest = sha256(credentials.credentials.encode()).digest()
+    key = (claims['iss'], claims['sub'], digest)
+    lock, cache = _profile_shards[digest[0] % len(_profile_shards)]
+    with lock:
+        entry = cache.get(key)
+        now = time.monotonic()
+        if entry and entry[0] > now:
+            cache.move_to_end(key)
+            if entry[1] is None:
+                raise HTTPException(503, 'Authentication service temporarily rate limited',
+                                    headers={'Retry-After': str(max(1, math.ceil(entry[0] - now)))})
+            return dict(entry[1])
+        cache.pop(key, None)
+        try:
+            result = _fetch_user_profile(claims, credentials)
+        except HTTPException as error:
+            # A 429 must not turn every dashboard poll into another Auth0 call.
+            # Never treat an unavailable or invalid profile as authenticated data.
+            if error.status_code == 503 and error.headers and 'Retry-After' in error.headers:
+                cache[key] = (time.monotonic() + int(error.headers['Retry-After']), None)
+                while len(cache) > _PROFILE_SHARD_SIZE:
+                    cache.popitem(last=False)
+            raise
+        ttl = min(_PROFILE_TTL, max(0, float(claims['exp']) - time.time()))
+        cache[key] = (time.monotonic() + ttl, dict(result))
+        while len(cache) > _PROFILE_SHARD_SIZE:
+            cache.popitem(last=False)
+        return result
+
+
+def _fetch_user_profile(claims: dict, credentials: HTTPAuthorizationCredentials) -> dict[str, str]:
 
     if credentials is None:
         raise HTTPException(
@@ -155,6 +203,15 @@ def require_user_profile(
             detail="Auth0 rejected the access token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    if response.status_code == 429:
+        try:
+            delay = float(response.headers['Retry-After']) if 'Retry-After' in response.headers else float(response.headers['X-RateLimit-Reset']) - time.time()
+            delay = max(1, min(300, math.ceil(delay)))
+        except (KeyError, ValueError, OverflowError):
+            delay = 60
+        raise HTTPException(503, 'Authentication service temporarily rate limited',
+                            headers={'Retry-After': str(delay)})
 
     if response.status_code != 200:
         # Avoid exposing Auth0's raw response to dashboard users.

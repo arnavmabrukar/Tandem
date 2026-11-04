@@ -17,7 +17,7 @@ export function ThreadPage({ project }: { project: Project }) {
     return (
       <Empty title="Task not found">
         This task is not present in the current project snapshot.{' '}
-        <Link to={`/projects/${project.id}/tasks`}>Return to tasks</Link>.
+        <Link to={`/projects/${project.id}/workflow?stage=execute`}>Return to workflow</Link>.
       </Empty>
     );
   return <ThreadDetail key={task.id} project={project} task={task} />;
@@ -58,8 +58,8 @@ function ThreadDetail({ project, task }: { project: Project; task: Task }) {
   const approvals = project.approvals.filter((a) => a.taskId === task.id);
   return (
     <>
-      <Link className="back-link" to={`/projects/${project.id}/tasks`}>
-        <ArrowLeft size={15} /> All tasks
+      <Link className="back-link" to={`/projects/${project.id}/workflow?stage=execute`}>
+        <ArrowLeft size={15} /> Back to workflow
       </Link>
       <PageHeader
         title={task.title}

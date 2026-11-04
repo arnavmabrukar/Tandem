@@ -9,6 +9,10 @@ export function SettingsPage() {
   const { user, api } = useSession();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState(user!.name);
+  const [removalCopied, setRemovalCopied] = useState(false);
+  const [removalCopyFailed, setRemovalCopyFailed] = useState(false);
+  // Match the one-command install location; never remove the project clone.
+  const removeRunnerCommand = 'rm -f -- "$HOME/Downloads/tandem_runner.py" "$HOME/.local/share/tandem/tandem_runner.py"';
   const name = draft.trim();
 
   const save = useMutation({
@@ -105,6 +109,19 @@ export function SettingsPage() {
           See which agent clients can reach your projects, and disconnect them.
         </p>
         <Link to="/mcp/connections">Manage agent connections</Link>
+      </section>
+      <section className="panel narrow-panel" aria-label="Remove local runner">
+        <h2>Remove local runner</h2>
+        <p>First stop each running worker with Ctrl+C in its terminal. Then run this command on the Mac or Linux machine where you used the one-command installer:</p>
+        <pre className="oauth-code">{removeRunnerCommand}</pre>
+        <Button variant="outline" onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(removeRunnerCommand);
+            setRemovalCopied(true); setRemovalCopyFailed(false);
+          } catch { setRemovalCopyFailed(true); }
+        }}>{removalCopied ? 'Copied' : 'Copy removal command'}</Button>
+        {removalCopyFailed && <p role="alert">Clipboard unavailable. Select and copy the command above.</p>}
+        <p className="small muted">This deletes the runner from Downloads and its previous install location. It does not stop an already running worker, remove project clones or managed workspaces, or revoke agent access. You can download it again from agent setup.</p>
       </section>
     </>
   );

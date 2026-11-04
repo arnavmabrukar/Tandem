@@ -1,6 +1,6 @@
 import { PlanChat } from '../components/PlanChat';
 import { useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useSession } from '../auth/session';
 import { ApiError } from '../api/client';
 import { roleFor, type Project } from '../types/domain';
@@ -16,7 +16,9 @@ const newTask = (): PlanProposal['tasks'][number] => ({
 });
 type Editor = { planId: string | null; planVersion?: number; projectVersion: number; proposal: PlanProposal };
 
-export function PlansPage({ project }: { project: Project }) {
+export function PlansPage({ project, plans, embedded = false, onApproved }: {
+  project: Project; plans: UseQueryResult<PlanRevision[]>; embedded?: boolean; onApproved?: (startNow: boolean) => void;
+}) {
   const { api, user } = useSession();
   const client = useQueryClient();
   const writable = roleFor(project, user!.id) === 'owner';
@@ -25,11 +27,6 @@ export function PlansPage({ project }: { project: Project }) {
   const [notice, setNotice] = useState('');
   // Preserve the exact request on uncertain outcomes, including its versions.
   const pending = useRef<{ planId: string | null; body: SavePlanRequest } | null>(null);
-  const plans = useQuery({
-    queryKey: ['plans', user!.id, project.id],
-    queryFn: ({ signal }) => api.listPlans(project.id, signal),
-    retry: false,
-  });
   const save = useMutation({
     mutationFn: () => {
       if (!pending.current) throw new Error('No draft to save.');
@@ -65,7 +62,7 @@ export function PlansPage({ project }: { project: Project }) {
       tasks: current.proposal.tasks.map((task, i) => i === index ? { ...task, ...patch } : task) } }));
   }
   return <>
-    <PageHeader title="Plans" description="Break a goal into tasks and review the scope before work begins."
+    <PageHeader level={embedded ? 2 : 1} title="Plan the work" description="Draft the goal and tasks, then review the plan to create work. Only owners can approve plans."
       action={<Button variant="outline" disabled={!writable || !!editor} onClick={() => open()}>Write a plan manually</Button>} />
     {writable && <PlanChat key={`${user!.id}:${project.id}`} project={project} disabled={!!editor} />}
     {notice && <p role="status">{notice}</p>}
@@ -145,9 +142,9 @@ export function PlansPage({ project }: { project: Project }) {
           <ul>{task.criteria.map((criterion, i) => <li key={i}>{criterion}</li>)}</ul>
           <p><strong>Depends on:</strong> {task.dependencies.map(key => plan.proposal.tasks.find(t => t.key === key)?.title ?? key).join(', ') || 'None'}</p>
         </details>)}
-        {plan.approvedPlanVersion ? <p>Tasks created. <Link to={`/projects/${project.id}/tasks`}>View tasks</Link> · <Link to={`/projects/${project.id}/approvals`}>Review contracts</Link></p> : <div className="row">
+        {plan.approvedPlanVersion ? <p>Tasks created. <Link to={`/projects/${project.id}/workflow?stage=execute`}>View tasks</Link> · <Link to={`/projects/${project.id}/workflow?stage=scope`}>Review contracts</Link></p> : <div className="row">
           <Button variant="outline" disabled={!writable || !!editor} onClick={() => open(plan)}>Edit draft</Button>
-          <PlanApproval plan={plan} projectVersion={project.version} disabled={!writable || !!editor} />
+          <PlanApproval plan={plan} projectVersion={project.version} disabled={!writable || !!editor} onApproved={onApproved} />
         </div>}
       </section>)}
     </>}

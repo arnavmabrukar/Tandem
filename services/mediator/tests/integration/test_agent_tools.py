@@ -85,6 +85,147 @@ class AgentToolIntegrationTests(unittest.TestCase):
         )
         self.agent, self.token = self.make_agent(self.owner, self.project, f"Agent {uuid4()}")
 
+    def test_clear_room_deletes_history_but_preserves_new_messages_and_saved_plans(self):
+        from unittest.mock import patch
+        from uuid import UUID
+        from mediator.main import app, get_current_user
+        from mediator.db.room import post_message, read_room, save_draft
+        from mediator.schemas.room import RoomMessageRequest, RoomReply
+        proposal = {'goal': 'Keep this plan', 'summary': 'Scope', 'tasks': [
+            {'key': 'one', 'title': 'Build', 'contractSummary': 'Scope', 'criteria': ['Works']}]}
+        with patch('mediator.db.room.generate_plan', return_value=RoomReply(
+                reply='Old reply', proposal=proposal, requestPresence=True)):
+            old = post_message(UUID(self.project), RoomMessageRequest(operationId=uuid4(), body='OLD PRIVATE'),
+                               user_id=UUID(self.owner))
+            saved = save_draft(UUID(self.project), UUID(old['id']), UUID(self.owner))
+            newer = self.ok('tandem_talk_to_mediator', operationId=str(uuid4()), body='New message')
+        task = self.make_task()
+        with patch.dict(app.dependency_overrides, {get_current_user: lambda: {'id': self.owner}}):
+            self.execute("UPDATE project_memberships SET role='reviewer' WHERE project_id=%s", (self.project,))
+            response = self.http.request('DELETE', f'/api/projects/{self.project}/room', json={'throughId': old['id']})
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(len(read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges']), 2)
+            self.execute("UPDATE project_memberships SET role='owner' WHERE project_id=%s", (self.project,))
+            for _ in range(2):
+                response = self.http.request('DELETE', f'/api/projects/{self.project}/room', json={'throughId': old['id']})
+                self.assertEqual(response.status_code, 200, response.text)
+                visible = read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges']
+                self.assertEqual([r['id'] for r in visible], [newer['id']])
+            self.assertEqual(self.http.request('DELETE', f'/api/projects/{uuid4()}/room', json={'throughId': newer['id']}).status_code, 403)
+            self.assertEqual(self.http.request('DELETE', f'/api/projects/{self.project}/room', json={'throughId': 'invalid'}).status_code, 422)
+            self.assertEqual(self.http.request('DELETE', f'/api/projects/{self.project}/room', json={'throughId': newer['id']}).status_code, 200)
+        self.assertEqual(read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges'], [])
+        self.assertEqual(self.ok('tandem_get_presence_requests')['presenceRequests'], [])
+        self.assertEqual(self.execute('SELECT count(*) FROM plan_proposals WHERE id=%s', (saved.planId,))[0][0], 1)
+        self.assertEqual(self.execute('SELECT count(*) FROM tasks WHERE id=%s', (task,))[0][0], 1)
+
+    def test_clearing_a_pending_exchange_prevents_its_model_reply_from_returning(self):
+        from unittest.mock import patch
+        from uuid import UUID
+        from mediator.db.room import clear_room, post_message, read_room
+        from mediator.db.agent_tasks import AgentOperationConflict
+        from mediator.schemas.room import RoomMessageRequest, RoomReply
+        def clear_during_generation(*args, **kwargs):
+            row = read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges'][-1]
+            clear_room(UUID(self.project), UUID(row['id']), UUID(self.owner))
+            return RoomReply(reply='Late response', proposal=None)
+        with patch('mediator.db.room.generate_plan', side_effect=clear_during_generation):
+            with self.assertRaises(AgentOperationConflict):
+                post_message(UUID(self.project), RoomMessageRequest(operationId=uuid4(), body='Pending'), user_id=UUID(self.owner))
+        self.assertEqual(read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges'], [])
+
+    def test_presence_only_listener_posts_in_the_same_room(self):
+        import importlib.util
+        import io
+        from unittest.mock import patch
+        from uuid import UUID
+        from mediator.db.room import post_message, read_room
+        from mediator.schemas.room import RoomMessageRequest, RoomReply
+        spec = importlib.util.spec_from_file_location('presence_runner',
+            Path(__file__).resolve().parents[4] / 'agent-integrations/runner/tandem_runner.py')
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        with patch('mediator.db.room.generate_plan', return_value=RoomReply(
+                reply='Asking agents to reply here.', proposal=None, requestPresence=True)):
+            post_message(UUID(self.project), RoomMessageRequest(operationId=uuid4(), body='PRIVATE ping'),
+                         user_id=UUID(self.owner))
+
+        def transport(request, timeout):
+            # Keep the real runner JSON, bearer auth, MCP handlers and database;
+            # replace only the socket with the application's in-process transport.
+            response = self.http.post('/mcp/', headers=dict(request.header_items()), content=request.data)
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn('PRIVATE', response.text)
+            return io.BytesIO(response.content)
+
+        with patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': self.token}), \
+             patch.object(runner.urllib.request, 'urlopen', side_effect=transport), \
+             patch.object(runner, 'Repo') as repo:
+            for _ in range(2):
+                self.assertEqual(runner.main(['--presence-only', '--project', self.project, '--once',
+                                              '--url', 'http://127.0.0.1:8000/mcp/']), 0)
+            repo.assert_not_called()
+        room = read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges']
+        self.assertEqual(len(room), 2)
+        self.assertEqual(room[-1]['senderAgentId'], self.agent)
+        self.assertEqual(room[-1]['body'], "I'm online.")
+        self.assertIsNone(room[-1]['response'])
+
+    def test_presence_requires_explicit_ack_and_keeps_human_exchange_private(self):
+        from unittest.mock import patch
+        from uuid import UUID
+        from mediator.db.room import post_message, read_room
+        from mediator.schemas.room import RoomMessageRequest, RoomReply
+        request = RoomMessageRequest(operationId=uuid4(), body='PRIVATE who is online?')
+        with patch('mediator.db.room.generate_plan', return_value=RoomReply(
+                reply='PRIVATE asking agents now', proposal=None, requestPresence=True)):
+            human = post_message(UUID(self.project), request, user_id=UUID(self.owner))
+            replay = post_message(UUID(self.project), request, user_id=UUID(self.owner))
+        check_id = human['response']['presenceCheckId']
+        self.assertEqual(check_id, replay['response']['presenceCheckId'])
+        # Authenticated traffic/heartbeats and reads do not synthesize replies.
+        visible = self.ok('tandem_read_room')
+        self.assertEqual(visible['exchanges'], [])
+        self.assertEqual(visible['presenceRequests'], [{'id': check_id, 'message': "Who's online?"}])
+        self.assertNotIn('PRIVATE', str(visible))
+        self.assertNotIn(human['id'], str(visible))
+        # Ordinary task traffic also delivers the challenge, even if the IDE
+        # never calls the new room tools. It still must explicitly acknowledge.
+        task_result = self.call('tandem_list_tasks')
+        self.assertIn(check_id, str(task_result['content']))
+        self.assertIn('tandem_acknowledge_presence', str(task_result['content']))
+        self.assertNotIn('PRIVATE', str(task_result))
+        self.assertNotIn(human['id'], str(task_result))
+        self.assertEqual(len(read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges']), 1)
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            replies = list(pool.map(lambda _: self.ok('tandem_acknowledge_presence', checkId=check_id), range(4)))
+        self.assertEqual(len({r['id'] for r in replies}), 1)
+        self.assertEqual(replies[0]['body'], "I'm online.")
+        self.assertEqual(replies[0]['kind'], 'agent')
+        self.assertEqual(replies[0]['senderAgentId'], self.agent)
+        self.assertIsNone(replies[0]['response'])
+        self.assertEqual(self.ok('tandem_get_presence_requests')['presenceRequests'], [])
+        # A newly connected agent can acknowledge the still-pending challenge.
+        other, token = self.make_agent(self.owner, self.project, 'Late arrival')
+        self.assertEqual(self.ok('tandem_get_presence_requests', token)['presenceRequests'][0]['id'], check_id)
+        late = self.ok('tandem_acknowledge_presence', token, checkId=check_id)
+        self.assertEqual(late['sender'], 'Late arrival')
+        with patch('mediator.db.room.generate_plan', return_value=RoomReply(reply='Hello', proposal=None)) as model:
+            self.ok('tandem_talk_to_mediator', operationId=str(uuid4()), body='Hello')
+            self.assertNotIn('PRIVATE', str(model.call_args))
+        self.execute("UPDATE agent_room_exchanges SET completed_at=now()-interval '6 minutes' WHERE id=%s", (human['id'],))
+        self.assertEqual(self.ok('tandem_acknowledge_presence', checkId=check_id)['id'], replies[0]['id'])
+        _, fresh_token = self.make_agent(self.owner, self.project, 'Too late')
+        self.refused('expired', 'tandem_acknowledge_presence', fresh_token, checkId=check_id)
+        self.refused('expired', 'tandem_acknowledge_presence', checkId=str(uuid4()))
+        self.refused('access', 'tandem_acknowledge_presence', projectId=str(uuid4()), checkId=check_id)
+        self.execute("UPDATE agent_project_grants SET status='revoked' WHERE agent_id=%s", (other,))
+        from mediator.db.room import acknowledge_presence
+        from mediator.db.agent_tasks import AgentAccessDenied
+        with self.assertRaises(AgentAccessDenied):
+            acknowledge_presence(UUID(self.project), UUID(check_id), {
+                'agentId': other, 'ownerId': self.owner, 'projects': [{'projectId': self.project}]})
+
     def test_room_privacy_replay_and_agent_authority(self):
         from unittest.mock import patch
         from uuid import UUID
