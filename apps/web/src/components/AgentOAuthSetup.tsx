@@ -38,11 +38,11 @@ export function useMcpDiscovery() {
   });
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+function CopyButton({ text, label, disabled = false }: { text: string; label: string; disabled?: boolean }) {
   const [copied, setCopied] = useState(false);
   const [failed, setFailed] = useState(false);
   return <>
-    <Button variant="outline" size="sm" onClick={async () => {
+    <Button variant="outline" size="sm" disabled={disabled} onClick={async () => {
       try { await navigator.clipboard.writeText(text); setCopied(true); setFailed(false); }
       catch { setFailed(true); }
     }}>{copied ? 'Copied' : label}</Button>
@@ -56,12 +56,12 @@ function WorkerSetup({ project, agent, url, initialClient }: { project: Project;
   const [custom, setCustom] = useState('');
   const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
   const ready = !!repo.trim() && (engine !== 'custom' || !!custom.trim());
-  const argumentsText = `--prompt-token --project ${quote(project.id)} --url ${quote(url)} --repo ${quote(repo.trim())}${agent ? ` --agent-id ${quote(agent.id)}` : ''} ${engine === 'custom' ? `--agent-command ${quote(custom)}` : `--agent ${engine}`}`;
+  const argumentsText = `--prompt-token --project ${quote(project.id)} --url ${quote(url)} --repo ${quote(repo.trim() || '/path/to/your-project-worker')}${agent ? ` --agent-id ${quote(agent.id)}` : ''} ${engine === 'custom' ? `--agent-command ${quote(custom.trim() || 'YOUR_AGENT_COMMAND')}` : `--agent ${engine}`}`;
   // Download from this deployment, not the MCP host; preserve the caller's
   // working directory so relative project paths resolve from the user's terminal.
   const installCommand = `mkdir -p "$HOME/.local/share/tandem" &&\ncurl -fLsS ${quote(new URL('/downloads/tandem_runner.py', window.location.origin).href)} \\\n  -o "$HOME/.local/share/tandem/tandem_runner.py" &&\npython3 "$HOME/.local/share/tandem/tandem_runner.py" ${argumentsText}`;
   return <section aria-label="Continuous worker setup" className="agent-advanced">
-    <h3>Keep this agent working</h3>
+    <h3>2. Choose your worker and project folder</h3>
     <p>Start a worker to handle assigned, approved tasks and answer room pings automatically. No access to Tandem’s private repository is needed.</p>
     <Field label="Worker engine"><select value={engine} onChange={e => setEngine(e.target.value)}>
       <option value="codex">Codex CLI</option><option value="claude">Claude Code CLI</option><option value="custom">Other command</option>
@@ -72,14 +72,16 @@ function WorkerSetup({ project, agent, url, initialClient }: { project: Project;
       <input value={repo} onChange={e => setRepo(e.target.value)} placeholder="/path/to/your-project-worker" />
     </Field>
     <p className="small muted">Requires Python 3.11+, curl, Git, and signed-in GitHub and agent CLIs on macOS/Linux.</p>
+    <h3>3. Get your agent token</h3>
     {agent ? <><p>Have this agent’s token ready for the terminal prompt.</p><AgentTokenButton project={project} agent={agent} /></>
       : <p>After connecting, open your agent’s Set up worker control to get its token.</p>}
-    {ready && <section aria-label="Download and start worker">
-      <h4>Download and start</h4>
-      <p>Paste this into your terminal, then enter the agent token when prompted.</p>
+    <section aria-label="Download and start worker">
+      <h3>4. Download and start</h3>
+      <p>{ready ? 'Copy and paste this into your terminal, then enter the agent token when prompted.' : 'Complete the required fields in step 2 to finish this command and enable copying.'}</p>
+      {engine === 'custom' && !custom.trim() && <p className="small muted">Also enter your headless agent command in step 2.</p>}
       <pre className="oauth-code">{installCommand}</pre>
-      <CopyButton key={installCommand} text={installCommand} label="Copy download and start command" />
-    </section>}
+      <CopyButton key={installCommand} text={installCommand} label="Copy download and start command" disabled={!ready} />
+    </section>
     <p className="small muted">The worker pushes task branches and opens PRs; approvals and merges stay with you. Keep the terminal open. Ctrl+C stops it.</p>
   </section>;
 }
@@ -133,23 +135,25 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
     ? JSON.stringify({ mcpServers: { 'tandem-oauth': { type: 'http', url } } }, null, 2)
     : `# Tandem remote MCP connection. Authentication happens in your browser.\n[mcp_servers.tandem-oauth]\nurl = ${JSON.stringify(url)}`);
   return <Modal open onOpenChange={(open) => { if (!open) onClose(); }}
-    title={connections.data ? 'Access authorized' : 'Connect your IDE'}
+    title={connections.data ? 'Access authorized' : 'Connect your agent'}
     description={agent ? `${agent.name} · ${project.name}` : project.name}>
     {discovery.isPending && <p role="status">Checking your server…</p>}
     <ErrorNotice error={discovery.error} retry={() => void discovery.refetch()} />
     {url && (connections.data ? <>
-      <p>Your IDE has permission to access this project.</p>
-      <details className="agent-advanced"><summary>Optional IDE chat prompt</summary>
+      <h3>1. Connect your agent — complete</h3>
+      <p>Your agent has permission to access this project.</p>
+      <details className="agent-advanced"><summary>Optional agent chat prompt</summary>
       <pre className="oauth-code">{roomPrompt}</pre>
       <CopyButton text={roomPrompt} label="Copy startup prompt" />
       </details>
     </> : step === 1 ? <>
-      <Field label="Your IDE agent">
+      <h3>1. Connect your agent</h3>
+      <Field label="Your agent">
         <select value={client} onChange={(e) => setClient(e.target.value)}>
           <option>Codex</option><option>Claude Code</option><option>Other</option>
         </select>
       </Field>
-      <p>Add Tandem as a remote MCP server in your IDE using this address.</p>
+      <p>Add Tandem as a remote MCP server in your agent’s app, CLI, or IDE using this address. Your client must support remote HTTP MCP and browser sign-in.</p>
       <Field label="Server URL"><input readOnly value={url} onFocus={(e) => e.currentTarget.select()} /></Field>
       <CopyButton key={url} text={url} label="Copy server URL" />
       <details className="agent-advanced">
@@ -157,7 +161,7 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
         <p>{client === 'Claude Code'
           ? 'Add this to .mcp.json in your project, keeping any existing servers. Reload Claude Code and approve the server when prompted.'
           : client === 'Codex'
-            ? 'Open MCP settings in Codex and add a remote HTTP server named tandem-oauth. Or add this entry to ~/.codex/config.toml and reload the extension.'
+            ? 'Open MCP settings in your Codex client and add a remote HTTP server named tandem-oauth. For a local Codex client, you can also add this entry to ~/.codex/config.toml and restart the session.'
             : 'Use your client’s remote MCP settings. It must support browser sign-in.'}</p>
         {client !== 'Other' && <>
           <pre className="oauth-code">{snippet}</pre>
@@ -168,9 +172,10 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
       {new URL(url).protocol === 'http:' && <p className="small muted">Local setup: keep Tandem running on this computer. Use your hosted server for other machines.</p>}
       <div className="row end"><Button onClick={() => setStep(2)}>Continue</Button></div>
     </> : <>
+      <h3>1. Finish connecting your agent</h3>
       <p>{client === 'Claude Code'
         ? 'In Claude Code, open /mcp, choose tandem-oauth, then authenticate.'
-        : 'In your IDE’s MCP settings, choose tandem-oauth and start sign-in.'}</p>
+        : 'In your agent client’s MCP settings, choose tandem-oauth and start sign-in.'}</p>
       <p>In the browser, choose <strong>{project.name}</strong>{agent ? <> and <strong>{agent.name}</strong></> : ' and name your agent'}, then click <strong>Allow connection</strong>.</p>
       <p role="status">Waiting for authorization…</p>
       <ErrorNotice error={connections.error} retry={() => void connections.refetch()} />

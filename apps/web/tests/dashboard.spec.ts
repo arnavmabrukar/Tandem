@@ -568,9 +568,14 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   expect(await script.text()).toBe(readFileSync(new URL('../../../agent-integrations/runner/tandem_runner.py', import.meta.url), 'utf8'));
   await expect(worker).not.toContainText('agent-integrations/runner/');
   await expect(worker).toContainText('No access to Tandem’s private repository is needed.');
-  await expect(worker.locator('pre')).toHaveCount(0);
+  await expect(worker.locator('pre')).toHaveCount(1);
+  await expect(worker.locator('pre')).toContainText('/path/to/your-project-worker');
+  await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeDisabled();
+  const headings = page.getByRole('dialog').getByRole('heading', { level: 3 });
+  await expect(headings).toHaveText(['1. Connect your agent', '2. Choose your worker and project folder', '3. Get your agent token', '4. Download and start']);
   await worker.getByLabel('Project folder', { exact: true }).fill('/projects/my-worker');
   await expect(worker.locator('pre')).toHaveCount(1);
+  await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeEnabled();
   for (const name of ['Copy clone command', 'Copy setup check', 'Copy worker command', 'Copy listener command']) {
     await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
   }
@@ -580,16 +585,17 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(install.locator('pre')).toContainText('--agent codex');
   await expect(install.locator('pre')).toContainText('--prompt-token');
   await expect(install.locator('pre')).not.toContainText('git clone');
-  await page.getByLabel('Your IDE agent').selectOption('Claude Code');
+  await page.getByLabel('Your agent', { exact: true }).selectOption('Claude Code');
   await expect(worker.getByLabel('Worker engine')).toHaveValue('claude');
   await worker.getByLabel('Project folder', { exact: true }).fill("../worker's clone");
   await expect(install.locator('pre')).toContainText("'../worker'\\''s clone'");
   await expect(install.locator('pre')).toContainText('--agent claude');
   await worker.getByLabel('Worker engine').selectOption('custom');
   await expect(worker.getByRole('button', { name: 'Copy worker command' })).toHaveCount(0);
-  await expect(install).toHaveCount(0);
+  await expect(install.locator('pre')).toContainText('YOUR_AGENT_COMMAND');
+  await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeDisabled();
   await worker.getByLabel('Agent command', { exact: true }).fill('my-agent --headless');
-  await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeVisible();
+  await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeEnabled();
   await expect(install.locator('pre')).toContainText("--agent-command 'my-agent --headless'");
 });
 
