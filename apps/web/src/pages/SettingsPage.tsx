@@ -20,12 +20,7 @@ export function SettingsPage({ project, userOnly = false }: { project: Project |
     target?.scrollIntoView({ block: 'start' });
     target?.focus({ preventScroll: true });
   }, [section, location.key, project?.id]);
-  const { user, api, signOut } = useSession();
-  const [confirmation, setConfirmation] = useState('');
-  const deletion = useMutation({
-    mutationFn: () => api.deleteAccount(confirmation),
-    onSuccess: () => signOut(),
-  });
+  const { user, api } = useSession();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState(user!.name);
   const name = draft.trim();
@@ -49,7 +44,7 @@ export function SettingsPage({ project, userOnly = false }: { project: Project |
 
   return (
     <>
-      <PageHeader title={userOnly ? 'User settings' : 'Settings'} description={userOnly ? 'Manage your profile, sign-ins and account access.' : 'Manage your project, people and automation.'} />
+      <PageHeader title={userOnly ? 'User settings' : 'Project Settings'} description={userOnly ? 'Manage your profile, GitHub account and connected agents.' : 'Manage your project, people and automation.'} />
 
       {userOnly && <>
       <section id="profile" tabIndex={-1} className="panel narrow-panel settings-section">
@@ -92,9 +87,6 @@ export function SettingsPage({ project, userOnly = false }: { project: Project |
             )}
           </dd>
         </dl>
-        <h3>Sign-in methods</h3>
-        <ul>{user!.signIns?.map((signIn, index) => <li key={index}>{signIn.method}{signIn.current ? ' · Current sign-in' : ''}</li>) ?? <li>Your connected sign-in provider</li>}</ul>
-        <p className="small muted">Manage your email address and password with your sign-in provider. Changing your display name here only changes your Tandem profile.</p>
         {user!.email && !user!.emailVerified && (
           <p className="notice" role="status">
             Verify this email to combine this account with other sign-ins that use it. Open the
@@ -115,16 +107,6 @@ export function SettingsPage({ project, userOnly = false }: { project: Project |
       </>}
       {!userOnly && project && <ProjectSetupPage key={project.id} project={project} embedded />}
       {!userOnly && <div id="connection-guide" tabIndex={-1} className="settings-section"><ConnectionsPage /></div>}
-      {userOnly && <section id="delete-account" tabIndex={-1} className="panel narrow-panel danger-zone settings-section">
-        <h2>Delete your Tandem account</h2>
-        <p>Removes your profile and project memberships, disconnects GitHub, and revokes your agents and their tokens. Transfer ownership or delete any projects where you are the only owner first.</p>
-        <p className="small muted">Shared project history, including past messages and activity, remains. Your Google, GitHub and Auth0 accounts are not deleted. Signing in again creates a new Tandem account without your previous access.</p>
-        <form onSubmit={event => { event.preventDefault(); if (confirmation === 'DELETE') deletion.mutate(); }}>
-          <Field label="Type DELETE to confirm" hint="This cannot be undone."><input value={confirmation} onChange={event => setConfirmation(event.target.value)} autoComplete="off" /></Field>
-          <ErrorNotice error={deletion.error} />
-          <Button variant="destructive" type="submit" disabled={confirmation !== 'DELETE' || deletion.isPending || deletion.isSuccess}>{deletion.isPending ? 'Deleting…' : 'Delete my account'}</Button>
-        </form>
-      </section>}
     </>
   );
 }

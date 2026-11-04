@@ -1,7 +1,6 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   Activity,
-  ArrowLeft,
   Bot,
   ChevronsUpDown,
   ListChecks,
@@ -9,10 +8,12 @@ import {
   LogOut,
   RefreshCw,
   LayoutDashboard,
+  Folders,
   Mail,
   Moon,
   Plus,
   Settings,
+  Sun,
 } from 'lucide-react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -67,7 +68,7 @@ export function AppLayout({
     const path = location.pathname;
     if (overview) return 'Projects';
     if (path === '/invitations') return 'Invitations';
-    if (path === '/settings') return 'Settings';
+    if (path === '/settings') return 'Project Settings';
     if (path === '/settings/user') return 'User settings';
     if (path === '/projects/new') return 'New project';
     const section = path.split('/')[3];
@@ -111,14 +112,7 @@ export function AppLayout({
       <aside className="sidebar" aria-label="Project sidebar">
         <div className="brand">
           <BrandMark />
-          <span>
-            Tandem
-            {project && (
-              <small className="brand-project" title={project.name}>
-                {project.name}
-              </small>
-            )}
-          </span>
+          <span>Tandem</span>
         </div>
         <ProjectSwitcher
           projects={projects}
@@ -127,11 +121,16 @@ export function AppLayout({
           onSelect={(projectId) => navigate(`/projects/${projectId}/overview`)}
         />
         <nav aria-label="Main navigation">
-          {id && <Link to="/dashboard"><ArrowLeft size={18} /><span>Back to all projects</span></Link>}
-          <NavLink to={id ? `/projects/${id}/overview` : '/dashboard'} end>
-            <LayoutDashboard size={18} />
-            <span>{id ? 'Overview' : 'Projects'}</span>
+          <NavLink to="/dashboard" end>
+            <Folders size={18} />
+            <span>Projects</span>
           </NavLink>
+          {id && (
+            <NavLink to={`/projects/${id}/overview`} end>
+              <LayoutDashboard size={18} />
+              <span>Overview</span>
+            </NavLink>
+          )}
           {id &&
             nav.map(({ to, text, icon: Icon }) => (
               <NavLink key={to} aria-label={to === 'workflow' && pending > 0 ? `${text}, ${pending} pending ${pending === 1 ? 'approval' : 'approvals'}` : text} to={`/projects/${id}/${to}`}
@@ -148,11 +147,10 @@ export function AppLayout({
               setSettingsOpen(inSettings ? !settingsOpen : true);
               if (!inSettings) navigate(settingsLink(defaultSettingsSection));
             }}>
-            <Settings size={18} /><span>Settings</span><ChevronDown size={16} className={settingsOpen ? 'expanded' : ''} />
+            <Settings size={18} /><span>Project Settings</span><ChevronDown size={16} className={settingsOpen ? 'expanded' : ''} />
           </button>
           {settingsOpen && <div id="settings-navigation" className="settings-subnav">
-            {settingsSections.map(group => <div key={group.title}>
-              <p><strong>{group.title}</strong></p>
+            {settingsSections.map(group => <div key={group.title} className="settings-subnav-group">
               {group.items.map(([section, text]) => {
                 const active = inSettings && (new URLSearchParams(location.search).get('section') ?? defaultSettingsSection) === section;
                 return <Link key={section} to={settingsLink(section)} className={active ? 'active' : undefined} aria-current={active ? 'location' : undefined}>{text}</Link>;
@@ -203,17 +201,29 @@ export function AppLayout({
                     <Settings size={16} aria-hidden="true" />
                     User settings
                   </DropdownMenu.Item>
-                  <DropdownMenu.CheckboxItem
-                    className="account-menu-item theme-item"
-                    checked={theme === 'dark'}
-                    onCheckedChange={(on) => setTheme(on ? 'dark' : 'light')}
-                    // Keep the menu open so the change can be seen and undone.
-                    onSelect={(event) => event.preventDefault()}
-                  >
-                    <Moon size={16} aria-hidden="true" />
-                    <span className="theme-label">Dark mode</span>
-                    <span className="theme-switch" aria-hidden="true" />
-                  </DropdownMenu.CheckboxItem>
+                  <div className="theme-row">
+                    <span id="theme-label">Theme</span>
+                    <DropdownMenu.RadioGroup
+                      className="theme-seg"
+                      aria-labelledby="theme-label"
+                      value={theme}
+                      onValueChange={(value) => setTheme(value === 'dark' ? 'dark' : 'light')}
+                    >
+                      {([['light', Sun], ['dark', Moon]] as const).map(([value, Icon]) => (
+                        <DropdownMenu.RadioItem
+                          key={value}
+                          value={value}
+                          className="theme-option"
+                          aria-label={value === 'light' ? 'Light theme' : 'Dark theme'}
+                          title={value === 'light' ? 'Light' : 'Dark'}
+                          // Keep the menu open so the change can be seen and undone.
+                          onSelect={(event) => event.preventDefault()}
+                        >
+                          <Icon size={16} aria-hidden="true" />
+                        </DropdownMenu.RadioItem>
+                      ))}
+                    </DropdownMenu.RadioGroup>
+                  </div>
                   <DropdownMenu.Separator className="account-menu-separator" />
                   <DropdownMenu.Item
                     className="account-menu-item account-menu-danger"
