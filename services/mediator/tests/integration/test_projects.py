@@ -233,6 +233,11 @@ class ProjectTests(unittest.TestCase):
         from mediator.schemas.invitations import AcceptInvitationRequest
         project = self.create()
         invite, _ = self.invitation(project)
+        pending = list_pending_invitations('friend@example.com')['invitations']
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]['projectName'], 'repo')
+        self.assertEqual(pending[0]['repository'], 'owner/repo')
+        self.assertEqual(pending[0]['invitedByName'], 'Owner')
         recipient = self.recipient()
         request = AcceptInvitationRequest(operationId=uuid4())
         with self.assertRaises(InvitationNotFound):

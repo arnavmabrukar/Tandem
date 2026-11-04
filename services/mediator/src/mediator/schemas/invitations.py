@@ -64,6 +64,8 @@ class PendingInvitation(BaseModel):
     id: UUID
     projectId: UUID
     projectName: str
+    repository: str
+    invitedByName: str
 
     # Show which address and role the invitation targets.
     email: EmailStr

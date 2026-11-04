@@ -266,6 +266,8 @@ export const pendingInvitationSchema = z.object({
   id: z.string().uuid(),
   projectId: z.string().uuid(),
   projectName: z.string().min(1),
+  repository: z.string().min(1),
+  invitedByName: z.string().min(1),
   email: z.string().email(),
   role: z.enum(roles),
   expiresAt: z.string().datetime({ offset: true }),
