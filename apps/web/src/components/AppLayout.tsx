@@ -79,7 +79,7 @@ export function AppLayout({
       tasks: 'Workflow',
       plans: 'Workflow',
       approvals: 'Workflow',
-      agents: 'Agents',
+      agents: 'Meta Mediator',
       setup: 'Project setup',
       connections: 'Connection guide',
     };
@@ -89,7 +89,7 @@ export function AppLayout({
   const nav = [
     { to: 'activity', text: 'Activity', icon: Activity },
     { to: 'workflow', text: 'Workflow', icon: ListChecks },
-    { to: 'agents', text: 'Agents', icon: Bot },
+    { to: 'agents', text: 'Meta Mediator', icon: Bot },
   ];
   const settingsLink = (section: string) => `/settings?${new URLSearchParams({ ...(id ? { project: id } : {}), section })}`;
   const defaultSettingsSection = id ? 'setup-details' : 'connection-guide';

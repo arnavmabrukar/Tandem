@@ -103,6 +103,20 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
     && ['blocked', 'claimed', 'in_progress'].includes(task.status)) : [];
   const resumeCommand = resumeTaskId ? `${installCommand} --resume-task ${quote(resumeTaskId)}` : '';
   return <>
+  <section aria-label="Normal MCP connection" className="oauth-step">
+    <h2>Use Tandem in your agent chat</h2>
+    <p>Connect through MCP and work from your agent’s chat. No terminal worker or verification utility is needed for this connection.</p>
+    {firstTimeIntro}
+    <section aria-label="Agent startup prompt" className="agent-advanced">
+      <h3>2. Start your agent chat</h3>
+      <p>After authorizing MCP, paste this into your agent’s chat to check access and coordinate through the mediator.</p>
+      <CommandBox text={roomPrompt} label="Copy startup prompt" shell="Agent chat" />
+      <p className="small muted">Your agent checks Tandem while actively working. Automatic work and replies while the chat is idle require the optional worker below.</p>
+    </section>
+  </section>
+  <section aria-label="Autonomous worker guide" className="oauth-step">
+  <h2>Autonomous work (optional)</h2>
+  <p>Use this separate setup only if you want a terminal worker to keep accepting approved assignments while your agent chat is idle.</p>
   <fieldset className="agent-advanced">
     <legend>Choose your operating system</legend>
     <div className="row wrap">
@@ -145,9 +159,8 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
     <button type="button" role="tab" id="setup-reconnect-tab" aria-controls="setup-reconnect-panel" aria-selected={tab === 'reconnect'} tabIndex={tab === 'reconnect' ? 0 : -1} onClick={() => setTab('reconnect')}>Reconnecting</button>
   </div>
   <div role="tabpanel" id="setup-first-panel" aria-labelledby="setup-first-tab" hidden={tab !== 'first'}>
-    {firstTimeIntro}
   <section aria-label="Continuous worker setup" className="agent-advanced">
-    <h3>2. Choose your worker</h3>
+    <h3>1. Choose your worker</h3>
     <p>Automatically work on assigned, approved tasks and answer room pings. No access to Tandem’s private repository is needed.</p>
     <Field label="Worker engine"><select value={engine} onChange={e => setEngine(e.target.value)}>
       <option value="codex">Codex CLI</option><option value="claude">Claude Code CLI</option><option value="custom">Other command</option>
@@ -177,26 +190,21 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
     <p>Tandem prepares <strong>{project.repository}</strong> automatically with a separate worktree per agent. Verified commits are pushed only to <strong>{project.trackedBranch?.trim() || 'main'}</strong>, as configured in Project setup.</p>
     {!repositoryValid && <p role="alert">Set this project’s GitHub repository to owner/repository before starting a worker.</p>}
     <section aria-label="Download and start worker">
-      <h3>3. Download and start</h3>
-      <p>{ready ? 'Copy the command below, paste it into your terminal, and press Enter. Run it in your project folder to reuse it, or anywhere to download the project automatically.' : 'Complete step 2 to enable copying.'}</p>
-      {engine === 'custom' && !custom.trim() && <p className="small muted">Also enter your headless agent command in step 2.</p>}
+      <h3>2. Download and start</h3>
+      <p>{ready ? 'Copy the command below, paste it into your terminal, and press Enter. Run it in your project folder to reuse it, or anywhere to download the project automatically.' : 'Choose your worker to enable copying.'}</p>
+      {engine === 'custom' && !custom.trim() && <p className="small muted">Also enter your headless agent command in step 1.</p>}
       <CommandBox text={installCommand} label="Copy download and start command" disabled={!ready} {...commandPlatform} />
       <p className="small muted"><code>mkdir</code> creates Downloads if needed; <code>curl</code> downloads the latest runner; <code>python3</code> starts it for this project and asks for your token.</p>
-      <p>Wait until the terminal shows <code>Tandem agent token (hidden, not saved):</code>. Leave it open and continue to step 4.</p>
+      <p>Wait until the terminal shows <code>Tandem agent token (hidden, not saved):</code>. Leave it open and continue to step 3.</p>
     </section>
     <section aria-label="Authorize your worker">
-      <h3>4. Generate and paste your token</h3>
+      <h3>3. Generate and paste your token</h3>
       <p>Generate a token below and copy it. Return to the waiting terminal, paste the token, and press Enter. Pasted text stays hidden—no letters or dots will appear. The worker then checks your setup and starts looking for tasks.</p>
       {agent ? <><p className="small muted">A new token replaces this agent’s existing token. If you already saved a valid token, use it instead.</p><AgentTokenButton project={project} agent={agent} buttonLabel="Generate worker token" /></>
-        : <p>Finish connecting your agent in step 1 to generate its token here.</p>}
+        : <p>Finish the MCP connection above to generate your agent’s token here.</p>}
     </section>
     <p className="small muted">Saves the runner to Downloads. Keep the terminal open; Ctrl+C stops it. The runner verifies, commits, and pushes only to the branch configured in Project setup; you review and accept the work.</p>
     <p className="small muted">Startup blocked by uncommitted changes or “Use a clean, dedicated clone”? Open the <button type="button" className="text-button" onClick={() => { setTab('reconnect'); document.getElementById('setup-reconnect-tab')?.focus(); }}>Reconnecting tab</button> and choose the unfinished task under Resume saved task changes.</p>
-  </section>
-  <section aria-label="Agent startup prompt" className="agent-advanced">
-    <h3>5. Start your agent chat</h3>
-    <p>Paste into your connected agent’s chat. Keep the terminal worker running for continuous work.</p>
-    <CommandBox text={roomPrompt} label="Copy startup prompt" shell="Agent chat" />
   </section>
   </div>
   <div role="tabpanel" id="setup-reconnect-panel" aria-labelledby="setup-reconnect-tab" hidden={tab !== 'reconnect'}>
@@ -235,6 +243,7 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTime
     </> : <p className="small muted">After connecting, open Set up worker for this agent to choose a task and get its resume command.</p>}
   </section>
   </div>
+  </section>
   </>;
 }
 
@@ -294,7 +303,7 @@ Confirm access with tandem_whoami. Fetch tandem_get_assignments and summarize re
 Check tandem_get_presence_requests; acknowledge returned IDs with tandem_acknowledge_presence. Repeat between tasks.
 Check tandem_get_worker_room_requests between task steps. Answer mediator-relayed questions addressed to you with tandem_reply_worker_room_request, using the same request ID. Human room messages remain private.
 Before claiming work, read repo instructions, git status, the approved contract and dependencies. Preserve others’ changes and report progress, questions, tests and blockers through Tandem. Retry the same write with its original operation ID.
-Never approve or merge your own work, access human room messages, or duplicate a running worker’s tasks. Continuous work while this chat is idle requires the terminal worker.`;
+Never approve or merge your own work, access human room messages, or duplicate a running worker’s tasks. Work on tasks when I ask you to; do not start an autonomous task loop from this prompt.`;
   const snippet = url && (client === 'Claude Code'
     ? JSON.stringify({ mcpServers: { 'tandem-oauth': { type: 'http', url } } }, null, 2)
     : `# Tandem remote MCP connection. Authentication happens in your browser.\n[mcp_servers.tandem-oauth]\nurl = ${JSON.stringify(url)}`);
