@@ -1,85 +1,212 @@
-import { useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { Check, ExternalLink, Search } from 'lucide-react';
 import { useSession } from '../auth/session';
 import type { GitHubRepository } from '../types/domain';
-import { Button } from './ui/button';
 import { ErrorNotice, Field } from './common';
+
+// Accepts "owner/repo" or a pasted GitHub URL.
+const normalize = (text: string) =>
+  text.trim().toLowerCase().replace(/^(https?:\/\/)?(www\.)?github\.com\//, '').replace(/\/$/, '').replace(/\.git$/, '');
+
+function AccessLink({ href, children }: { href: string; children: string }) {
+  return (
+    <a className="icon-link" href={href} target="_blank" rel="noreferrer">
+      <ExternalLink size={14} aria-hidden="true" />
+      {children}
+    </a>
+  );
+}
+
+function RepositoryCombobox({ installationId, installUrl, onSelect }: {
+  installationId: number;
+  installUrl: string;
+  onSelect: (repo: GitHubRepository | null) => void;
+}) {
+  const { api, user } = useSession();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const [selected, setSelected] = useState<GitHubRepository | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  const inputId = useId();
+
+  // Load every page so that search covers all repositories, not only the first 30.
+  const repos = useInfiniteQuery({
+    queryKey: ['github-repos', user?.id, installationId],
+    queryFn: ({ pageParam }) => api.githubRepositories(installationId, pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (last, _all, page) => (last.hasMore ? page + 1 : undefined),
+  });
+  useEffect(() => {
+    if (repos.hasNextPage && !repos.isFetchingNextPage && !repos.isFetchNextPageError) void repos.fetchNextPage();
+  }, [repos.hasNextPage, repos.isFetchingNextPage, repos.isFetchNextPageError]);
+
+  const items = useMemo(() => repos.data?.pages.flatMap((page) => page.items) ?? [], [repos.data]);
+  const matches = useMemo(() => {
+    const q = normalize(query);
+    // After choosing, reopening shows the whole list rather than only the chosen repository.
+    if (!q || selected?.fullName === query) return items;
+    return items.filter((r) => r.fullName.toLowerCase().includes(q));
+  }, [items, query, selected]);
+  const loading = repos.isPending || (repos.hasNextPage && !repos.isFetchNextPageError);
+
+  useEffect(() => setActive(0), [query]);
+  useEffect(() => {
+    if (open) document.getElementById(`${listId}-${active}`)?.scrollIntoView({ block: 'nearest' });
+  }, [active, open]);
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(event: MouseEvent) {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onPointer);
+    return () => document.removeEventListener('mousedown', onPointer);
+  }, [open]);
+
+  function choose(repo: GitHubRepository) {
+    setSelected(repo);
+    setQuery(repo.fullName);
+    setOpen(false);
+    onSelect(repo);
+  }
+  function onKey(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!open) {
+        setOpen(true);
+        return;
+      }
+      setActive((i) => (event.key === 'ArrowDown' ? Math.min(i + 1, matches.length - 1) : Math.max(i - 1, 0)));
+    } else if (event.key === 'Enter' && open) {
+      event.preventDefault();
+      if (matches[active]) choose(matches[active]);
+    } else if (event.key === 'Escape' && open) {
+      event.preventDefault();
+      setOpen(false);
+    } else if (event.key === 'Tab') {
+      setOpen(false);
+    }
+  }
+
+  return (
+    <div className="field repo-combobox" ref={root}>
+      <label htmlFor={inputId}>Repository</label>
+      <div className="switcher-search">
+        <Search size={15} aria-hidden="true" />
+        <input
+          id={inputId}
+          type="text"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={open && matches[active] ? `${listId}-${active}` : undefined}
+          placeholder="Search repositories or paste a GitHub URL"
+          autoComplete="off"
+          spellCheck={false}
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+            if (selected) {
+              setSelected(null);
+              onSelect(null);
+            }
+          }}
+          onFocus={() => setOpen(true)}
+          onClick={() => setOpen(true)}
+          onKeyDown={onKey}
+        />
+      </div>
+      {open && (
+        <div className="switcher-panel">
+          <ul id={listId} role="listbox" aria-label="Repositories" className="switcher-list">
+            {matches.map((repo, index) => (
+              <li
+                key={repo.id}
+                id={`${listId}-${index}`}
+                role="option"
+                aria-selected={repo.id === selected?.id}
+                className={index === active ? 'switcher-option is-active' : 'switcher-option'}
+                onMouseEnter={() => setActive(index)}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => choose(repo)}
+              >
+                <span className="switcher-option-text">
+                  <span className="switcher-option-name">{repo.fullName}</span>
+                </span>
+                {repo.id === selected?.id && <Check size={15} aria-hidden="true" />}
+              </li>
+            ))}
+          </ul>
+          {loading && <p className="repo-combobox-note" role="status">Loading repositories…</p>}
+          {!loading && matches.length === 0 && !repos.error && (
+            <p className="repo-combobox-note">
+              {query.trim() ? 'No repositories match.' : 'Tandem can’t see any repositories on this account.'}{' '}
+              <AccessLink href={installUrl}>Adjust GitHub access</AccessLink>
+            </p>
+          )}
+        </div>
+      )}
+      <ErrorNotice error={repos.error} retry={() => void repos.refetch()} />
+    </div>
+  );
+}
 
 export function GitHubRepositoryPicker({ onSelect }: {
   onSelect: (repo: GitHubRepository | null, installationId: number) => void;
 }) {
   const { api, user } = useSession();
-  const location = useLocation();
-  const navigate = useNavigate();
-  const completed = useRef(false);
-  const [installationId, setInstallationId] = useState(0);
-  const [accountPage, setAccountPage] = useState(1);
-  const [repoPage, setRepoPage] = useState(1);
-  const [selected, setSelected] = useState(0);
-  const [search, setSearch] = useState('');
-  const accounts = useQuery({ queryKey: ['github-accounts', user?.id, accountPage],
-    queryFn: () => api.githubInstallations(accountPage), retry: false });
-  const repos = useQuery({ queryKey: ['github-repos', user?.id, installationId, repoPage],
-    queryFn: () => api.githubRepositories(installationId, repoPage), enabled: installationId > 0, retry: false });
-  const connect = useMutation({ mutationFn: () => api.connectGitHub(), retry: false,
-    onSuccess: ({url}) => { window.location.assign(url); } });
-  const finish = useMutation({ mutationFn: ({code, state}: {code: string; state: string}) => api.completeGitHub(code, state),
-    retry: false, onSuccess: () => { void accounts.refetch(); } });
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (!params.has('github_state') || completed.current) return;
-    completed.current = true;
-    const code = params.get('github_code') ?? '';
-    const state = params.get('github_state') ?? '';
-    // Remove the single-use authorization code from browser history immediately.
-    navigate('/projects/new', {replace: true});
-    finish.mutate({code, state});
-  }, [location.search]);
-  function clear() { setSelected(0); onSelect(null, 0); }
-  // A single installation needs no extra account-selection step.
-  useEffect(() => {
-    if (!installationId && accounts.data?.items.length === 1 && !accounts.data.hasMore && accountPage === 1) {
-      setInstallationId(accounts.data.items[0].id);
-    }
-  }, [accounts.data, installationId, accountPage]);
-  const singleAccount = accountPage === 1 && accounts.data?.items.length === 1 && !accounts.data.hasMore;
-  return <div>
-    {accounts.isPending && <p role="status">Checking GitHub connection…</p>}
-    {!accounts.isPending && (!accounts.data || accounts.isError) && <>
-      <p>Connect GitHub to see your repositories.</p>
-      <Button type="button" variant="outline" disabled={connect.isPending || finish.isPending}
-        onClick={() => connect.mutate()}>{finish.isPending ? 'Connecting…' : 'Connect GitHub'}</Button>
-    </>}
-    <ErrorNotice error={connect.error || finish.error} />
-    <ErrorNotice error={accounts.error} />
-    {accounts.data && <>
-      {singleAccount ? <p className="muted">GitHub connected · {accounts.data.items[0].name}</p> : <Field label="Account or organization"><select value={installationId} onChange={e => {
-        clear(); setInstallationId(Number(e.target.value)); setRepoPage(1);
-      }}><option value={0}>Choose an account</option>{accounts.data.items.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>}
-      {accounts.data.items.length === 0 && <p>Allow Tandem to access your repositories using the link below, then refresh.</p>}
-      {(accountPage > 1 || accounts.data.hasMore) && <div className="button-row">
-        <Button type="button" variant="ghost" disabled={accountPage === 1} onClick={() => {clear(); setInstallationId(0); setAccountPage(p => p - 1);}}>Previous accounts</Button>
-        <Button type="button" variant="ghost" disabled={!accounts.data.hasMore} onClick={() => {clear(); setInstallationId(0); setAccountPage(p => p + 1);}}>More accounts</Button>
-      </div>}
-    </>}
-    {installationId > 0 && <>
-      {repos.isPending && <p role="status">Loading repositories…</p>}
-      <ErrorNotice error={repos.error} />
-      <Field label="Search repositories on this page"><input placeholder="Find a repository…" value={search} onChange={e => setSearch(e.target.value)} /></Field>
-      <Field label="Repository"><select required value={selected} onChange={e => {
-        const id = Number(e.target.value); setSelected(id);
-        onSelect(repos.data?.items.find(r => r.id === id) ?? null, installationId);
-      }}><option value={0}>Choose a repository</option>{repos.data?.items.filter(r => r.fullName.toLowerCase().includes(search.toLowerCase())).map(r => <option key={r.id} value={r.id}>{r.fullName}</option>)}</select></Field>
-      {repos.data?.items.length === 0 && <p>No repositories available. Update GitHub access below to add one.</p>}
-      {(repoPage > 1 || repos.data?.hasMore) && <div className="button-row">
-        <Button type="button" variant="ghost" disabled={repoPage === 1} onClick={() => {clear(); setRepoPage(p => p - 1);}}>Previous repositories</Button>
-        <Button type="button" variant="ghost" disabled={!repos.data?.hasMore} onClick={() => {clear(); setRepoPage(p => p + 1);}}>More repositories</Button>
-      </div>}
-    </>}
-    {accounts.data && <div className="button-row">
-      <a href={accounts.data.installUrl} target="_blank" rel="noreferrer">Missing a repository? Update GitHub access</a>
-      <Button type="button" variant="ghost" onClick={() => {clear(); void accounts.refetch(); if (installationId > 0) void repos.refetch();}}>Refresh</Button>
-    </div>}
-  </div>;
+  const [chosen, setChosen] = useState(0);
+  const accounts = useQuery({
+    queryKey: ['github-accounts', user?.id],
+    queryFn: async () => {
+      const first = await api.githubInstallations(1);
+      const items = [...first.items];
+      for (let page = 2, more = first.hasMore; more; page += 1) {
+        const next = await api.githubInstallations(page);
+        items.push(...next.items);
+        more = next.hasMore;
+      }
+      return { items, installUrl: first.installUrl };
+    },
+  });
+
+  if (accounts.isPending) return <p className="muted" role="status">Loading GitHub accounts…</p>;
+  if (!accounts.data) return <ErrorNotice error={accounts.error} retry={() => void accounts.refetch()} />;
+  const { items, installUrl } = accounts.data;
+  if (items.length === 0) {
+    return (
+      <p className="repo-empty">
+        The Tandem GitHub App isn’t installed on your account yet.{' '}
+        <AccessLink href={installUrl}>Install it on GitHub</AccessLink>
+      </p>
+    );
+  }
+  const installationId = items.some((a) => a.id === chosen) ? chosen : items[0].id;
+  return (
+    <>
+      {items.length > 1 && (
+        <Field label="Account or organization">
+          <select
+            value={installationId}
+            onChange={(e) => {
+              setChosen(Number(e.target.value));
+              onSelect(null, 0);
+            }}
+          >
+            {items.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </Field>
+      )}
+      <RepositoryCombobox
+        key={installationId}
+        installationId={installationId}
+        installUrl={installUrl}
+        onSelect={(repo) => onSelect(repo, installationId)}
+      />
+    </>
+  );
 }

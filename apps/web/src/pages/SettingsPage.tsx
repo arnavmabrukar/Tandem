@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { useSession } from '../auth/session';
 import { ErrorNotice, Field, PageHeader } from '../components/common';
+import { GitHubConnectionPanel } from '../components/GitHubConnection';
 import { Button } from '../components/ui/button';
 import { McpConnectionList } from './McpOAuthPage';
 
@@ -34,7 +35,7 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" description="Your profile, connected agents and local runner." />
+      <PageHeader title="Settings" description="Your profile, GitHub account, connected agents and local runner." />
 
       <section className="panel narrow-panel">
         <h2>Profile</h2>
@@ -83,6 +84,8 @@ export function SettingsPage() {
           </p>
         )}
       </section>
+
+      <GitHubConnectionPanel />
 
       <section className="panel narrow-panel">
         <h2>Connected agents</h2>

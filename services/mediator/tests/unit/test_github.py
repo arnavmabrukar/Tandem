@@ -2,6 +2,7 @@
 import hashlib
 import unittest
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
@@ -43,6 +44,25 @@ class GitHubTests(unittest.TestCase):
         encrypted = key.encrypt(b'ghu_example').decode()
         with self.database({'token_encrypted':encrypted,'expires_at':None}), patch.object(github,'cipher',return_value=key):
             self.assertEqual(github.user_token(uuid4()),'ghu_example')
+
+    def test_connection_reports_no_link(self):
+        with self.database(None), patch.object(github, 'configured', return_value=False):
+            self.assertEqual(github.connection(uuid4()), {'connected': False, 'login': None, 'installUrl': None})
+
+    def test_connection_reports_linked_login_without_token(self):
+        later = datetime.now(timezone.utc) + timedelta(hours=1)
+        with self.database({'login': 'octo', 'expires_at': later}), patch.object(github, 'configured', return_value=True):
+            result = github.connection(uuid4())
+        self.assertTrue(result['connected'])
+        self.assertEqual(result['login'], 'octo')
+        self.assertEqual(set(result), {'connected', 'login', 'installUrl'})
+
+    def test_connection_keeps_login_when_link_expired(self):
+        earlier = datetime.now(timezone.utc) - timedelta(hours=1)
+        with self.database({'login': 'octo', 'expires_at': earlier}), patch.object(github, 'configured', return_value=True):
+            result = github.connection(uuid4())
+        self.assertFalse(result['connected'])
+        self.assertEqual(result['login'], 'octo')
 
     def test_repository_must_belong_to_selected_installation(self):
         with patch.object(github,'user_token',return_value='secret'), patch.object(github,'api',side_effect=[

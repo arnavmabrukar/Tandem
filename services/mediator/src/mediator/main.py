@@ -1250,7 +1250,7 @@ def github_connect(user: dict = Depends(get_current_user)):
 def github_callback(code: str = Query(default="", max_length=1024), state: str = Query(default="", max_length=256)):
     # The browser finishes under its Auth0 session, binding GitHub authorization
     # to the same Tandem user who started it. No token appears in a redirect.
-    return RedirectResponse(settings.github_dashboard_origin + "/#/projects/new?" +
+    return RedirectResponse(settings.github_dashboard_origin + "/#/settings?" +
                             urlencode({"github_code": code, "github_state": state}),
                             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
@@ -1259,6 +1259,12 @@ def github_callback(code: str = Query(default="", max_length=1024), state: str =
 def github_complete(request: GitHubCallbackRequest, user: dict = Depends(get_current_user)):
     with plan_api_errors():
         return github.finish(UUID(user["id"]), request.code, request.state)
+
+
+@app.get("/api/github/connection")
+def github_connection(user: dict = Depends(get_current_user)):
+    with plan_api_errors():
+        return github.connection(UUID(user["id"]))
 
 
 @app.get("/api/github/installations")

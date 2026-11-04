@@ -199,8 +199,9 @@ same creator return 409. Existing projects may update name/description, but not 
 
 Authenticated GitHub routes (no operation envelope):
 - `POST /api/github/connect` returns `{url}` to begin authorization.
-- `GET /api/github/callback` redirects to the configured dashboard; never accepts a user-provided redirect destination.
+- `GET /api/github/callback` redirects to Settings on the configured dashboard; never accepts a user-provided redirect destination.
 - `POST /api/github/complete` accepts `{code,state}` and returns `{login}`.
+- `GET /api/github/connection` returns `{connected,login,installUrl}`. `login` stays set when a saved link has expired; `installUrl` is null when GitHub isn't configured.
 - `GET /api/github/installations?page=1` returns `{items:[{id,name}],hasMore,installUrl}`.
 - `GET /api/github/installations/:id/repositories?page=1` returns `{items:[{id,name,fullName,defaultBranch,description}],hasMore}`.
 

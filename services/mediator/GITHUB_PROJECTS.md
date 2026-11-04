@@ -48,11 +48,13 @@ credentials in the root `.env.local`, never `apps/web/.env.local` or Git.
 
 ## User flow
 
-Choose Create project → Connect GitHub → authorize Tandem. Install the GitHub App
-on the desired account and selected repositories using the picker’s installation
-link, then refresh. Choose an account, repository and branch, then Create project.
-The default branch is prefilled. Lists are paginated; filtering searches the current
-page. Archived/disabled repositories are not offered.
+Link GitHub once from Settings → GitHub → Connect GitHub, and authorize Tandem. Install
+the GitHub App on the desired account and repositories using Manage repository access.
+Create project shows the linked account and sends unlinked users to Settings. Search for
+a repository (or paste its GitHub URL), then choose Import repository. The default branch
+is prefilled under Optional settings. The search covers every repository the installation
+exposes, and the list updates when the tab regains focus. Archived/disabled repositories
+are not offered.
 
 Authorization uses one-time, user-bound state and PKCE. Expired/revoked GitHub
 access requires reconnecting. Automatic refresh-token rotation is not implemented.
