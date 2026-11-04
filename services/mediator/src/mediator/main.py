@@ -129,8 +129,8 @@ from mediator.auth import require_access_token, require_user_profile
 from mediator.db.workspace import load_workspace
 
 # database function that saves or retrieves the Tandem user
-from mediator.db.users import get_or_create_user, update_display_name
-from mediator.schemas.users import UpdateProfileRequest
+from mediator.db.users import get_or_create_user, update_display_name, delete_account
+from mediator.schemas.users import UpdateProfileRequest, DeleteAccountRequest
 
 
 
@@ -251,6 +251,17 @@ def get_current_user(
             status_code=503,
             detail="User database unavailable",
         ) from None
+
+@app.delete("/api/me")
+def delete_current_user(request: DeleteAccountRequest, claims: dict = Depends(require_access_token)) -> dict:
+    try:
+        delete_account(claims["iss"], claims["sub"])
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except DatabaseError:
+        raise HTTPException(status_code=503, detail="Account deletion unavailable") from None
+    return {"deleted": True}
+
 
 @app.patch("/api/me")
 def update_current_user(

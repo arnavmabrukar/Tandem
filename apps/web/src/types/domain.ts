@@ -229,6 +229,7 @@ export interface DashboardApi {
     expectedVersion: number): Promise<{ projectId: string; projectVersion: number; entityId: string; token: string }>;
   getCurrentUser(signal?: AbortSignal): Promise<User>;
   updateProfile(name: string): Promise<{ id: string; name: string }>;
+  deleteAccount(confirmation: string): Promise<{ deleted: true }>;
   load(signal?: AbortSignal): Promise<Workspace>;
   execute(request: MutationRequest): Promise<MutationResult>;
 

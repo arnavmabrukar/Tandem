@@ -2,6 +2,45 @@ import { expect, test, type Page, type Request } from '@playwright/test';
 import { testProject, testTask } from './support/data';
 import { readFileSync } from 'node:fs';
 
+test('profile menu opens user settings and account deletion requires confirmation', async ({ page }) => {
+  await connect(page);
+  let deletion: unknown;
+  await page.route('https://api.tandem.test/api/me', async route => {
+    if (route.request().method() === 'DELETE') {
+      deletion = route.request().postDataJSON();
+      await route.fulfill({ status: 409, json: { detail: 'Transfer ownership or delete projects where you are the only owner before deleting your account.' } });
+    } else await route.fallback();
+  });
+  await page.goto('/#/projects/project-1/activity');
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menuitem', { name: 'User settings' }).click();
+  await expect(page.getByRole('heading', { name: 'User settings', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Project details', exact: true })).toHaveCount(0);
+  const remove = page.getByRole('button', { name: 'Delete my account' });
+  await expect(remove).toBeDisabled();
+  await page.getByLabel('Type DELETE to confirm').fill('DELETE');
+  await remove.click();
+  await expect(page.locator('#delete-account').getByRole('alert')).toContainText('Transfer ownership');
+  expect(deletion).toEqual({ confirmation: 'DELETE' });
+});
+
+test('settings sidebar expands and navigates unified account and project sections', async ({ page }) => {
+  await connect(page);
+  await page.goto('/#/projects/project-1/activity');
+  const nav = page.getByRole('navigation', { name: 'Main navigation' });
+  await nav.getByRole('button', { name: 'Settings' }).click();
+  await expect(nav.getByRole('button', { name: 'Settings' })).toHaveAttribute('aria-expanded', 'true');
+  await nav.getByRole('link', { name: 'People & invitations' }).click();
+  await expect(page).toHaveURL(/project=project-1&section=setup-people/);
+  await expect(page.locator('#setup-people')).toBeFocused();
+  await nav.getByRole('link', { name: 'GitHub', exact: true }).click();
+  await expect(page.locator('#github')).toBeFocused();
+  await nav.getByRole('button', { name: 'Settings' }).click();
+  await expect(nav.getByRole('link', { name: 'Profile', exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(nav.getByRole('link', { name: 'GitHub', exact: true })).toHaveAttribute('aria-current', 'location');
+});
+
 async function connect(page: Page) {
   const state = { project: testProject(), readStatus: 200, writes: [] as Request[], reads: 0 };
   await page.route('https://api.tandem.test/api/**', async (route) => {

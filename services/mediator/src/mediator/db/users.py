@@ -93,6 +93,47 @@ def update_display_name(issuer: str, subject: str, name: str) -> dict[str, str] 
     return {"id": str(row[0]), "name": row[1]} if row else None
 
 
+def delete_account(issuer: str, subject: str) -> None:
+    """Remove access, retaining an anonymous actor for shared audit references."""
+    with _connect() as connection:
+        row = connection.execute(
+            "SELECT user_id FROM public.user_identities WHERE auth_issuer = %s AND auth_subject = %s FOR UPDATE",
+            (issuer, subject),
+        ).fetchone()
+        if row is None:
+            return  # Retrying a completed deletion is harmless.
+        user_id = row[0]
+        # Serialize ownership changes/deletions on the same project rows.
+        connection.execute(
+            "SELECT id FROM public.projects WHERE id IN (SELECT project_id FROM public.project_memberships WHERE user_id = %s) ORDER BY id FOR UPDATE",
+            (user_id,),
+        ).fetchall()
+        sole_owner = connection.execute(
+            """SELECT 1 FROM public.project_memberships AS own
+               WHERE own.user_id = %s AND own.role = 'owner'
+               AND NOT EXISTS (SELECT 1 FROM public.project_memberships AS other
+                   WHERE other.project_id = own.project_id AND other.role = 'owner'
+                   AND other.user_id <> own.user_id) LIMIT 1""",
+            (user_id,),
+        ).fetchone()
+        if sole_owner:
+            raise ValueError("Transfer ownership or delete projects where you are the only owner before deleting your account.")
+        connection.execute("DELETE FROM public.mcp_oauth_sessions WHERE owner_id = %s", (user_id,))
+        connection.execute("DELETE FROM public.mcp_oauth_requests WHERE owner_id = %s", (user_id,))
+        connection.execute("UPDATE public.agents SET grant_status = 'revoked', token_hash = gen_random_uuid()::text, owner = 'Deleted account' WHERE owner_user_id = %s", (user_id,))
+        # Membership deletion also removes project grants and their OAuth sessions.
+        connection.execute("DELETE FROM public.project_memberships WHERE user_id = %s", (user_id,))
+        connection.execute("DELETE FROM public.github_connections WHERE user_id = %s", (user_id,))
+        connection.execute("DELETE FROM public.github_oauth_states WHERE user_id = %s", (user_id,))
+        connection.execute("DELETE FROM public.user_identities WHERE user_id = %s", (user_id,))
+        # Historical tasks and approvals reference this row. Detach all sign-ins
+        # instead of cascading away other members' shared work.
+        connection.execute(
+            "UPDATE public.users SET name = 'Deleted account', name_customized = true, auth_issuer = 'deleted', auth_subject = id::text WHERE id = %s",
+            (user_id,),
+        )
+
+
 def _connect() -> psycopg.Connection:
     # refuse to connect w/o and explicity configured DB url
     if settings.database_url is None:

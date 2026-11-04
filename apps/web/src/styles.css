@@ -400,6 +400,15 @@ fieldset {
   color: #0b3954;
   background: #dcebf6;
 }
+.settings-nav-toggle { display: flex; align-items: center; gap: 11px; flex-shrink: 0; width: 100%; border: 0; border-radius: 7px; padding: 11px 12px; background: transparent; color: #536f84; font: inherit; font-weight: 550; cursor: pointer; text-align: left; }
+.settings-nav-toggle:hover { background: #f3f8fc; }
+.settings-nav-toggle.active { color: #0b3954; background: #dcebf6; }
+.settings-nav-toggle > svg:last-child { margin-left: auto; transform: rotate(-90deg); }
+.settings-nav-toggle > svg.expanded { transform: none; }
+.settings-subnav { margin: 0 0 8px 20px; padding-left: 10px; border-left: 1px solid #dce7ef; flex-shrink: 0; }
+.settings-subnav p { margin: 14px 10px 4px; color: #536f84; font-size: 11px; font-weight: 650; overflow-wrap: anywhere; }
+.sidebar nav .settings-subnav a { padding: 7px 10px; font-size: 12px; }
+.settings-section, .setup-stack h2 { scroll-margin-top: 24px; }
 .nav-count {
   margin-left: auto;
   font-size: 11px;
@@ -1428,6 +1437,9 @@ td:first-child {
   .sidebar nav svg {
     width: 14px;
   }
+  .settings-subnav { grid-column: 1 / -1; margin-left: 0; }
+  .sidebar nav .settings-subnav a { justify-content: flex-start; }
+  .settings-nav-toggle { padding: 10px 7px; font-size: 11px; gap: 5px; }
   .nav-count {
     margin-left: 0;
   }

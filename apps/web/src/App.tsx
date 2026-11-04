@@ -85,7 +85,7 @@ function Dashboard() {
   const contextProject =
     location.pathname === '/projects/new'
       ? null
-      : (project ?? projects.find((p) => p.id === lastProjectId) ?? projects[0] ?? null);
+      : (project ?? projects.find((p) => p.id === new URLSearchParams(location.search).get('project')) ?? projects.find((p) => p.id === lastProjectId) ?? projects[0] ?? null);
   useEffect(() => {
     document.title = project ? `${project.name} · Tandem` : 'Tandem — Coordination dashboard';
     return () => {
@@ -140,7 +140,8 @@ function Dashboard() {
               path="/invitations"
               element={<InvitationsPage key={user.id} />}
             />
-            <Route path="/settings" element={<SettingsPage key={user.id} />} />
+            <Route path="/settings" element={<SettingsPage key={user.id} project={contextProject} />} />
+            <Route path="/settings/user" element={<SettingsPage key={`user:${user.id}`} project={null} userOnly />} />
             <Route path="/projects/new" element={<ProjectSetupPage key="new" project={null} />} />
             {query.data && !accessDenied ? (
               <>
