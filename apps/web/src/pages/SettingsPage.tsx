@@ -12,7 +12,7 @@ export function SettingsPage() {
   const [removalCopied, setRemovalCopied] = useState(false);
   const [removalCopyFailed, setRemovalCopyFailed] = useState(false);
   // Match the one-command install location; never remove the project clone.
-  const removeRunnerCommand = 'rm -f -- "$HOME/.local/share/tandem/tandem_runner.py"';
+  const removeRunnerCommand = 'rm -f -- "$HOME/Downloads/tandem_runner.py" "$HOME/.local/share/tandem/tandem_runner.py"';
   const name = draft.trim();
 
   const save = useMutation({
@@ -121,7 +121,7 @@ export function SettingsPage() {
           } catch { setRemovalCopyFailed(true); }
         }}>{removalCopied ? 'Copied' : 'Copy removal command'}</Button>
         {removalCopyFailed && <p role="alert">Clipboard unavailable. Select and copy the command above.</p>}
-        <p className="small muted">This deletes only the installed runner file. It does not stop an already running worker, remove project clones, or revoke agent access. For a manually downloaded copy, delete tandem_runner.py from the folder where you saved it. You can download it again from agent setup.</p>
+        <p className="small muted">This deletes the runner from Downloads and its previous install location. It does not stop an already running worker, remove project clones or managed workspaces, or revoke agent access. You can download it again from agent setup.</p>
       </section>
     </>
   );

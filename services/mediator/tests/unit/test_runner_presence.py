@@ -1,6 +1,7 @@
 """Presence is acknowledged by the runner after receipt, never by authentication."""
 import importlib.util
 import os
+import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import Mock, call, patch
@@ -12,6 +13,30 @@ spec.loader.exec_module(runner_module)
 
 
 class RunnerPresenceTests(unittest.TestCase):
+    def test_failed_clone_leaves_no_partial_workspace(self):
+        with tempfile.TemporaryDirectory() as home, \
+             patch.object(runner_module.Path, 'home', return_value=Path(home)), \
+             patch.object(runner_module.shutil, 'which', return_value='/bin/tool'), \
+             patch.object(runner_module.subprocess, 'run', return_value=Mock(returncode=1)):
+            with self.assertRaisesRegex(runner_module.WorkBlocked, 'account with access'):
+                runner_module.managed_clone('team/private', 'project', 'agent')
+            self.assertEqual(list((Path(home) / '.local/share/tandem/workspaces').iterdir()), [])
+            self.assertEqual(list((Path(home) / '.local/share/tandem/repositories').iterdir()), [])
+
+    def test_managed_clone_rejects_non_repository_inputs(self):
+        for repository in ('../repo', 'team/..', '--config=x', 'https://untrusted/repo', 'team/repo;command'):
+            with self.assertRaises(runner_module.WorkBlocked):
+                runner_module.managed_clone(repository, 'project', 'agent')
+
+    def test_automatic_clone_requires_authenticated_project_access(self):
+        with patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'test-token'}), \
+             patch.object(runner_module, 'Tandem') as tandem_class, \
+             patch.object(runner_module, 'managed_clone') as clone:
+            tandem_class.return_value.call.return_value = {'agentId': 'agent', 'name': 'Agent', 'projects': []}
+            with self.assertRaisesRegex(SystemExit, 'no access'):
+                runner_module.main(['--project', 'project', '--repository', 'team/private', '--check'])
+            clone.assert_not_called()
+
     def test_worker_continues_between_ready_tasks_and_waits_when_empty(self):
         with patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'test-token'}), \
              patch.object(runner_module.Path, 'exists', return_value=True), \

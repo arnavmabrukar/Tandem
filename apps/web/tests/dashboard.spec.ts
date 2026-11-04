@@ -569,11 +569,11 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(worker).not.toContainText('agent-integrations/runner/');
   await expect(worker).toContainText('No access to Tandem’s private repository is needed.');
   await expect(worker.locator('pre')).toHaveCount(1);
-  await expect(worker.locator('pre')).toContainText('/path/to/your-project-worker');
-  await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeDisabled();
+  await expect(worker.locator('pre')).toContainText('$HOME/Downloads/tandem_runner.py');
+  await expect(worker.locator('pre')).toContainText("--repository 'team/tandem'");
+  await expect(worker.getByLabel('Project folder', { exact: true })).toHaveCount(0);
   const headings = page.getByRole('dialog').getByRole('heading', { level: 3 });
-  await expect(headings).toHaveText(['1. Connect your agent', '2. Choose your worker and project folder', '3. Get your agent token', '4. Download and start']);
-  await worker.getByLabel('Project folder', { exact: true }).fill('/projects/my-worker');
+  await expect(headings).toHaveText(['1. Connect your agent', '2. Choose your worker', '3. Get your agent token', '4. Download and start']);
   await expect(worker.locator('pre')).toHaveCount(1);
   await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeEnabled();
   for (const name of ['Copy clone command', 'Copy setup check', 'Copy worker command', 'Copy listener command']) {
@@ -587,8 +587,6 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(install.locator('pre')).not.toContainText('git clone');
   await page.getByLabel('Your agent', { exact: true }).selectOption('Claude Code');
   await expect(worker.getByLabel('Worker engine')).toHaveValue('claude');
-  await worker.getByLabel('Project folder', { exact: true }).fill("../worker's clone");
-  await expect(install.locator('pre')).toContainText("'../worker'\\''s clone'");
   await expect(install.locator('pre')).toContainText('--agent claude');
   await worker.getByLabel('Worker engine').selectOption('custom');
   await expect(worker.getByRole('button', { name: 'Copy worker command' })).toHaveCount(0);

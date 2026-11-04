@@ -52,32 +52,32 @@ function CopyButton({ text, label, disabled = false }: { text: string; label: st
 
 function WorkerSetup({ project, agent, url, initialClient }: { project: Project; agent?: Agent; url: string; initialClient: string }) {
   const [engine, setEngine] = useState(initialClient === 'Claude Code' ? 'claude' : initialClient === 'Codex' ? 'codex' : 'custom');
-  const [repo, setRepo] = useState('');
   const [custom, setCustom] = useState('');
   const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
-  const ready = !!repo.trim() && (engine !== 'custom' || !!custom.trim());
-  const argumentsText = `--prompt-token --project ${quote(project.id)} --url ${quote(url)} --repo ${quote(repo.trim() || '/path/to/your-project-worker')}${agent ? ` --agent-id ${quote(agent.id)}` : ''} ${engine === 'custom' ? `--agent-command ${quote(custom.trim() || 'YOUR_AGENT_COMMAND')}` : `--agent ${engine}`}`;
-  // Download from this deployment, not the MCP host; preserve the caller's
-  // working directory so relative project paths resolve from the user's terminal.
-  const installCommand = `mkdir -p "$HOME/.local/share/tandem" &&\ncurl -fLsS ${quote(new URL('/downloads/tandem_runner.py', window.location.origin).href)} \\\n  -o "$HOME/.local/share/tandem/tandem_runner.py" &&\npython3 "$HOME/.local/share/tandem/tandem_runner.py" ${argumentsText}`;
+  const repositoryValid = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(project.repository)
+    && project.repository.split('/').every(part => part !== '.' && part !== '..');
+  const ready = repositoryValid && (engine !== 'custom' || !!custom.trim());
+  const argumentsText = `--prompt-token --project ${quote(project.id)} --url ${quote(url)} --repository ${quote(project.repository)}${agent ? ` --agent-id ${quote(agent.id)}` : ''} ${engine === 'custom' ? `--agent-command ${quote(custom.trim() || 'YOUR_AGENT_COMMAND')}` : `--agent ${engine}`}`;
+  // The frontend serves the runner; absolute install and managed workspace paths
+  // let users run this command from any terminal directory.
+  const installCommand = `mkdir -p "$HOME/Downloads" &&\ncurl -fLsS ${quote(new URL('/downloads/tandem_runner.py', window.location.origin).href)} \\\n  -o "$HOME/Downloads/tandem_runner.py" &&\npython3 "$HOME/Downloads/tandem_runner.py" ${argumentsText}`;
   return <section aria-label="Continuous worker setup" className="agent-advanced">
-    <h3>2. Choose your worker and project folder</h3>
+    <h3>2. Choose your worker</h3>
     <p>Start a worker to handle assigned, approved tasks and answer room pings automatically. No access to Tandem’s private repository is needed.</p>
     <Field label="Worker engine"><select value={engine} onChange={e => setEngine(e.target.value)}>
       <option value="codex">Codex CLI</option><option value="claude">Claude Code CLI</option><option value="custom">Other command</option>
     </select></Field>
     {engine === 'custom' && <Field label="Agent command"><input value={custom} onChange={e => setCustom(e.target.value)} placeholder="Your headless command" /></Field>}
     {engine === 'custom' && <p className="small muted">The command must accept the task on stdin, complete it without interactive prompts, and commit its changes before exiting. Verify its login separately.</p>}
-    <Field label="Project folder" hint="An existing, dedicated clone of your own project—not your active checkout. Use a full path, or a path relative to your terminal’s current folder.">
-      <input value={repo} onChange={e => setRepo(e.target.value)} placeholder="/path/to/your-project-worker" />
-    </Field>
+    <p>The runner downloads to your Downloads folder and prepares an agent worktree for <strong>{project.repository}</strong> automatically. Agents share the repository, work on their own task branches, and resolve conflicts with the base branch before submitting work. Your GitHub account needs access to this project.</p>
+    {!repositoryValid && <p role="alert">Set this project’s GitHub repository to owner/repository before starting a worker.</p>}
     <p className="small muted">Requires Python 3.11+, curl, Git, and signed-in GitHub and agent CLIs on macOS/Linux.</p>
     <h3>3. Get your agent token</h3>
     {agent ? <><p>Have this agent’s token ready for the terminal prompt.</p><AgentTokenButton project={project} agent={agent} /></>
       : <p>After connecting, open your agent’s Set up worker control to get its token.</p>}
     <section aria-label="Download and start worker">
       <h3>4. Download and start</h3>
-      <p>{ready ? 'Copy and paste this into your terminal, then enter the agent token when prompted.' : 'Complete the required fields in step 2 to finish this command and enable copying.'}</p>
+      <p>{ready ? 'Run this from your project folder to reuse its repository, or from any folder to let Tandem download it. Enter the agent token when prompted.' : 'Complete the required setup in step 2 to enable copying.'}</p>
       {engine === 'custom' && !custom.trim() && <p className="small muted">Also enter your headless agent command in step 2.</p>}
       <pre className="oauth-code">{installCommand}</pre>
       <CopyButton key={installCommand} text={installCommand} label="Copy download and start command" disabled={!ready} />
