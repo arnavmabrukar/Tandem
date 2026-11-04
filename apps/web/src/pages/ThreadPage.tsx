@@ -134,7 +134,7 @@ function ThreadDetail({ project, task }: { project: Project; task: Task }) {
           <>
             <h3>Review this work</h3>
             <p className="muted">{task.status === 'in_review'
-              ? 'Merge the pull request first. Accepting marks this task finished and lets tasks that depend on it start.'
+              ? 'Review the published commit first. Accepting marks this task finished and lets tasks that depend on it start.'
               : 'The agent could not finish. Tell it what to do differently, or release the task below.'}</p>
             <Field label="Note for the agent">
               <textarea maxLength={10000} value={decisionNote} disabled={decision.isPending}

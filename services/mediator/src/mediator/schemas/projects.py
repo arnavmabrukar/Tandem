@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -20,7 +21,7 @@ class CreateProjectRequest(BaseModel):
 
     githubRepositoryId: int = Field(gt=0, strict=True)
     githubInstallationId: int = Field(gt=0, strict=True)
-    trackedBranch: str = Field(min_length=1, max_length=255)
+    trackedBranch: str | None = Field(default=None, max_length=255)
 
     # Require a name between 1 and 80 characters.
     name: str = Field(min_length=1, max_length=80)
@@ -43,6 +44,11 @@ class CreateProjectRequest(BaseModel):
 
         # Preserve the original text for consistent retry comparisons.
         return value
+
+    @field_validator("trackedBranch")
+    @classmethod
+    def validate_tracked_branch(cls, value: str | None) -> str | None:
+        return validate_push_branch(value) if value is not None else None
 
 
 class CreateProjectResponse(BaseModel):
@@ -83,6 +89,9 @@ class UpdateProjectRequest(BaseModel):
     # Empty descriptions are allowed.
     description: str = Field(max_length=1000)
 
+    # An empty value deliberately means the conventional main branch.
+    trackedBranch: str | None = Field(default=None, max_length=255)
+
     @field_validator("name")
     @classmethod
     def validate_name(cls, value: str) -> str:
@@ -90,6 +99,11 @@ class UpdateProjectRequest(BaseModel):
         if not value.strip():
             raise ValueError("Project name must not be blank")
         return value
+
+    @field_validator("trackedBranch")
+    @classmethod
+    def validate_tracked_branch(cls, value: str | None) -> str | None:
+        return validate_push_branch(value) if value is not None else None
 
 class UpdateProjectResponse(BaseModel):
     """Describe the committed project update."""
@@ -107,3 +121,29 @@ class DeleteProjectRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operationId: UUID
     expectedVersion: int = Field(ge=1, strict=True)
+
+
+def validate_push_branch(value: str) -> str:
+    """Accept a simple Git branch name; blank is normalized by callers to main."""
+    branch = value.strip()
+    if not branch:
+        return ""
+    parts = branch.split("/")
+    invalid_part = any(
+        not part
+        or part in (".", "..")
+        or part.startswith(".")
+        or part.endswith(".")
+        or part.endswith(".lock")
+        for part in parts
+    )
+    if (
+        branch == "HEAD"
+        or branch.startswith("refs/")
+        or invalid_part
+        or ".." in branch
+        or "@{" in branch
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,254}", branch)
+    ):
+        raise ValueError("Use a valid branch name such as main or agents/work")
+    return branch

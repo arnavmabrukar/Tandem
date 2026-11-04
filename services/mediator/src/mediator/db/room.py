@@ -1,4 +1,5 @@
 """Project room: agents can never read human exchanges, even through model context."""
+import re
 from uuid import UUID, uuid4
 from psycopg.types.json import Jsonb
 from mediator.config import settings
@@ -38,10 +39,12 @@ def _history(conn, project_id, agent=False, limit=100):
 
 
 def _public(row):
+    task_event = (row['response'] or {}).get('taskEvent')
     return dict(id=str(row['id']), operationId=str(row['operation_id']), sender=row['sender_name'], senderUserId=str(row['sender_user_id']) if row['sender_user_id'] else None,
                 senderAgentId=row['sender_agent_id'],
                 kind='human' if row['sender_user_id'] else 'agent',
-                body=row['body'], response=row['response'], state=row['state'],
+                body=row['body'], response=None if task_event else row['response'], state=row['state'],
+                taskEvent=task_event,
                 createdAt=row['created_at'].isoformat())
 
 
@@ -90,6 +93,53 @@ def acknowledge_presence(project_id: UUID, check_id: UUID, identity):
         return _public(row)
 
 
+def pending_worker_requests(project_id: UUID, identity, task_id: UUID | None = None):
+    with _transaction() as conn:
+        _authorize(conn, project_id, identity=identity)
+        rows = conn.execute("""SELECT r.body, r.response->'workerRequest' AS request
+            FROM public.agent_room_exchanges r
+            WHERE r.project_id=%s AND r.state='complete'
+              AND r.response->'workerRequest'->>'agentId'=%s
+              AND (%s::text IS NULL OR r.response->'workerRequest'->>'taskId'=%s::text)
+              AND NOT EXISTS (SELECT 1 FROM public.agent_room_exchanges a
+                  WHERE a.project_id=r.project_id AND a.sender_agent_id=%s
+                    AND a.operation_id=(r.response->'workerRequest'->>'id')::uuid)
+            ORDER BY r.created_at, r.id LIMIT 10""",
+            (project_id, identity['agentId'], task_id, task_id, identity['agentId'])).fetchall()
+        # Older requests explicitly shared their human text; new requests carry
+        # only mediator-written text in the workerRequest payload.
+        return {'workerRequests': [{'id': row['request']['id'], 'taskId': row['request']['taskId'],
+                                    'message': row['request'].get('message', row['body'])} for row in rows]}
+
+
+def reply_worker_request(project_id: UUID, request_id: UUID, body: str, identity):
+    if len(body.strip()) > 8000:
+        raise AgentOperationConflict('Worker room replies must be at most 8000 characters')
+    with _transaction() as conn:
+        _, _, name = _authorize(conn, project_id, identity=identity)
+        conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                     (f'room:{project_id}:{identity["agentId"]}',))
+        existing = conn.execute("""SELECT * FROM public.agent_room_exchanges
+            WHERE project_id=%s AND sender_agent_id=%s AND operation_id=%s""",
+            (project_id, identity['agentId'], request_id)).fetchone()
+        if existing:
+            if existing['body'] != body:
+                raise AgentOperationConflict('This worker request already has a different reply')
+            return _public(existing)
+        request = conn.execute("""SELECT 1 FROM public.agent_room_exchanges
+            WHERE project_id=%s AND state='complete' AND sender_user_id IS NOT NULL
+              AND response->'workerRequest'->>'id'=%s
+              AND response->'workerRequest'->>'agentId'=%s""",
+            (project_id, str(request_id), identity['agentId'])).fetchone()
+        if not request:
+            raise AgentOperationConflict('Worker request is unavailable or addressed to another agent')
+        row = conn.execute("""INSERT INTO public.agent_room_exchanges
+            (project_id,sender_agent_id,sender_name,operation_id,body,state,lease,lease_until,completed_at)
+            VALUES (%s,%s,%s,%s,%s,'complete',%s,now(),now()) RETURNING *""",
+            (project_id, identity['agentId'], name, request_id, body, uuid4())).fetchone()
+        return _public(row)
+
+
 def read_room(project_id: UUID, *, user_id=None, identity=None):
     with _transaction() as conn:
         _authorize(conn, project_id, user_id=user_id, identity=identity)
@@ -127,11 +177,31 @@ def clear_room(project_id: UUID, through_id: UUID, user_id: UUID):
 
 
 def _context(conn, project_id, project, role, agent):
-    tasks = conn.execute("""SELECT id::text, title, status, contract_summary AS scope,
-        progress FROM public.tasks WHERE project_id=%s
-        ORDER BY updated_at DESC, id LIMIT 100""", (project_id,)).fetchall()
+    tasks = conn.execute("""SELECT t.id::text, t.title, t.status, t.contract_summary AS scope,
+        t.progress, t.claimed_by_agent_id::text AS agent_id, a.name AS agent_name
+        FROM public.tasks t LEFT JOIN public.agents a ON a.id=t.claimed_by_agent_id
+        WHERE t.project_id=%s ORDER BY t.updated_at DESC, t.id LIMIT 100""", (project_id,)).fetchall()
     return {**project, 'role': role, 'senderKind': 'agent' if agent else 'human',
             'tasks': tasks, 'taskLimit': 100}
+
+
+def _mentioned_agent(body: str, tasks: list[dict]) -> tuple[str | None, str | None]:
+    """Resolve exact @names from this project's working tasks, including spaces."""
+    agents = {(str(task['agent_id']), task['agent_name']) for task in tasks
+              if task.get('agent_id') and task.get('agent_name')
+              and task['status'] in ('claimed', 'in_progress', 'blocked')}
+    matches = set()
+    for marker in re.finditer(r'(?<!\S)@', body):
+        remaining = body[marker.end():]
+        candidates = [(agent_id, name) for agent_id, name in agents
+                      if remaining.casefold().startswith(name.casefold())
+                      and (len(remaining) == len(name) or not re.match(r'[\w-]', remaining[len(name)]))]
+        if not candidates:
+            return None, 'I could not find that @agent on an active task in this project.'
+        matches.add(max(candidates, key=lambda candidate: len(candidate[1]))[0])
+    if len(matches) > 1:
+        return None, 'Mention one working agent at a time.'
+    return next(iter(matches), None), None
 
 
 def _conversation(rows, current_id):
@@ -181,6 +251,9 @@ def post_message(project_id: UUID, request: RoomMessageRequest, *, user_id=None,
                 VALUES (%s,%s,%s,%s,%s,%s,%s,now()+interval '3 minutes') RETURNING *""",
                 (project_id, user_id, agent_id, name, request.operationId, request.body, lease)).fetchone()
         context = _context(conn, project_id, project, role, identity is not None)
+        mention_id, mention_error = _mentioned_agent(request.body, context['tasks']) if identity is None else (None, None)
+        if mention_id:
+            context['mentionedAgentId'] = mention_id
         history = _history(conn, project_id, identity is not None, 10)
         if not any(r['id'] == row['id'] for r in history):
             history.append(row)
@@ -197,13 +270,50 @@ def post_message(project_id: UUID, request: RoomMessageRequest, *, user_id=None,
                 # Model output cannot introduce arbitrary task IDs or change active work.
                 allowed = {str(t['id']) for t in context['tasks'] if t['status'] == 'open'}
                 reply.cancelTaskIds = [i for i in reply.cancelTaskIds if str(i) in allowed]
-            response = reply.model_dump(mode='json')
+            response = reply.model_dump(mode='json', exclude={'relayTaskId', 'relayMessage'})
             # Attribute replies to the configured model, never a name supplied
             # by the model itself. Persist it so future config changes keep history accurate.
             response['model'] = settings.meta_model
             if reply.requestPresence:
                 # Independent random ID: agents cannot infer the private source ID.
                 response['presenceCheckId'] = str(uuid4())
+            if mention_error:
+                response['reply'] = mention_error
+            elif identity is None and (reply.relayTaskId or reply.relayMessage or mention_id):
+                relay_text = (reply.relayMessage or '').strip()
+                if relay_text.casefold() == request.body.casefold() or '\x00' in relay_text:
+                    # The model must compose a separate worker request, never
+                    # forward the original private human message verbatim.
+                    relay_text = ''
+                mentioned_tasks = [task for task in context['tasks']
+                                   if task['agent_id'] == mention_id
+                                   and task['status'] in ('claimed', 'in_progress', 'blocked')]
+                named_tasks = [task for task in mentioned_tasks
+                               if task['title'].casefold() in request.body.casefold()]
+                ambiguous_mention = bool(mention_id and len(mentioned_tasks) > 1 and len(named_tasks) != 1)
+                relay_task_id = (UUID(mentioned_tasks[0]['id']) if mention_id and len(mentioned_tasks) == 1
+                                 else UUID(named_tasks[0]['id']) if mention_id and len(named_tasks) == 1
+                                 else reply.relayTaskId if not mention_id else None)
+                target = conn.execute("""SELECT t.claimed_by_agent_id::text AS agent_id,
+                        a.name AS agent_name, t.status
+                    FROM public.tasks t JOIN public.agents a ON a.id=t.claimed_by_agent_id
+                    JOIN public.agent_project_grants g ON g.agent_id=a.id AND g.project_id=t.project_id
+                    WHERE t.project_id=%s AND t.id=%s
+                      AND t.status IN ('claimed','in_progress','blocked')
+                      AND a.grant_status='active' AND g.status='active'""",
+                    (project_id, relay_task_id)).fetchone() if relay_task_id and relay_text else None
+                if target and (not mention_id or target['agent_id'] == mention_id):
+                    # Only the mediator-written payload reaches this worker's
+                    # authenticated MCP request. The human exchange stays private.
+                    response['workerRequest'] = {
+                        'id': str(uuid4()), 'taskId': str(relay_task_id),
+                        'agentId': target['agent_id'], 'message': relay_text,
+                    }
+                elif ambiguous_mention:
+                    response['reply'] = 'That agent has multiple active tasks. Name the task in your message and ask again.'
+                else:
+                    response['reply'] = ('I could not relay that message. Choose a claimed, active, '
+                                         'or blocked task with a connected agent and ask again.')
             updated = conn.execute("""UPDATE public.agent_room_exchanges
                 SET response=%s,state='complete',completed_at=now()
                 WHERE id=%s AND lease=%s RETURNING *""",

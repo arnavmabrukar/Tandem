@@ -153,7 +153,7 @@ class AutonomousFlowTests(unittest.TestCase):
     def make_runner(self, token, command, clone=None):
         module = self.runner_module
         tandem = module.Tandem(self.url, token, str(self.project))
-        return module.Runner(tandem, module.Repo(clone or self.clone), command, timeout=60, open_pull_requests=False)
+        return module.Runner(tandem, module.Repo(clone or self.clone), command, timeout=60)
 
     def project_version(self):
         return self.execute("SELECT version FROM public.projects WHERE id = %s", (self.project,))[0][0]

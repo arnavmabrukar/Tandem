@@ -44,7 +44,7 @@ class ProjectTests(unittest.TestCase):
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
         verifier = patch('mediator.github.verify_repository', return_value={'name': 'repo', 'full_name': 'owner/repo'})
-        verifier.start()
+        self.verify_repository = verifier.start()
         self.addCleanup(verifier.stop)
         self.body = dict(operationId=str(uuid4()), expectedVersion=None, name='repo',
                          repository='owner/repo', description='Initial', githubRepositoryId=1,
@@ -127,6 +127,30 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(self.scalar('SELECT version FROM projects WHERE id=%s', (project,)), 2)
         self.assertEqual(self.scalar('SELECT count(*) FROM operations WHERE actor_id=%s AND response_payload IS NULL', (self.owner,)), 0)
 
+    def test_owner_sets_agent_push_branch_and_blank_means_main(self):
+        project = self.create()
+        self.verify_repository.reset_mock()
+        first = self.edit(trackedBranch='agents/integration')
+        self.assertEqual(self.send(first, project).status_code, 200)
+        self.verify_repository.assert_called_once_with(
+            self.owner, 1, 1, 'agents/integration')
+        self.assertEqual(self.send(first, project).status_code, 200)
+        self.verify_repository.assert_called_once()
+        self.assertEqual(self.scalar('SELECT tracked_branch FROM projects WHERE id=%s', (project,)),
+                         'agents/integration')
+        second = self.edit(expectedVersion=2, trackedBranch='')
+        self.assertEqual(self.send(second, project).status_code, 200)
+        self.assertIsNone(self.scalar('SELECT tracked_branch FROM projects WHERE id=%s', (project,)))
+
+    def test_agent_push_branch_validation(self):
+        for branch in ('HEAD', 'refs/heads/main', '../main', 'bad branch', 'x.lock'):
+            with self.subTest(branch=branch):
+                project = self.create()
+                response = self.send(self.edit(trackedBranch=branch), project)
+                self.assertEqual(response.status_code, 422, response.text)
+                self.body['operationId'] = str(uuid4())
+                self.body['githubRepositoryId'] += 1
+
     def test_rename_persists_and_repository_stays_fixed(self):
         project = self.create()
         response = self.send(self.edit(name='Renamed project'), project)
@@ -183,10 +207,9 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(self.scalar('SELECT count(*) FROM operations WHERE operation_id=%s', (body['operationId'],)), 0)
         self.assertEqual(self.send(body, project).status_code, 200)
 
-    def test_import_identity_is_immutable(self):
+    def test_import_repository_is_immutable(self):
         project = self.create()
-        for change in [{'name': 'Renamed'}, {'repository': 'other/repo'}]:
-            self.assertEqual(self.send(self.edit(**change), project).status_code, 403)
+        self.assertEqual(self.send(self.edit(repository='other/repo'), project).status_code, 403)
         self.assertEqual(self.scalar('SELECT version FROM projects WHERE id=%s', (project,)), 1)
 
     def invitation(self, project, **changes):
@@ -210,6 +233,11 @@ class ProjectTests(unittest.TestCase):
         from mediator.schemas.invitations import AcceptInvitationRequest
         project = self.create()
         invite, _ = self.invitation(project)
+        pending = list_pending_invitations('friend@example.com')['invitations']
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]['projectName'], 'repo')
+        self.assertEqual(pending[0]['repository'], 'owner/repo')
+        self.assertEqual(pending[0]['invitedByName'], 'Owner')
         recipient = self.recipient()
         request = AcceptInvitationRequest(operationId=uuid4())
         with self.assertRaises(InvitationNotFound):

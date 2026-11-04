@@ -24,5 +24,9 @@ class ClearRoomRequest(BaseModel):
 
 class RoomReply(PlanChatResponse):
     requestPresence: bool = False
+    # The mediator writes a separate, scoped request for the worker. The human
+    # room message itself is never exposed through MCP.
+    relayTaskId: UUID | None = None
+    relayMessage: str | None = Field(default=None, max_length=8000)
     # Suggestions only; existing cancellation permissions/version checks still apply.
     cancelTaskIds: list[UUID] = Field(default_factory=list, max_length=20)

@@ -80,7 +80,8 @@ export function commandEndpoint(request: MutationRequest): {
       };
     case 'review-task':
       return { method: 'POST', path: `${base}/tasks/${segment(command.taskId)}/review`,
-        payload: { decision: command.decision, note: command.note } };
+        payload: { decision: command.decision, note: command.note,
+          ...(command.expectedTaskVersion !== undefined ? { expectedTaskVersion: command.expectedTaskVersion } : {}) } };
     case 'release-task':
       return { method: 'POST', path: `${base}/tasks/${segment(command.taskId)}/release`,
         payload: { note: command.note } };

@@ -25,6 +25,9 @@ def _run_decision(actor_id: UUID, project_id: UUID, task_id: UUID, operation_typ
     """Apply one decision atomically, replaying the saved result on an exact retry."""
     payload = {"projectId": str(project_id), "taskId": str(task_id),
                **request.model_dump(mode="json")}
+    # Preserve the payload of pre-existing decisions when replaying older clients.
+    if payload.get('expectedTaskVersion') is None:
+        payload.pop('expectedTaskVersion', None)
     with agent_tasks._transaction() as connection:
         reserved = connection.execute(
             """INSERT INTO public.operations
@@ -101,6 +104,8 @@ def review_task(actor_id: UUID, project_id: UUID, task_id: UUID,
     accepting = request.decision == "accept"
 
     def apply(connection, task: dict) -> str:
+        if request.expectedTaskVersion is not None and task['version'] != request.expectedTaskVersion:
+            raise agent_tasks.AgentTaskConflict('This review submission changed; reload before deciding')
         allowed = ("in_review",) if accepting else ("in_review", "blocked")
         if task["status"] not in allowed:
             raise agent_tasks.AgentTaskConflict(

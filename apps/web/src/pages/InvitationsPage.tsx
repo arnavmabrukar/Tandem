@@ -139,6 +139,8 @@ export function InvitationsPage() {
           {invitations.data.invitations.map((invitation) => (
             <section className="panel narrow-panel" key={invitation.id}>
               <h2>{invitation.projectName}</h2>
+              <p className="muted">GitHub repository: {invitation.repository}</p>
+              <p>Invited by {invitation.invitedByName}</p>
               <p>
                 Invited as <strong>{invitation.role}</strong> using{' '}
                 {invitation.email}.

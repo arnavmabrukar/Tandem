@@ -82,7 +82,7 @@ describe('real HTTP client contract', () => {
         '/api/projects',
       ],
       [
-        { type: 'update-project', name: 'P', repository: 'owner/repo', description: '' },
+        { type: 'update-project', name: 'P', repository: 'owner/repo', description: '', trackedBranch: 'agents/work' },
         'PATCH',
         '/api/projects/project-1',
       ],

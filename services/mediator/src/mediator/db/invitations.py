@@ -378,12 +378,16 @@ def list_pending_invitations(verified_email: str) -> dict:
                 invitation.id,
                 invitation.project_id AS "projectId",
                 project.name AS "projectName",
+                project.repository AS "repository",
+                inviter.name AS "invitedByName",
                 invitation.email,
                 invitation.role,
                 invitation.expires_at AS "expiresAt"
             FROM public.project_invitations AS invitation
             JOIN public.projects AS project
                 ON project.id = invitation.project_id
+            JOIN public.users AS inviter
+                ON inviter.id = invitation.invited_by
             WHERE invitation.email = %s
               AND invitation.status = 'pending'
               AND invitation.expires_at > statement_timestamp()

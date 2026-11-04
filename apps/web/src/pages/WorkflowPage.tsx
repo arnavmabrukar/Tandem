@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { ArrowRight, CheckCheck, ClipboardList, FileCheck2, Layers2 } from 'lucide-react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useSession } from '../auth/session';
@@ -28,9 +29,19 @@ export function WorkflowRedirect({ project, stage }: { project: Project; stage: 
 export function WorkflowPage({ project }: { project: Project }) {
   const { api, user } = useSession();
   const [params, setParams] = useSearchParams();
+  const root = useRef<HTMLDivElement>(null);
+  const [navigation, setNavigation] = useState(0);
   const requested = params.get('stage');
   // Never change the selected stage when background refreshes change the counts.
   const stage: Stage = requested === 'scope' || requested === 'execute' || requested === 'review' ? requested : 'plan';
+  useLayoutEffect(() => {
+    // A repeated click on the current stage must still reveal its controls.
+    // Only user navigation triggers this; background polling preserves scroll.
+    if (!navigation) return;
+    const panel = root.current?.querySelector<HTMLElement>(`#workflow-${stage}`);
+    panel?.focus({ preventScroll: true });
+    panel?.scrollIntoView({ block: 'start', behavior: 'instant' });
+  }, [navigation, stage]);
   const plans = useQuery({ queryKey: ['plans', user!.id, project.id],
     queryFn: ({ signal }) => api.listPlans(project.id, signal), retry: false });
   const drafts = plans.data?.filter(plan => !plan.approvedPlanVersion).length;
@@ -59,8 +70,9 @@ export function WorkflowPage({ project }: { project: Project }) {
     const updated = new URLSearchParams(params);
     updated.set('stage', value);
     setParams(updated);
+    setNavigation(value => value + 1);
   }
-  return <div className="workflow-page">
+  return <div className="workflow-page" ref={root}>
     <PageHeader title="Workflow" description="One place to plan, approve, execute, and finish the work."
       action={<span className="workflow-completed"><CheckCheck size={16} />{completed} completed</span>} />
     <nav aria-label="Workflow stages" className="workflow-stages">
@@ -77,19 +89,19 @@ export function WorkflowPage({ project }: { project: Project }) {
       <Button variant="outline" onClick={() => select(next)}>{guidance.action}<ArrowRight size={16} /></Button>
     </section>
     {/* Keep panels mounted so changing stages does not erase an unsaved draft or review note. */}
-    <div id="workflow-plan" hidden={stage !== 'plan'}><PlansPage project={project} plans={plans} embedded
+    <div id="workflow-plan" tabIndex={-1} hidden={stage !== 'plan'}><PlansPage project={project} plans={plans} embedded
       onApproved={startNow => select(startNow ? 'execute' : 'scope')} /></div>
-    <div id="workflow-scope" hidden={stage !== 'scope'}>
+    <div id="workflow-scope" tabIndex={-1} hidden={stage !== 'scope'}>
       <ApprovalsPage project={project} kind="contract" embedded />
       <div className="workflow-handoff"><p>Plans approved with “Approve and run” already have approved contracts. Ready tasks can move straight to execution.</p>
         <Button variant="outline" onClick={() => select('execute')}>Continue to execution<ArrowRight size={16} /></Button></div>
     </div>
-    <div id="workflow-execute" hidden={stage !== 'execute'}><TasksPage project={project} embedded />
+    <div id="workflow-execute" tabIndex={-1} hidden={stage !== 'execute'}><TasksPage project={project} embedded />
       <div className="workflow-handoff"><p>Agents work on approved scope. When results arrive, review them before accepting the work.</p>
         <Button variant="outline" onClick={() => select('review')}>Continue to review<ArrowRight size={16} /></Button></div>
     </div>
-    <div id="workflow-review" hidden={stage !== 'review'}>
-      <PageHeader level={2} title="Review & finish" description="Review the code, request changes, and accept completed work. Recording approval does not merge a pull request." />
+    <div id="workflow-review" tabIndex={-1} hidden={stage !== 'review'}>
+      <PageHeader level={2} title="Review & finish" description="Review the code published to the configured branch, request changes, and accept completed work." />
       {ready.length > 0 && <section className="panel" aria-label="Submitted work">
         <h2>Submitted work</h2><p className="muted">Open each task to inspect the result and finish acceptance.</p>
         <div className="workflow-task-list">{ready.map(task => <Link className="workflow-task-row" key={task.id} to={`/projects/${project.id}/tasks/${task.id}`}>

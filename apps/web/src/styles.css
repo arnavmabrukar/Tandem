@@ -1206,6 +1206,36 @@ td:first-child {
 .dialog-content form > .row.end {
   margin-top: 22px;
 }
+.setup-command-box { margin: 12px 0; border: 1px solid #cfdeea; border-radius: 10px; background: #f3f7fb; overflow: hidden; }
+.setup-command-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #cfdeea; font-size: 12px; }
+.setup-command-toolbar select { width: auto; max-width: 100%; padding: 5px 8px; font-size: 12px; }
+.setup-command-toolbar button { margin-left: auto; flex-shrink: 0; }
+.setup-command-box .oauth-code { margin: 0; border: 0; border-radius: 0; padding: 16px; background: transparent; }
+.dialog-content.plan-approval-dialog { width: min(860px, calc(100vw - 32px)); display: flex; flex-direction: column; overflow: hidden; }
+.plan-approval-dialog > .row, .plan-approval-dialog > p { flex-shrink: 0; }
+.plan-approval-body { overflow-y: auto; min-height: 0; padding-right: 8px; }
+.plan-approval-overview { padding: 16px; background: #f3f7fb; border: 1px solid #cfdeea; border-radius: 8px; margin-bottom: 20px; }
+.plan-approval-overview h3 { font-size: 17px; line-height: 1.4; margin: 6px 0 10px; }
+.plan-approval-overview p { font-size: 14px; line-height: 1.6; }
+.plan-approval-section-title { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
+.plan-approval-tasks { display: grid; gap: 10px; margin-bottom: 20px; }
+.plan-approval-task { border: 1px solid #cfdeea; border-radius: 8px; }
+.plan-approval-task summary { cursor: pointer; padding: 12px; font-size: 14px; line-height: 1.5; }
+.plan-approval-number { display: inline-block; text-align: center; min-width: 24px; margin-right: 8px; border-radius: 4px; background: #e4edf5; font-weight: 700; }
+.plan-approval-task-body { border-top: 1px solid #cfdeea; padding: 14px 16px; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.plan-approval-task-body dl { margin-top: 12px; }
+.plan-approval-task-body dt { font-size: 12px; font-weight: 700; color: #526c82; margin-top: 12px; }
+.plan-approval-task-body dd { margin: 3px 0 0; }
+.plan-approval-task-body code { display: block; }
+.plan-approval-task-body ul { list-style: disc; padding-left: 20px; }
+.plan-approval-task-body li + li { margin-top: 4px; }
+.plan-approval-footer { flex-shrink: 0; border-top: 1px solid #cfdeea; margin-top: 16px; padding-top: 12px; }
+.plan-approval-footer p { font-size: 12px; line-height: 1.5; color: #526c82; margin-bottom: 12px; }
+@media (max-width: 600px) {
+  .dialog-content.plan-approval-dialog { padding: 16px; }
+  .plan-approval-footer .row { gap: 8px; }
+  .plan-approval-footer button { flex: 1 1 auto; }
+}
 .sign-in {
   min-height: 100dvh;
   display: grid;
@@ -1540,6 +1570,12 @@ td:first-child {
   border: 1px solid #d9e5ee; border-radius: .5rem; background: #f5f8fa; font-size: .85rem; }
 .agent-advanced { margin-block: 1rem; }
 .agent-advanced summary, .oauth-step summary { cursor: pointer; }
+.agent-setup-dialog { width: min(760px, calc(100vw - 32px)); }
+.setup-tabs { display: flex; gap: .25rem; border-bottom: 1px solid #d9e5ee; margin: .5rem 0 1.25rem; }
+.setup-tabs button { border: 0; border-bottom: 3px solid transparent; background: transparent; color: #536f84; cursor: pointer; font: inherit; font-weight: 600; padding: .75rem 1rem; }
+.setup-tabs button[aria-selected="true"] { border-bottom-color: #0d5d61; color: #0d5d61; }
+.setup-tabs button:focus-visible { outline: 2px solid #0d5d61; outline-offset: -2px; }
+.worker-reconnect { border-top: 0; }
 
 /* A bounded conversation keeps the composer within reach as the chat grows. */
 .plan-chat { display: flex; flex-direction: column; height: min(780px, 80dvh); min-height: 540px; background: #fff; border: 1px solid #dae5ee; border-radius: 22px; overflow: hidden; box-shadow: 0 8px 32px #172c3d10; margin-bottom: 32px; }
@@ -1576,6 +1612,9 @@ td:first-child {
 .chat-composer:focus-within { border-color: #6089aa; box-shadow: 0 0 0 3px #0b5a8a0c; }
 .chat-composer textarea { width: 100%; border: 0; background: transparent; border-radius: 0; resize: none; min-height: 28px; max-height: 180px; padding: 0; margin: 0; box-shadow: none; }
 .chat-composer textarea:focus-visible { outline: none; }
+.room-mentions { display: flex; flex-wrap: wrap; gap: .4rem; padding-bottom: .65rem; margin-bottom: .65rem; border-bottom: 1px solid #d5e2ec; }
+.room-mentions button { border: 1px solid #b8cbd9; border-radius: .5rem; background: #f1f7fa; color: #0b4b66; cursor: pointer; font: inherit; font-size: .85rem; padding: .35rem .6rem; }
+.room-mentions button:hover, .room-mentions button:focus-visible { background: #e1f1f4; outline: 2px solid #0d5d61; outline-offset: 1px; }
 .chat-composer-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
 .chat-composer-actions > span { color: #7f98aa; font-size: 11px; }
 .chat-send.button { width: 34px; height: 34px; min-height: 34px; padding: 0; border-radius: 11px; }
@@ -1597,14 +1636,20 @@ td:first-child {
 }
 @media (prefers-reduced-motion: reduce) { .chat-dots { animation: none; } }
 
-/* A project conversation with a compact, persistent agent roster. */
-.agent-room-layout { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 20px; align-items: start; }
-.agent-room-chat { min-width: 0; margin: 0; }
+/* The room fills the workspace below the actual header height, including when
+   the header wraps. Transcript and roster scroll independently on desktop. */
+.workspace:has(.agent-room-page) { height: 100dvh; display: flex; flex-direction: column; }
+.workspace:has(.agent-room-page) > .topbar { flex-shrink: 0; padding-inline: 24px; }
+main#main:has(.agent-room-page) { padding: 0; margin: 0; max-width: none; flex: 1; min-height: 0; }
+.agent-room-page { --room-background: #f9fbfd; height: 100%; display: flex; flex-direction: column; background: var(--room-background); }
+.agent-room-layout { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 0; flex: 1; min-height: 0; }
+.agent-room-chat { min-width: 0; min-height: 0; height: 100%; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
 .room-transcript { flex: 1; min-height: 0; overflow-y: auto; }
 .agent-room-chat .chat-header, .agent-room-chat .chat-bottom { flex-shrink: 0; }
+.agent-room-chat, .agent-room-chat .chat-bottom { background: var(--room-background); }
 .agent-room-chat .chat-footnote { justify-content: flex-start; align-items: center; flex-wrap: nowrap; }
 .agent-room-chat .chat-footnote svg { flex-shrink: 0; }
-.room-roster { background: white; border: 1px solid var(--border, #dde7f0); border-radius: 18px; padding: 18px; }
+.room-roster { background: var(--room-background); border-left: 1px solid var(--border, #dde7f0); padding: 18px; min-height: 0; overflow-y: auto; }
 .room-roster > button { width: 100%; }
 .room-roster h2 { font-size: 15px; margin: 24px 0 14px; }
 .room-roster h3 { font-size: 13px; color: #536f84; margin: 24px 0 12px; }
@@ -1633,6 +1678,14 @@ td:first-child {
 .room-header > div { min-width: 0; }
 .room-header h2 { margin-bottom: 10px; }
 .room-header > button { flex-shrink: 0; }
+.room-work-status { padding: 14px 24px; border-bottom: 1px solid #ecf2f6; font-size: 13px; max-height: 200px; overflow-y: auto; flex-shrink: 0; }
+.room-work-status summary { cursor: pointer; }
+.room-work-preview { display: block; margin-top: 4px; color: #536f84; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.room-work-status details[open] summary { margin-bottom: 10px; }
+.room-work-item { display: block; padding: 10px 0; color: inherit; text-decoration: none; border-bottom: 1px solid #ecf2f6; overflow-wrap: anywhere; }
+.room-work-item:hover strong { text-decoration: underline; }
+.room-work-item > span { display: block; margin-top: 4px; color: #536f84; white-space: pre-wrap; max-height: 4.5em; overflow: hidden; }
+.room-work-status p { margin: 8px 0 0; }
 .room-avatar { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 50%; background: #fff; border: 1px solid #dde7f0; color: #536f84; }
 .room-avatar img { width: 19px; height: 19px; }
 .room-avatar-human { background: #e5edf4; }
@@ -1641,7 +1694,10 @@ td:first-child {
 .mediator-tag { display: inline-flex; border-radius: 5px; padding: 2px 6px; background: #edf4f9; color: #3774a6; font-size: 10px; font-weight: 600; line-height: 1.5; }
 .room-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
 .room-change { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid #dde7f0; border-radius: 10px; margin: 8px 0; }
-.room-claims { margin-top: 20px; }
+.room-task-update { margin-top: 12px; padding-top: 12px; border-top: 1px solid #d2e1ed; }
+.room-task-update > details { margin-block: 12px; }
+.room-task-update code { overflow-wrap: anywhere; }
+.room-claims { padding: 10px 24px; border-top: 1px solid #d2e1ed; flex-shrink: 0; max-height: 30dvh; overflow: auto; }
 .workflow-completed { display: flex; align-items: center; gap: 8px; color: #42617b; font-size: 13px; white-space: nowrap; }
 .workflow-stages { margin-bottom: 20px; }
 .workflow-stages ol { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 0; margin: 0; list-style: none; }
@@ -1683,7 +1739,14 @@ td:first-child {
   .workflow-task-row { flex-wrap: wrap; }
   .workflow-task-row > div { flex-basis: 100%; }
 }
-@media (max-width: 1050px) { .agent-room-layout { grid-template-columns: minmax(0, 1fr); } .room-roster { grid-row: 1; } .room-roster h2, .room-roster h3 { margin-top: 14px; } }
+@media (max-width: 1050px) {
+  .workspace:has(.agent-room-page) { height: auto; min-height: 100dvh; }
+  .agent-room-page { height: auto; }
+  .agent-room-layout { grid-template-columns: minmax(0, 1fr); display: flex; flex-direction: column; }
+  .agent-room-chat { flex: 0 0 auto; height: max(760px, 90dvh); }
+  .room-roster { flex-shrink: 0; overflow: visible; border-left: 0; border-top: 1px solid #d2e1ed; }
+  .room-roster h2, .room-roster h3 { margin-top: 14px; }
+}
 
 /* Project setup */
 .setup-stack {

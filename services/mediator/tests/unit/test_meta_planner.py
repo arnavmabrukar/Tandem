@@ -236,7 +236,7 @@ class ChatTests(unittest.TestCase):
                 self.assertIn(planner._PLAN_DROPPED, result.reply)
                 # Nothing unvalidated survives alongside the reply.
                 self.assertIsNone(result.proposal)
-                self.assertIsNone(getattr(result, "relayTaskId", None))  # Not on every room schema.
+                self.assertIsNone(result.relayTaskId)
                 self.assertEqual(result.cancelTaskIds, [])
                 self.assertFalse(result.requestPresence)
 

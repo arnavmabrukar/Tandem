@@ -98,6 +98,18 @@ class ProjectDeletionTests(unittest.TestCase):
                     "taskVersion": 1, "contractVersion": 1, "head": None}))
         agent_tasks.claim_task(identity, project, task, 1, uuid4())
         agent_tasks.post_message(identity, project, task, "status", f"{marker} agent message", uuid4())
+        self.execute(
+            """INSERT INTO public.agent_room_exchanges
+               (project_id, sender_user_id, sender_name, operation_id, body, lease, lease_until)
+               VALUES (%s, %s, 'Owner', %s, %s, %s, now())""",
+            (project, owner, uuid4(), f"{marker} room message", uuid4()),
+        )
+        self.execute(
+            """INSERT INTO public.agent_room_exchanges
+               (project_id, sender_agent_id, sender_name, operation_id, body, lease, lease_until)
+               VALUES (%s, %s, 'Agent', %s, %s, %s, now())""",
+            (project, agent, uuid4(), f"{marker} agent room reply", uuid4()),
+        )
 
         proposal = PlanProposal(goal=f"{marker} goal", summary=f"{marker} summary", tasks=[
             {"key": "one", "title": f"{marker} planned", "contractSummary": f"{marker} scope", "criteria": ["Works"]},
@@ -147,7 +159,8 @@ class ProjectDeletionTests(unittest.TestCase):
         # Prove the scan works and the fixture really reached the important tables.
         before = self.tables_containing(marker)
         for table in ("projects", "tasks", "messages", "contract_approvals", "project_activity", "agents",
-                      "plan_proposal_revisions", "project_invitations", "operations", "plan_approvals"):
+                      "plan_proposal_revisions", "project_invitations", "operations", "plan_approvals",
+                      "agent_room_exchanges"):
             self.assertIn(table, before)
         for table in ("agent_project_grants", "plan_tasks", "plan_proposals", "mcp_oauth_sessions"):
             self.assertTrue(self.execute(f"SELECT count(*) FROM public.{table} WHERE project_id = %s",

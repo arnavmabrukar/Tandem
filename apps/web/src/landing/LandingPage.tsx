@@ -106,12 +106,12 @@ const steps = [
   ],
   [
     'Agents work in parallel',
-    'Each claims a task and its files, posts messages in the task thread and works on its own tandem/… branch.',
+    'Each claims a task and its files, posts messages in the task thread and works in its own isolated worktree.',
     'Agents',
   ],
   [
-    'Review, merge, then Accept work',
-    'Merge the pull request on GitHub. Accepting the work in Tandem releases the tasks that were waiting on it.',
+    'Review, then Accept work',
+    'Review the commit on the configured GitHub branch. Accepting the work in Tandem releases waiting tasks.',
     'You',
   ],
 ];
@@ -273,11 +273,11 @@ export function LandingPage() {
                 <ol>
                   <li className="lp-ask">
                     <time>12:10</time>
-                    <b>Needs you.</b> Review the pull request for T-14, then accept the work.
+                    <b>Needs you.</b> Review the published commit for T-14, then accept the work.
                   </li>
                   <li>
                     <time>12:09</time>
-                    <b>Claude Code</b> opened PR <code>#212</code> and moved T-14 to review.
+                    <b>Claude Code</b> pushed a verified commit and moved T-14 to review.
                   </li>
                   <li className="lp-warn">
                     <time>12:04</time>
@@ -311,10 +311,10 @@ export function LandingPage() {
         <section id="loop" className="lp-first">
           <div className="lp-wrap lp-split">
             <div className="lp-copy">
-              <h2>From a plan to a merged pull request</h2>
+              <h2>From a plan to a verified commit</h2>
               <p>
                 Each step has an owner. Agents propose and do the work. You approve what gets done and
-                decide what gets merged. Dependent tasks stay locked until you accept the work they
+                decide what gets accepted. Dependent tasks stay locked until you accept the work they
                 rely on.
               </p>
             </div>
@@ -343,7 +343,7 @@ export function LandingPage() {
               <p>
                 Agents connect over MCP with OAuth or an agent token. For agents that only act when
                 prompted, an optional runner on your own machine polls for assigned tasks, works in a
-                dedicated clone, opens the pull request and moves the task to review.
+                dedicated worktree, pushes to your configured branch and moves the task to review.
               </p>
             </div>
             <div className="lp-panel">

@@ -150,7 +150,7 @@ export type Command =
   | { type: 'auto-delegate'; enabled: boolean }
   | { type: 'create-project'; name: string; repository: string; description: string; githubRepositoryId: number; githubInstallationId: number; trackedBranch: string }
   | { type: 'delete-project' }
-  | { type: 'update-project'; name: string; repository: string; description: string }
+  | { type: 'update-project'; name: string; repository: string; description: string; trackedBranch: string }
   | { type: 'invite'; email: string; role: Role }
   | { type: 'revoke-invite'; invitationId: string }
   | {
@@ -174,7 +174,7 @@ export type Command =
     }
   | { type: 'assign-task'; taskId: string; agentId: string | null; autoSelect?: boolean }
   | { type: 'cancel-task'; taskId: string }
-  | { type: 'review-task'; taskId: string; decision: 'accept' | 'request_changes'; note: string | null }
+  | { type: 'review-task'; taskId: string; decision: 'accept' | 'request_changes'; note: string | null; expectedTaskVersion?: number }
   | { type: 'release-task'; taskId: string; note: string | null }
   | { type: 'send-message'; taskId: string; body: string; replyTo: string | null }
   | {
@@ -266,6 +266,8 @@ export const pendingInvitationSchema = z.object({
   id: z.string().uuid(),
   projectId: z.string().uuid(),
   projectName: z.string().min(1),
+  repository: z.string().min(1),
+  invitedByName: z.string().min(1),
   email: z.string().email(),
   role: z.enum(roles),
   expiresAt: z.string().datetime({ offset: true }),

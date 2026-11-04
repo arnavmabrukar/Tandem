@@ -40,12 +40,14 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
   const changed = !!project && project.version !== formVersion;
   const trimmedName = name.trim();
   const dirty =
-    !!project && (description !== project.description || trimmedName !== project.name);
+    !!project && (description !== project.description || trimmedName !== project.name
+      || branch.trim() !== (project.trackedBranch ?? ''));
   function loadLatest() {
     if (project) {
       setName(project.name);
       setRepo(project.repository);
       setDescription(project.description);
+      setBranch(project.trackedBranch ?? '');
       setFormVersion(project.version);
       setSaved(false);
       save.reset();
@@ -82,12 +84,13 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
               <GitHubRepositoryPicker onSelect={(repository, installationId) => {
                 setSelection(repository ? {repositoryId: repository.id, installationId} : null);
                 setRepo(repository?.fullName ?? ''); setName(repository?.name.slice(0, 80) ?? '');
-                setBranch(repository?.defaultBranch ?? ''); setDescription(repository?.description.slice(0, 1000) ?? '');
+                // An unset push branch always selects main, regardless of GitHub's default.
+                setBranch(''); setDescription(repository?.description.slice(0, 1000) ?? '');
               }} />
               {selection && <details>
                 <summary>Optional settings</summary>
-                <Field label="Branch to track" hint="Defaults to the repository’s default branch. The backend checks that this branch exists.">
-                  <input required maxLength={255} value={branch} onChange={e => setBranch(e.target.value)} />
+                <Field label="Agent push branch" hint="Agents push verified commits only here. Leave blank for main.">
+                  <input maxLength={255} value={branch} placeholder="main" onChange={e => setBranch(e.target.value)} />
                 </Field>
                 <Field label="Description">
                   <textarea
@@ -100,7 +103,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
                   />
                 </Field>
               </details>}
-              <Button type="submit" disabled={!selection || !branch}>
+              <Button type="submit" disabled={!selection}>
                 {save.isPending ? 'Importing…' : 'Import repository'}
               </Button>
             </fieldset>
@@ -158,14 +161,13 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
               </a>
             </div>
           </div>
-          <span className="branch-chip" title="Tracked branch">
+          <span className="branch-chip" title="Agent push branch">
             <GitBranch size={14} aria-hidden="true" />
-            <code>{project.trackedBranch || 'Branch not recorded'}</code>
+            <code>{project.trackedBranch || 'main'}</code>
           </span>
         </div>
         <p className="small muted identity-note">
-          The repository and branch are set when a repository is imported. To track a different
-          repository, import it as a new project.
+          The repository is fixed after import. Set the branch where agents may publish below.
         </p>
         <form
           className="setup-form"
@@ -173,7 +175,8 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
             e.preventDefault();
             try {
               const result = await save.mutateAsync({
-                type: 'update-project', name: trimmedName, repository: project.repository, description,
+                type: 'update-project', name: trimmedName, repository: project.repository,
+                description, trackedBranch: branch,
               });
               setFormVersion(result.projectVersion);
               setSaved(true);
@@ -191,6 +194,17 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
                   value={name}
                   onChange={(e) => {
                     setName(e.target.value);
+                    setSaved(false);
+                  }}
+                />
+              </Field>
+              <Field label="Agent push branch" hint="Agents push verified commits only here. Leave blank for main.">
+                <input
+                  maxLength={255}
+                  value={branch}
+                  placeholder="main"
+                  onChange={(e) => {
+                    setBranch(e.target.value);
                     setSaved(false);
                   }}
                 />
@@ -218,6 +232,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
                     onClick={() => {
                       setName(project.name);
                       setDescription(project.description);
+                      setBranch(project.trackedBranch ?? '');
                       setSaved(false);
                     }}
                   >

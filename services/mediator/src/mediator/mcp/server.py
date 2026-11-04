@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 mcp = MCPServer("Tandem", instructions=(
     "When a tool result includes a mediator presence request, call tandem_acknowledge_presence "
     "with its projectId/checkId to reply in the project room. To participate while idle, "
-    "poll tandem_get_presence_requests periodically. Human room exchanges remain private."
+    "poll tandem_get_presence_requests periodically. Check tandem_get_worker_room_requests "
+    "between task steps and reply with tandem_reply_worker_room_request. "
+    "Only separate mediator-written requests addressed to this worker are visible; "
+    "human room exchanges remain private."
 ), middleware=[deliver_presence_requests])
 
 
@@ -193,6 +196,25 @@ def tandem_acknowledge_presence(projectId: UUID, checkId: UUID) -> dict[str, Any
     from mediator.db.room import acknowledge_presence
     identity = _project_identity(projectId)
     return _run(lambda: acknowledge_presence(projectId, checkId, identity))
+
+
+@mcp.tool()
+def tandem_get_worker_room_requests(projectId: UUID, taskId: UUID | None = None) -> dict[str, Any]:
+    """Get only mediator-relayed questions addressed to this authenticated agent.
+
+    Other human room messages and conversation history remain private.
+    """
+    from mediator.db.room import pending_worker_requests
+    identity = _project_identity(projectId)
+    return _run(lambda: pending_worker_requests(projectId, identity, taskId))
+
+
+@mcp.tool()
+def tandem_reply_worker_room_request(projectId: UUID, requestId: UUID, body: MessageBody) -> dict[str, Any]:
+    """Reply in the room under your authenticated agent identity, once per request."""
+    from mediator.db.room import reply_worker_request
+    identity = _project_identity(projectId)
+    return _run(lambda: reply_worker_request(projectId, requestId, body, identity))
 
 
 @mcp.tool()
