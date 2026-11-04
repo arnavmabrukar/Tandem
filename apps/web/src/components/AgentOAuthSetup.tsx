@@ -54,10 +54,11 @@ function WorkerSetup({ project, agent, url, initialClient }: { project: Project;
   const [engine, setEngine] = useState(initialClient === 'Claude Code' ? 'claude' : initialClient === 'Codex' ? 'codex' : 'custom');
   const [custom, setCustom] = useState('');
   const [verification, setVerification] = useState('');
-  const codexSetup = 'npm install -g @openai/codex@latest\ncodex login\ncodex login status';
+  const sandboxSetup = 'npm install -g @anthropic-ai/sandbox-runtime@0.0.81';
+  const codexSetup = 'npm install -g @openai/codex@latest @anthropic-ai/sandbox-runtime@0.0.81\ncodex login\ncodex login status';
   // The native installer uses ~/.local/bin; make it available in this terminal
   // immediately so the login commands and runner can find the new executable.
-  const claudeSetup = 'curl -fsSL https://claude.ai/install.sh | bash\nexport PATH="$HOME/.local/bin:$PATH"\nclaude auth login\nclaude auth status';
+  const claudeSetup = `curl -fsSL https://claude.ai/install.sh | bash\nexport PATH="$HOME/.local/bin:$PATH"\n${sandboxSetup}\nclaude auth login\nclaude auth status`;
   const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
   const repositoryValid = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(project.repository)
     && project.repository.split('/').every(part => part !== '.' && part !== '..');
@@ -77,22 +78,27 @@ function WorkerSetup({ project, agent, url, initialClient }: { project: Project;
     {engine === 'custom' && <Field label="Agent command"><input value={custom} onChange={e => setCustom(e.target.value)} placeholder="Your headless command" /></Field>}
     {engine === 'custom' && <p className="small muted">Accept tasks on stdin, run without prompts, and leave edits for the runner to verify and commit. Sign in before starting.</p>}
     {engine === 'codex' && <section aria-label="Codex CLI setup">
-      <p>One-time Codex CLI setup: run each line in your terminal and finish browser sign-in. Requires Node.js/npm.</p>
+      <p>Install Codex and the verification sandbox, then finish browser sign-in. Requires Node.js/npm.</p>
       <pre className="oauth-code">{codexSetup}</pre>
       <CopyButton text={codexSetup} label="Copy Codex setup commands" />
     </section>}
     {engine === 'claude' && <section aria-label="Claude CLI setup">
-      <p>One-time Claude Code setup: run each line in your terminal and finish browser sign-in.</p>
+      <p>Install Claude Code and the verification sandbox, then finish browser sign-in. Requires Node.js/npm.</p>
       <pre className="oauth-code">{claudeSetup}</pre>
       <CopyButton text={claudeSetup} label="Copy Claude setup commands" />
     </section>}
+    {engine === 'custom' && <section aria-label="Verification sandbox setup">
+      <p>Install the verification sandbox. Requires Node.js/npm.</p>
+      <pre className="oauth-code">{sandboxSetup}</pre>
+      <CopyButton text={sandboxSetup} label="Copy sandbox setup command" />
+    </section>}
     <details className="agent-advanced"><summary>Verification (optional)</summary>
-      <p className="small muted">Automatically runs root package.json scripts: typecheck, lint, test and build, when present. For other checks, enter commands below, one per line; these replace automatic checks. Failed checks stop the push.</p>
+      <p className="small muted">Runs root typecheck, lint, test and build scripts in an OS sandbox with an isolated environment and no network access. Other commands below replace these checks. Missing sandbox, denied access or failed checks stop the push; checks never fall back to the host.</p>
       <Field label="Verification commands"><textarea value={verification} onChange={e => setVerification(e.target.value)} placeholder="npm run test:e2e" /></Field>
     </details>
-    <p>Tandem prepares <strong>{project.repository}</strong> automatically, with a worktree and task branches per agent. Your GitHub account needs repository access.</p>
+    <p>Tandem prepares <strong>{project.repository}</strong> automatically with a separate worktree per agent. Verified commits are pushed only to <strong>{project.trackedBranch?.trim() || 'main'}</strong>, as configured in Project setup.</p>
     {!repositoryValid && <p role="alert">Set this project’s GitHub repository to owner/repository before starting a worker.</p>}
-    <p className="small muted">macOS/Linux: Python 3.11+, curl, Git, and signed-in GitHub CLI (gh auth login) and agent CLI.</p>
+    <p className="small muted">macOS/Linux: Python 3.11+, curl, Git, and signed-in GitHub CLI (gh auth login) and agent CLI. Linux verification also requires bubblewrap and socat.</p>
     <h3>3. Get your agent token</h3>
     {agent ? <><p>Copy this agent’s token for the terminal prompt.</p><AgentTokenButton project={project} agent={agent} /></>
       : <p>After connecting, open Set up worker on your agent to get its token.</p>}
@@ -103,7 +109,7 @@ function WorkerSetup({ project, agent, url, initialClient }: { project: Project;
       <pre className="oauth-code">{installCommand}</pre>
       <CopyButton key={installCommand} text={installCommand} label="Copy download and start command" disabled={!ready} />
     </section>
-    <p className="small muted">Saves the runner to Downloads. Keep the terminal open; Ctrl+C stops it. The runner verifies, commits, pushes and opens PRs; you approve and merge.</p>
+    <p className="small muted">Saves the runner to Downloads. Keep the terminal open; Ctrl+C stops it. The runner verifies, commits, and pushes only to the branch configured in Project setup; you review and accept the work.</p>
   </section>;
 }
 

@@ -144,6 +144,7 @@ test('project edits persist after reload and stale tabs cannot overwrite them', 
         return;
       }
       state.project.description = body.description;
+      state.project.trackedBranch = body.trackedBranch || null;
       state.project.version++;
       await route.fulfill({ json: {
         projectId: state.project.id, entityId: state.project.id,
@@ -154,11 +155,13 @@ test('project edits persist after reload and stale tabs cannot overwrite them', 
     await expect(tab.getByRole('button', { name: 'Save project', exact: true })).toBeEnabled();
   }
   await second.getByLabel('Description', { exact: true }).fill('Stale tab draft');
+  await page.getByLabel('Agent push branch', { exact: true }).fill('agents/integration');
   await page.getByLabel('Description', { exact: true }).fill('Saved owner description');
   await page.getByRole('button', { name: 'Save project', exact: true }).click();
   await expect(page.getByText('Project saved by the backend.')).toBeVisible();
   await page.reload();
   await expect(page.getByLabel('Description', { exact: true })).toHaveValue('Saved owner description');
+  await expect(page.getByLabel('Agent push branch', { exact: true })).toHaveValue('agents/integration');
   // Refresh exercises the same workspace update that polling delivers.
   await second.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(second.getByText('Newer project data is available.')).toBeVisible();
@@ -569,7 +572,7 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(worker).not.toContainText('agent-integrations/runner/');
   await expect(worker).toContainText('No access to Tandem’s private repository is needed.');
   const cliSetup = worker.getByRole('region', { name: 'Codex CLI setup' });
-  await expect(cliSetup.locator('pre')).toHaveText('npm install -g @openai/codex@latest\ncodex login\ncodex login status');
+  await expect(cliSetup.locator('pre')).toHaveText('npm install -g @openai/codex@latest @anthropic-ai/sandbox-runtime@0.0.81\ncodex login\ncodex login status');
   const download = worker.getByRole('region', { name: 'Download and start worker' });
   await expect(download.locator('pre')).toContainText('$HOME/Downloads/tandem_runner.py');
   await expect(download.locator('pre')).toContainText("--repository 'team/tandem'");
@@ -599,11 +602,12 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(worker.getByLabel('Worker engine')).toHaveValue('claude');
   await expect(cliSetup).toHaveCount(0);
   const claudeSetup = worker.getByRole('region', { name: 'Claude CLI setup' });
-  await expect(claudeSetup.locator('pre')).toHaveText('curl -fsSL https://claude.ai/install.sh | bash\nexport PATH="$HOME/.local/bin:$PATH"\nclaude auth login\nclaude auth status');
+  await expect(claudeSetup.locator('pre')).toHaveText('curl -fsSL https://claude.ai/install.sh | bash\nexport PATH="$HOME/.local/bin:$PATH"\nnpm install -g @anthropic-ai/sandbox-runtime@0.0.81\nclaude auth login\nclaude auth status');
   await expect(claudeSetup.getByRole('button', { name: 'Copy Claude setup commands' })).toBeEnabled();
   await expect(install.locator('pre')).toContainText('--agent claude');
   await worker.getByLabel('Worker engine').selectOption('custom');
   await expect(claudeSetup).toHaveCount(0);
+  await expect(worker.getByRole('region', { name: 'Verification sandbox setup' })).toContainText('@anthropic-ai/sandbox-runtime@0.0.81');
   await expect(worker.getByRole('button', { name: 'Copy worker command' })).toHaveCount(0);
   await expect(install.locator('pre')).toContainText('YOUR_AGENT_COMMAND');
   await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeDisabled();

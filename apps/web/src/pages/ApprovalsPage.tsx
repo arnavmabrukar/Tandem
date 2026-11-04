@@ -28,7 +28,7 @@ export function ApprovalsPage({ project, kind, embedded = false }: { project: Pr
           <strong>Decisions apply to one exact target.</strong>
           <p>
             The mediator validates your authority and the current task, contract and PR head.
-            Recording an approval does not merge the pull request.
+            Recording an approval does not change GitHub; agents publish verified commits to the configured project branch.
           </p>
         </div>
       </div>}

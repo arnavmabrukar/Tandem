@@ -32,7 +32,7 @@ def create_project(
 
     from mediator.github import verify_repository
     repo = verify_repository(actor_id, request.githubInstallationId,
-                             request.githubRepositoryId, request.trackedBranch)
+                             request.githubRepositoryId, request.trackedBranch or "main")
     # The selected GitHub record is authoritative, not editable browser text.
     if request.repository != repo["full_name"] or request.name != repo["name"][:80]:
         raise ProjectAccessDenied("Repository selection changed; select it again")
@@ -143,7 +143,8 @@ def create_project(
                 (
                     request.name,
                     request.repository,
-                    request.description, request.githubRepositoryId, request.githubInstallationId, request.trackedBranch, actor_id,
+                    request.description, request.githubRepositoryId, request.githubInstallationId,
+                    request.trackedBranch or None, actor_id,
                 ),
             ).fetchone()
 
@@ -218,10 +219,23 @@ def update_project(
             "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
         )
 
-        original = connection.execute("SELECT name, repository FROM public.projects WHERE id=%s", (project_id,)).fetchone()
+        original = connection.execute(
+            """SELECT name, repository, tracked_branch,
+                      github_repository_id, github_installation_id
+               FROM public.projects WHERE id=%s""",
+            (project_id,),
+        ).fetchone()
         if original is None or original["repository"] != request.repository or original["name"] != request.name:
             raise ProjectAccessDenied("Project name and repository cannot be changed after import")
 
+        # Verify modern imported projects against GitHub before changing the
+        # destination branch. Legacy projects without import IDs still use the
+        # runner's remote-branch check before any work begins.
+        requested_branch = (
+            original["tracked_branch"]
+            if request.trackedBranch is None
+            else request.trackedBranch
+        )
         # Reserve the operation before making changes.
         # An identical concurrent operation waits for its outcome.
         reservation = connection.execute(
@@ -285,6 +299,22 @@ def update_project(
             )
 
         else:
+            current_branch = original["tracked_branch"] or "main"
+            if (requested_branch or "main") != current_branch and (
+                original["github_repository_id"] and original["github_installation_id"]
+            ):
+                # Verify only a new, authorized branch-setting operation. Exact
+                # retries return their saved result without another GitHub call.
+                from mediator.github import verify_repository
+                verified = verify_repository(
+                    actor_id,
+                    original["github_installation_id"],
+                    original["github_repository_id"],
+                    requested_branch or "main",
+                )
+                if verified["full_name"] != request.repository:
+                    raise ProjectAccessDenied("Repository selection changed; reconnect GitHub")
+
             # Compare the version and perform the edit in ONE statement.
             # Two different edits against the same version cannot both succeed.
             project = connection.execute(
@@ -292,12 +322,14 @@ def update_project(
                 UPDATE public.projects
                 SET
                     description = %s,
+                    tracked_branch = NULLIF(%s, ''),
                     version = version + 1
                 WHERE id = %s AND version = %s
                 RETURNING id, version
                 """,
                 (
                     request.description,
+                    requested_branch,
                     project_id,
                     request.expectedVersion,
                 ),

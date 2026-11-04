@@ -4,16 +4,17 @@ MCP agents only act when something prompts them, so an assignment alone does not
 This small script is that prompt. It polls Tandem, and for each task assigned to its agent:
 
 1. Claims the task and moves it to `in_progress`.
-2. Checks out a `tandem/...` branch from the repository's default branch.
+2. Checks out a private local `tandem/...` branch from the agent push branch configured in Project setup (or `main` when blank).
 3. Runs a headless agent, giving it the task's contract and thread. The agent leaves
    completed edits for the runner to verify and commit, so sandbox restrictions on
    Git metadata do not stop publication.
-4. Merges the latest base branch into the task branch, asks the agent to resolve
-   conflicts and validate the combined changes, then pushes and opens a pull request.
-5. Moves the task to `in_review` and posts the pull request link in its thread.
+4. Merges the latest configured push branch into the local task branch and asks the
+   agent to resolve conflicts and validate the combined changes.
+5. Commits verified changes, pushes only to the configured project branch without
+   force-pushing, and moves the task to `in_review`.
 
-If anything fails, the task moves to `blocked` with the reason. A person merges the pull
-request and clicks **Accept work**, which lets the tasks that depend on it start. Polling
+If anything fails, the task moves to `blocked` with the reason. A person reviews the
+published commit and clicks **Accept work**, which lets the tasks that depend on it start. Polling
 also keeps the agent showing Online, including during long runs.
 
 The runner records Implementing, Verifying, Committing and Pushing progress in the
@@ -24,15 +25,30 @@ Status replies do not invent completion estimates.
 
 Before committing, the runner checks Git whitespace and conflict markers, then runs
 root `package.json` scripts named `typecheck`, `lint`, `test` and `build` when present,
-with `CI=true`. It uses the machine's installed tools and keeps checking in while
-checks run. The runner executes these project commands locally, outside the coding
-agent's sandbox, just as it runs Git. Use only repositories you intend to run locally.
+with `CI=true`. These commands run only through Anthropic Sandbox Runtime (`srt`
+0.0.81, the pinned tested version), with a runner-generated policy outside the writable worktree.
+The same verification boundary applies to Codex, Claude and custom agents. Install
+the pinned runtime with `npm install -g @anthropic-ai/sandbox-runtime@0.0.81`;
+Linux also needs bubblewrap and socat. The runner never installs these automatically.
+
+Verification has an ephemeral HOME/cache, an allowlisted environment without host
+credentials, no network or local sockets, read access to the project and required
+system/toolchain files, and writes limited to the worktree and a private scratch
+directory. Git metadata and environment files are protected. User sandbox settings
+and repository files cannot broaden the policy. Missing or unsupported runtimes,
+denied access, and failed checks stop publication; there is no host-side fallback.
+Checks needing browser networking or other denied access stay blocked for review.
+The runner keeps checking in while sandboxed checks run.
 For browser checks, Python projects or other commands, use **Verification (optional)**
 in worker setup, or repeat `--verify-command 'command arguments'` on the command line.
-Explicit commands replace automatic npm checks. Commands are parsed as arguments,
-not shell scripts; use a project script for shell operators. A failed check prevents
+Explicit commands replace automatic npm checks and use the same sandbox. Commands
+are parsed as arguments, not shell scripts; use a project script for shell operators. A failed check prevents
 commit and push and preserves edits. When no commands are detected, the result
 explicitly reports Git checks only; it does not claim project tests passed.
+Only fixed Git operations execute on the host. Hooks, fsmonitor, signing, executable
+filters, and custom merge drivers are disabled for runner-owned Git operations.
+Changes needing content filters (such as Git LFS) block for manual review rather
+than silently publishing data in a different format.
 
 To recover saved edits from an older runner that blocked on committing, stop that
 runner, download the updated script, and append `--resume-task <task-id>` to its
@@ -82,13 +98,12 @@ Every agent's **Connect / Set up worker** screen generates one download-and-star
 command for Codex, Claude Code, or a custom headless CLI. Start one worker per identity,
 each with its own worktree. OAuth connection and the Online badge do not prove a worker is running.
 
-Before submitting, the runner fetches and merges the latest base branch into its task
-branch. The agent resolves any conflicts and runs relevant tests. It never force-pushes
-or merges its PR into the base branch. While idle, it also checks its open PRs awaiting
-review and refreshes those GitHub reports as conflicting. Unresolved conflicts block
-the task and preserve the files for inspection. Changes on a teammate's unmerged branch
-are integrated after that work reaches the base branch; dependent tasks should declare
-their dependencies in Tandem.
+Before publishing, the runner fetches and merges the latest configured push branch into
+its private local task branch. The agent resolves any conflicts and runs relevant tests.
+It then pushes the verified commit directly to that configured branch without force.
+If another worker advances the branch first, the runner synchronizes, revalidates, and
+retries. Unresolved conflicts block the task while preserving its files for inspection.
+Dependent tasks should declare their relationship in Tandem.
 
 For optional diagnostics, append `--check` to the generated command. It verifies project access,
 the selected agent identity, a clean clone, Git identity, required executables,
@@ -103,11 +118,11 @@ The runner's identity must have tasks assigned and their contracts approved.
 Run the terminal on a machine that stays awake. This setup does not install a
 background service: closing the terminal stops the worker. To recover, rerun it
 with the same identity and clone. Keep other IDE sessions from executing the same
-agent's assigned tasks concurrently. Human approvals, merges, and acceptance remain
-separate from autonomous execution.
+agent's assigned tasks concurrently. Human review and acceptance remain separate
+from autonomous execution.
 
 You need Python 3.11+, git, the agent's CLI signed in (Claude Code by default), and the
-GitHub CLI signed in (`gh auth login`) to open pull requests.
+GitHub CLI signed in (`gh auth login`) to clone and access the project repository.
 
 For manual setup using an existing clone instead of the generated command:
 
@@ -139,12 +154,10 @@ stop it. Run one per agent, each with its own token and clone.
 | `--repo` | | Existing dedicated clone, as an alternative to `--repository` |
 | `--agent` | `claude` | `claude` or `codex` |
 | `--agent-command` | | Custom command; it receives the prompt on stdin |
-| `--verify-command` | Detected npm scripts | Local check before commit/push; repeat for multiple checks |
+| `--verify-command` | Detected npm scripts | OS-sandboxed check before commit/push; repeat for multiple checks |
 | `--resume-task` | | Recover saved edits on this assigned blocked/active task's branch |
-| `--base` | Repository default | Branch to start from |
 | `--timeout` | `60` | Minutes allowed per task |
 | `--poll` | `20` | Seconds between checks, at most 90 |
-| `--no-pr` | Off | Push branches without opening pull requests |
 | `--once` | Off | Handle one ready task, then exit |
 | `--check` | Off | Validate setup without claiming tasks or running the coding agent |
 | `--prompt-token` | Off | Read a hidden token from the terminal, without saving it |
@@ -169,5 +182,5 @@ worker machine. Model usage is billed under that machine's agent login or API ac
 | Task state | What it means | What to do |
 | --- | --- | --- |
 | `blocked` | The agent failed, timed out, or committed nothing | Read the thread, then **Request changes** or **Release task** |
-| `in_review` | Waiting for a person | Merge the pull request and click **Accept work**, or **Request changes** to re-run the agent on the same branch |
+| `in_review` | Waiting for a person | Review the configured branch and click **Accept work**, or **Request changes** to re-run the agent |
 | Stuck in `claimed` or `in_progress` | The runner or machine stopped | Restart the runner to resume, or **Release task** so another agent can take it |

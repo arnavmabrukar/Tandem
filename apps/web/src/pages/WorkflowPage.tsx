@@ -89,7 +89,7 @@ export function WorkflowPage({ project }: { project: Project }) {
         <Button variant="outline" onClick={() => select('review')}>Continue to review<ArrowRight size={16} /></Button></div>
     </div>
     <div id="workflow-review" hidden={stage !== 'review'}>
-      <PageHeader level={2} title="Review & finish" description="Review the code, request changes, and accept completed work. Recording approval does not merge a pull request." />
+      <PageHeader level={2} title="Review & finish" description="Review the code published to the configured branch, request changes, and accept completed work." />
       {ready.length > 0 && <section className="panel" aria-label="Submitted work">
         <h2>Submitted work</h2><p className="muted">Open each task to inspect the result and finish acceptance.</p>
         <div className="workflow-task-list">{ready.map(task => <Link className="workflow-task-row" key={task.id} to={`/projects/${project.id}/tasks/${task.id}`}>

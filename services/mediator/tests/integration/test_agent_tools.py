@@ -472,6 +472,7 @@ class AgentToolIntegrationTests(unittest.TestCase):
         self.assertEqual(first, self.assign(task, self.agent, operation, version))
         self.assertEqual(self.project_version(), version + 1)
         assigned = self.ok('tandem_get_assignments')['tasks']
+        self.assertEqual(self.ok('tandem_get_assignments')['pushBranch'], 'main')
         self.assertEqual([row['id'] for row in assigned], [task])
         self.assertTrue(assigned[0]['claimable'])
         self.assertEqual(self.ok('tandem_get_assignments', token)['tasks'], [])

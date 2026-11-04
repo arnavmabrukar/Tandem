@@ -56,10 +56,11 @@ class RunnerPresenceTests(unittest.TestCase):
              patch.object(runner_module, 'check_worker') as check, \
              patch.object(runner_module.Runner, 'run_once') as work:
             tandem_class.return_value.call.return_value = {'agentId': 'agent', 'name': 'Agent', 'projects': [{'projectId': 'project'}]}
+            tandem_class.return_value.project_call.return_value = {'tasks': [], 'pushBranch': 'main'}
             self.assertEqual(runner_module.main(['--project', 'project', '--repo', '/tmp/worker', '--agent-id', 'agent', '--check']), 0)
             check.assert_called_once()
             work.assert_not_called()
-            tandem_class.return_value.project_call.assert_not_called()
+            tandem_class.return_value.project_call.assert_called_once_with('tandem_get_assignments')
 
     def test_wrong_agent_token_cannot_start_worker(self):
         with patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'test-token'}), \
@@ -83,11 +84,11 @@ class RunnerPresenceTests(unittest.TestCase):
         repo = Mock()
         with patch.object(runner_module.shutil, 'which', return_value=None):
             with self.assertRaisesRegex(runner_module.WorkBlocked, 'Install'):
-                runner_module.check_worker(repo, ['codex'], True)
+                runner_module.check_worker(repo, ['codex'])
         with patch.object(runner_module.shutil, 'which', return_value='/bin/tool'):
             repo.dirty.return_value = True
             with self.assertRaisesRegex(runner_module.WorkBlocked, 'dedicated clone'):
-                runner_module.check_worker(repo, ['codex'], True)
+                runner_module.check_worker(repo, ['codex'])
 
     def test_preflight_checks_logins_without_exposing_token_to_process(self):
         repo = Mock()
@@ -95,8 +96,8 @@ class RunnerPresenceTests(unittest.TestCase):
         with patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'secret'}), \
              patch.object(runner_module.shutil, 'which', return_value='/bin/tool'), \
              patch.object(runner_module.subprocess, 'run', return_value=Mock(returncode=0)) as run:
-            runner_module.check_worker(repo, ['codex'], True)
-            self.assertEqual([c.args[0] for c in run.call_args_list], [['codex', 'login', 'status'], ['gh', 'auth', 'status']])
+            runner_module.check_worker(repo, ['codex'])
+            self.assertEqual([c.args[0] for c in run.call_args_list], [['codex', 'login', 'status']])
             for invocation in run.call_args_list:
                 self.assertNotIn('TANDEM_AGENT_TOKEN', invocation.kwargs['env'])
 

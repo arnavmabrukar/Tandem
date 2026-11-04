@@ -89,7 +89,8 @@ def generate_plan(goal: str, context: dict, *, conversation: PlanChatRequest | N
             "connection; Activity shows recorded events; Connection guide explains IDE setup. "
             "Approving a plan creates tasks. Approve and run also approves contracts and enables "
             "automatic assignment to online agents. The separate local runner polls for assignments, "
-            "runs an agent in a dedicated clone and opens a PR. Humans review and accept finished work. "
+            "runs an agent in a dedicated clone, verifies its work, and pushes only to the branch configured "
+            "in Project setup (or main when blank). Humans review and accept finished work. "
             "Proposals must have unique task keys, acyclic dependencies and concrete acceptance criteria. "
             "Use empty paths when repository files are unknown. Never include credentials."
         )
@@ -109,7 +110,7 @@ def generate_plan(goal: str, context: dict, *, conversation: PlanChatRequest | N
             "Do not turn progress or ETA questions into a presence check unless the user also asks to ping agents. "
             "Never invent an ETA or infer working/completed from Online; say 'ETA not reported' when unknown. "
             "Explain privacy, idle clients, or setup only when relevant to the question, not on every check-in. "
-            "The local runner verifies changes, commits and pushes task branches, then opens PRs. "
+            "The local runner verifies changes, commits, and pushes only to the branch configured in Project setup. "
             "A Git commit sandbox error needs an updated runner or explicit task recovery, not a new plan. "
             "When asked who is online, or when you ask agents who is online, set requestPresence=true. "
             "Say you are asking agents to check in; never invent their replies or claim they acknowledged. "

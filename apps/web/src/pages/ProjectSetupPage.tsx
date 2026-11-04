@@ -33,6 +33,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
       setName(project.name);
       setRepo(project.repository);
       setDescription(project.description);
+      setBranch(project.trackedBranch ?? '');
       setFormVersion(project.version);
       setSaved(false);
       save.reset();
@@ -67,7 +68,8 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
             try {
               if (!project && !selection) return;
               const result = await save.mutateAsync(project ? {
-                type: 'update-project', name: project.name, repository: project.repository, description,
+                type: 'update-project', name: project.name, repository: project.repository,
+                description, trackedBranch: branch,
               } : {
                 type: 'create-project', name, repository: repo, description,
                 githubRepositoryId: selection!.repositoryId,
@@ -87,23 +89,24 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
             {!project && <GitHubRepositoryPicker onSelect={(repository, installationId) => {
               setSelection(repository ? {repositoryId: repository.id, installationId} : null);
               setRepo(repository?.fullName ?? ''); setName(repository?.name.slice(0, 80) ?? '');
-              setBranch(repository?.defaultBranch ?? ''); setDescription(repository?.description.slice(0, 1000) ?? '');
+              // Tandem deliberately uses main when no agent push branch is specified.
+              setBranch(''); setDescription(repository?.description.slice(0, 1000) ?? '');
             }} />}
             {project ? <>
               <dl>
                 <dt>Project name</dt><dd>{project.name}</dd>
                 <dt>GitHub repository</dt><dd>{project.repository}</dd>
-                <dt>Tracked branch</dt><dd>{project.trackedBranch || 'Not recorded'}</dd>
               </dl>
-              <p className="muted">These details are fixed when you import a repository. To track a different repository, delete this project and import another. Your GitHub repository isn't affected.</p>
+              <p className="muted">The repository is fixed after import. Your GitHub repository isn't affected by editing these settings.</p>
             </> : null}
             <SettingsContainer>
             {!project && <summary>Optional settings</summary>}
-            {!project &&
-              <Field label="Branch to track" hint="Defaults to the repository’s default branch. The backend checks that this branch exists.">
-                <input required maxLength={255} value={branch} onChange={e => setBranch(e.target.value)} />
-              </Field>
-            }
+            <Field label="Agent push branch" hint="Agents commit and push only to this branch. Leave blank to use main. The backend checks imported repositories before saving.">
+              <input maxLength={255} value={branch} placeholder="main" onChange={e => {
+                setBranch(e.target.value);
+                setSaved(false);
+              }} />
+            </Field>
             <Field label="Description">
               <textarea
                 maxLength={1000}
@@ -115,7 +118,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
               />
             </Field>
             </SettingsContainer>
-            <Button type="submit" disabled={changed || (!project && (!selection || !branch))}>
+            <Button type="submit" disabled={changed || (!project && !selection)}>
               {save.isPending ? 'Saving…' : project ? 'Save project' : 'Import repository'}
             </Button>
           </fieldset>

@@ -421,6 +421,13 @@ def get_assignments(identity: dict, project_id: UUID) -> dict:
         role = _current_role(connection, identity, project_id)
         if role not in WRITE_ROLES:
             raise AgentAccessDenied("The agent's owner cannot execute assignments")
+        project = connection.execute(
+            """SELECT COALESCE(NULLIF(trim(tracked_branch), ''), 'main') AS push_branch
+               FROM public.projects WHERE id=%s AND disconnected_at IS NULL""",
+            (project_id,),
+        ).fetchone()
+        if project is None:
+            raise AgentAccessDenied("Project access is unavailable")
         tasks = connection.execute(
             _TASK_SELECT + """ WHERE t.project_id=%s AND t.assigned_agent_id=%s
                                AND t.status NOT IN ('approved', 'merged', 'cancelled')
@@ -428,5 +435,6 @@ def get_assignments(identity: dict, project_id: UUID) -> dict:
             (project_id, identity["agentId"], TASK_LIMIT + 1),
         ).fetchall()
     return {"projectId": str(project_id), "agentId": identity["agentId"],
+            "pushBranch": project["push_branch"],
             "tasks": [_public_task(task, identity["agentId"]) for task in tasks[:TASK_LIMIT]],
             "truncated": len(tasks) > TASK_LIMIT}

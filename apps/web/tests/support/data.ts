@@ -32,6 +32,7 @@ export const testProject = (): Project => ({
   id: 'project-1',
   name: 'API project',
   repository: 'team/tandem',
+  trackedBranch: 'main',
   description: 'Server description',
   version: 4,
   members: [{ id: 'user-1', name: 'Test owner', role: 'owner' }],

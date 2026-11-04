@@ -2,9 +2,8 @@
 """Run assigned Tandem tasks with a headless coding agent. Standard library only.
 
 The runner polls Tandem for this agent's assignments. For each one it claims the
-task, prepares a branch, runs the agent, pushes the result, opens a pull request,
-and moves the task to in_review. A person then merges and accepts the work, which
-unlocks the next task. See README.md in this folder.
+task, prepares an isolated local branch, runs the agent, and publishes the verified
+commit only to the project branch selected in Tandem settings. See README.md.
 """
 import argparse
 import getpass
@@ -46,6 +45,7 @@ MESSAGE_LIMIT = 10000
 # Comfortably inside the 2-minute window that counts as Online.
 KEEPALIVE_SECONDS = 60
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+SANDBOX_RUNTIME_VERSION = (0, 0, 81)
 
 
 class ToolRefused(Exception):
@@ -116,17 +116,44 @@ class Repo:
         self.path, self.base = path, base
 
     def git(self, *args: str, check: bool = True) -> str:
-        done = subprocess.run(["git", *args], cwd=self.path, capture_output=True, text=True,
+        # Git publication must not execute editable project hooks or fsmonitor
+        # commands as an indirect route around the coding-agent sandbox.
+        env = {**_agent_env(), 'GIT_TERMINAL_PROMPT': '0'}
+        env['PATH'] = os.pathsep.join(entry for entry in os.get_exec_path()
+                                    if Path(entry).is_absolute()
+                                    and not Path(entry).resolve().is_relative_to(self.path.resolve()))
+        git = shutil.which('git', path=env['PATH'])
+        if not git or Path(git).resolve().is_relative_to(self.path.resolve()):
+            raise WorkBlocked('Git must be installed outside the agent worktree.')
+        fixed = [git, '-c', f'core.hooksPath={os.devnull}', '-c', 'core.fsmonitor=false',
+                 '-c', 'commit.gpgSign=false', '-c', 'push.gpgSign=false']
+        # Attributes in editable files can select host-configured filters and
+        # merge drivers. Remove their executable definitions for every operation.
+        config = subprocess.run([*fixed, 'config', '--name-only', '--get-regexp',
+                                 r'^(filter\..*\.(clean|smudge|process|required)|merge\..*\.driver)$'],
+                                cwd=self.path, env=env, capture_output=True, text=True)
+        if config.returncode not in (0, 1):
+            raise WorkBlocked('Could not inspect Git executable configuration safely.')
+        if config.returncode == 0:
+            filters = set()
+            for key in config.stdout.splitlines():
+                if key.startswith('filter.'):
+                    filters.add(key.rsplit('.', 1)[0])
+                elif key.startswith('merge.'):
+                    fixed += ['-c', f'{key}=false']
+            for name in sorted(filters):
+                for field in ('clean', 'smudge', 'process'):
+                    fixed += ['-c', f'{name}.{field}=']
+                fixed += ['-c', f'{name}.required=false']
+        done = subprocess.run([*fixed, *args], cwd=self.path, capture_output=True, text=True,
                               encoding="utf-8", errors="replace",
-                              env={**_agent_env(), "GIT_TERMINAL_PROMPT": "0"})
+                              env=env)
         if check and done.returncode != 0:
             raise WorkBlocked(f"git {args[0]} failed: {done.stderr.strip()[:500]}")
         return done.stdout.strip()
 
     def exists(self, ref: str) -> bool:
-        done = subprocess.run(["git", "rev-parse", "--verify", "--quiet", ref], cwd=self.path,
-                              capture_output=True, text=True)
-        return done.returncode == 0
+        return bool(self.git('rev-parse', '--verify', '--quiet', ref, check=False))
 
     def base_branch(self) -> str:
         if self.base:
@@ -138,12 +165,11 @@ class Repo:
         return bool(self.git("status", "--porcelain"))
 
     def contains(self, ref: str) -> bool:
-        done = subprocess.run(['git', 'merge-base', '--is-ancestor', ref, 'HEAD'],
-                              cwd=self.path, capture_output=True, env=_agent_env())
-        return done.returncode == 0
+        target = self.git('rev-parse', '--verify', ref)
+        return self.git('merge-base', ref, 'HEAD', check=False) == target
 
     def prepare(self, branch: str, resume: bool = False) -> str:
-        """Check out the task's branch, continuing earlier work if there is any."""
+        """Check out a private local task branch based on the allowed push branch."""
         if self.dirty():
             if resume and self.git('branch', '--show-current') == branch:
                 # Explicit recovery may use only the saved files on this task's
@@ -153,13 +179,8 @@ class Repo:
                               "this task back to the agent.")
         self.git("fetch", "origin", "--prune")
         base = self.base_branch()
-        remote = self.exists(f"refs/remotes/origin/{branch}")
         if self.exists(f"refs/heads/{branch}"):
             self.git("checkout", branch)
-            if remote:
-                self.git("pull", "--ff-only", "origin", branch)
-        elif remote:
-            self.git("checkout", "-b", branch, f"origin/{branch}")
         else:
             if not self.exists(f"refs/remotes/origin/{base}"):
                 raise WorkBlocked(f"origin has no {base} branch to start from")
@@ -175,6 +196,25 @@ def _agent_env() -> dict[str, str]:
 def branch_name(task: dict) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", task["title"].lower()).strip("-")[:40].rstrip("-")
     return f"tandem/{task['id'][:8]}-{slug or 'task'}"
+
+
+def push_branch(value: object) -> str:
+    """Normalize and validate the server-controlled remote destination."""
+    branch = value.strip() if isinstance(value, str) else ""
+    branch = branch or "main"
+    parts = branch.split("/")
+    if (
+        len(branch) > 255
+        or branch == "HEAD"
+        or branch.startswith("refs/")
+        or ".." in branch
+        or "@{" in branch
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,254}", branch)
+        or any(not part or part in (".", "..") or part.startswith(".")
+               or part.endswith(".") or part.endswith(".lock") for part in parts)
+    ):
+        raise WorkBlocked("Tandem returned an invalid agent push branch; update Project setup.")
+    return branch
 
 
 def build_prompt(task: dict, branch: str) -> str:
@@ -224,26 +264,6 @@ def run_agent(command: list[str], prompt: str, cwd: Path, timeout: float) -> tup
     return done.returncode, (done.stdout or "") + (done.stderr or "")
 
 
-def _pull_request(repo: Repo, branch: str, base: str, task: dict, summary: str) -> str | None:
-    """Return the branch's pull request URL, opening one if needed."""
-    gh = shutil.which("gh")
-    if gh is None:
-        log.warning("GitHub CLI not found; skipping the pull request")
-        return None
-    def run(*args: str):
-        return subprocess.run([gh, *args], cwd=repo.path, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", env=_agent_env())
-    existing = run("pr", "view", branch, "--json", "url", "--jq", ".url")
-    if existing.returncode == 0 and existing.stdout.strip():
-        return existing.stdout.strip()
-    created = run("pr", "create", "--base", base, "--head", branch, "--title", task["title"],
-                  "--body", f"Tandem task `{task['id']}`.\n\n{summary}"[:60000])
-    if created.returncode != 0:
-        log.warning("Could not open a pull request: %s", created.stderr.strip()[:300])
-        return None
-    return created.stdout.strip().splitlines()[-1]
-
-
 def acknowledge_presence(tandem: Tandem):
     """The client must receive each challenge before sending an explicit reply."""
     pending = tandem.project_call('tandem_get_presence_requests')
@@ -258,17 +278,26 @@ def acknowledge_presence(tandem: Tandem):
 
 class Runner:
     def __init__(self, tandem: Tandem, repo: Repo, command: list[str], timeout: float,
-                 open_pull_requests: bool = True, verify_commands: list[list[str]] | None = None,
-                 resume_task: str | None = None):
+                 verify_commands: list[list[str]] | None = None, resume_task: str | None = None):
         self.tandem, self.repo, self.command, self.timeout = tandem, repo, command, timeout
-        self.open_pull_requests = open_pull_requests
         self.verify_commands, self.resume_task = verify_commands, resume_task
         self.active_task = None
+        self.push_branch = "main"
+        self.repo.base = self.push_branch
+
+    def _apply_project_settings(self, response: dict) -> list[dict]:
+        """Use the authenticated server value, never task text or a CLI override."""
+        configured = push_branch(response.get("pushBranch"))
+        self.push_branch = configured
+        self.repo.base = configured
+        return response["tasks"]
 
     def next_task(self) -> dict | None:
         """Pick work to start or resume. Tasks waiting on a person are skipped."""
         self.acknowledge_presence()
-        tasks = self.tandem.project_call("tandem_get_assignments")["tasks"]
+        tasks = self._apply_project_settings(
+            self.tandem.project_call("tandem_get_assignments")
+        )
         if self.resume_task:
             task = next((task for task in tasks if task['id'] == self.resume_task), None)
             if task is None or task['status'] not in ('blocked', 'claimed', 'in_progress'):
@@ -277,23 +306,7 @@ class Runner:
         for task in tasks:
             if task["status"] in ("claimed", "in_progress") or (task["status"] == "open" and task["claimable"]):
                 return task
-        # A teammate's merged PR can conflict with work already awaiting review.
-        # Only reopen an open, conflicting PR; never revive a merged/closed PR.
-        if self.open_pull_requests:
-            for task in tasks:
-                if task['status'] == 'in_review' and self._pr_conflicting(task):
-                    return task
         return None
-
-    def _pr_conflicting(self, task: dict) -> bool:
-        try:
-            result = subprocess.run(['gh', 'pr', 'view', branch_name(task), '--json', 'state,mergeable'],
-                                    cwd=self.repo.path, capture_output=True, text=True,
-                                    timeout=20, env=_agent_env())
-            status = json.loads(result.stdout) if result.returncode == 0 else {}
-            return status.get('state') == 'OPEN' and status.get('mergeable') == 'CONFLICTING'
-        except (OSError, subprocess.TimeoutExpired, ValueError):
-            return False
 
     def _update(self, task_id: str, version: int, **fields) -> int:
         done = self.tandem.project_call("tandem_update_task", taskId=task_id, expectedVersion=version,
@@ -376,23 +389,39 @@ class Runner:
         if not review_refresh and self.repo.git("rev-parse", "HEAD") == before:
             raise WorkBlocked("The agent finished without any task changes to commit. Last output:\n"
                               + summary[-1500:])
-        # Fetch again because another agent may have finished while this one worked.
-        integration_checks = self._integrate_base(task, branch, base)
-        verification = integration_checks or verification
-        if self.repo.git('branch', '--show-current') != branch:
-            raise WorkBlocked('The agent switched away from its assigned task branch.')
-        self._phase('Pushing verified task branch.')
-        # Recheck the live claim immediately before publication, including after
-        # a long verification run. A reassignment must stop this worker's push.
-        self.repo.git("push", "-u", "origin", branch)
-        url = _pull_request(self.repo, branch, base, task,
-                            f'Runner verification:\n{verification}\n\nAgent summary:\n{summary}') if self.open_pull_requests else None
-        where = f"Pull request: {url}" if url else f"Pushed to branch {branch}; no pull request was opened."
+        # Another worker may publish while this one verifies. Integrate and retry
+        # a normal fast-forward push without ever force-pushing the configured branch.
+        for attempt in range(3):
+            integration_checks = self._integrate_base(task, branch, base)
+            verification = integration_checks or verification
+            if self.repo.git('branch', '--show-current') != branch:
+                raise WorkBlocked('The agent switched away from its assigned local task branch.')
+            if self.active_task:
+                current = push_branch(
+                    self.tandem.project_call("tandem_get_assignments").get("pushBranch")
+                )
+                if current != base:
+                    raise WorkBlocked(
+                        f"Agent push branch changed from {base} to {current} while this task ran. "
+                        "Nothing was pushed; resume the task to use the new setting."
+                    )
+            self._phase(f'Pushing verified commit to {base}.')
+            try:
+                self.repo.git("push", "origin", f"HEAD:refs/heads/{base}")
+                break
+            except WorkBlocked:
+                if attempt == 2:
+                    raise WorkBlocked(
+                        f"Could not publish to {base} after synchronizing with other agents. "
+                        "The verified commit remains saved locally."
+                    ) from None
+                log.info("The push branch advanced; synchronizing and retrying")
+        where = f"Committed and pushed to {base}."
         commit = self.repo.git('rev-parse', 'HEAD')
         return {"message": f"{where}\nCommit: {commit}\n\nRunner verification:\n{verification}\n\nAgent summary:\n{summary}", "progress": where}
 
     def _finalize(self, task: dict, branch: str) -> str:
-        """The trusted local runner owns tests and Git writes, outside the model sandbox."""
+        """Run project checks in OS isolation; only fixed Git operations run on the host."""
         if self.repo.git('branch', '--show-current') != branch:
             raise WorkBlocked('The agent switched away from its assigned task branch.')
         self._phase('Verifying task changes.')
@@ -411,21 +440,27 @@ class Runner:
             name = shlex.join(command)
             self._phase(f'Verifying: {name}')
             try:
-                done = self._with_keepalive(lambda: subprocess.run(
-                    command, cwd=self.repo.path, capture_output=True, text=True,
-                    encoding='utf-8', errors='replace', timeout=self.timeout,
-                    env={**_agent_env(), 'CI': 'true', 'GIT_TERMINAL_PROMPT': '0'}))
+                done = self._with_keepalive(lambda: self._sandboxed_check(command))
             except (OSError, subprocess.TimeoutExpired):
                 raise WorkBlocked(f'Verification could not run: {name}. Changes were preserved; nothing was pushed.') from None
             if done.returncode:
                 raise WorkBlocked(f'Verification failed: {name}. Nothing was pushed.\n'
                                   + ((done.stdout or '') + (done.stderr or ''))[-1500:])
-            results.append(f'Passed: {name}')
+            results.append(f'Passed in OS sandbox: {name}')
         if not commands:
             results.append('No project test commands detected. Only Git checks ran; use --verify-command to configure tests.')
         if self.repo.git('branch', '--show-current') != branch:
             raise WorkBlocked('Verification switched away from the task branch.')
         if self.repo.dirty() or self.repo.exists('MERGE_HEAD'):
+            paths = set(self.repo.git('ls-files', '-z', '--modified', '--others', '--exclude-standard').split('\0'))
+            paths.update(self.repo.git('diff', '--cached', '--name-only', '-z').split('\0'))
+            paths.discard('')
+            if paths:
+                attributes = self.repo.git('check-attr', '-z', 'filter', '--', *sorted(paths)).split('\0')
+                if any(value not in ('unspecified', 'unset') for value in attributes[2::3]):
+                    # Disabling LFS/custom clean filters must not silently publish
+                    # raw contents in place of the repository's expected format.
+                    raise WorkBlocked('Changed files require a Git content filter. Automatic publication is blocked for manual review; edits were preserved.')
             self._phase('Committing verified task changes.')
             self.repo.git('add', '-A', '--', '.')
             self.repo.git('diff', '--cached', '--check')
@@ -433,6 +468,101 @@ class Runner:
         if self.repo.dirty():
             raise WorkBlocked('The repository is still dirty after commit. Nothing was pushed.')
         return '\n'.join(results)
+
+    def _sandboxed_check(self, command: list[str]):
+        """Never run repository code directly or fall back after a sandbox denial."""
+        runtime = shutil.which('srt')
+        workspace = self.repo.path.resolve()
+        def workspace_entry(path: str) -> bool:
+            # Canonicalize the parent (including macOS /var -> /private/var)
+            # while retaining the leaf symlink's location in the worktree.
+            entry = Path(path).absolute()
+            return (entry.parent.resolve() / entry.name).is_relative_to(workspace)
+
+        if not runtime or workspace_entry(runtime) or Path(runtime).resolve().is_relative_to(workspace):
+            raise WorkBlocked('Verification needs the tested Anthropic Sandbox Runtime 0.0.81. '
+                              'Install npm package @anthropic-ai/sandbox-runtime@0.0.81, then retry. '
+                              'Checks were not run on the host; nothing was pushed.')
+        runtime = str(Path(runtime).resolve())
+        if sys.platform not in ('darwin', 'linux'):
+            raise WorkBlocked('Sandboxed verification currently requires macOS or Linux. Nothing was pushed.')
+        # The control file is outside the writable worktree and scratch directory.
+        # Repo changes cannot replace its policy, HOME, or credential environment.
+        # Keep socket paths below macOS's Unix-domain path length limit.
+        with tempfile.TemporaryDirectory(prefix='tdv-', dir='/tmp') as directory:
+            control = Path(directory).resolve()
+            scratch = control / 'scratch'
+            scratch.mkdir()
+            for name in ('home', 'tmp', 'cache'):
+                (scratch / name).mkdir()
+            paths = [entry for entry in os.get_exec_path()
+                     if Path(entry).is_absolute() and not Path(entry).resolve().is_relative_to(workspace)]
+            env = {'PATH': os.pathsep.join(paths), 'HOME': str(scratch / 'home'),
+                   'TMPDIR': str(scratch / 'tmp'), 'TMP': str(scratch / 'tmp'),
+                   'TEMP': str(scratch / 'tmp'), 'XDG_CACHE_HOME': str(scratch / 'cache'),
+                   # Do not load the host's OpenSSL configuration/providers into
+                   # an isolated verification environment with no network access.
+                   'OPENSSL_CONF': os.devnull,
+                   'CI': 'true', 'GIT_TERMINAL_PROMPT': '0', 'LANG': 'en_US.UTF-8'}
+            version = subprocess.run([runtime, '--version'], cwd=control, env=env,
+                                     capture_output=True, text=True, timeout=20)
+            match = re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)', version.stdout.strip())
+            if version.returncode or not match or tuple(map(int, match.groups())) != SANDBOX_RUNTIME_VERSION:
+                raise WorkBlocked('Sandbox Runtime 0.0.81 is required; verification was not run. Nothing was pushed.')
+            # Allow project files and system/toolchain libraries, not the user's
+            # home, other projects, Git metadata, environment files, or network.
+            reads = [str(workspace), str(scratch), '/usr/bin', '/usr/sbin', '/usr/lib', '/usr/lib64',
+                     '/usr/share', '/usr/local/bin', '/usr/local/lib', '/bin', '/sbin', '/lib', '/lib64',
+                     '/System/Library', '/System/Cryptexes', '/System/Volumes/Preboot/Cryptexes/OS',
+                     '/private/var/select/sh',
+                     '/dev', '/etc/ld.so.cache',
+                     '/etc/ld.so.conf', '/etc/ld.so.conf.d', '/etc/nsswitch.conf']
+            if sys.platform == 'darwin':
+                # Homebrew language binaries link to libraries in other package
+                # prefixes. dyld must stat the opt symlink itself, not just its
+                # lib/ directory. Permit only installed Cellar package prefixes,
+                # never Homebrew's etc/var or an arbitrary symlink target.
+                for prefix in ('/opt/homebrew/opt', '/usr/local/opt'):
+                    cellar = Path(prefix).parent / 'Cellar'
+                    for library in Path(prefix).glob('*/lib/*.dylib'):
+                        package = library.parent.parent
+                        if package.resolve().is_relative_to(cellar):
+                            reads.extend((str(package), str(package.resolve())))
+            for executable in ('node', command[0]):
+                tool = shutil.which(executable, path=env['PATH'])
+                if (tool and not workspace_entry(tool)
+                        and not Path(tool).resolve().is_relative_to(workspace)):
+                    tool_path = Path(tool).resolve()
+                    # Do not grant an arbitrary script's parent directory. Only
+                    # installed language tools need their own library prefix.
+                    language_tool = re.fullmatch(r'(node|npm|npx|python(3(\.\d+)?)?)', Path(executable).name)
+                    root = tool_path.parent.parent if language_tool and tool_path.parent.name == 'bin' else tool_path
+                    if root == Path.home().resolve() or root in Path.home().resolve().parents:
+                        root = tool_path
+                    reads.append(str(root))
+                    if executable == 'node':
+                        env['PATH'] = str(tool_path.parent) + os.pathsep + env['PATH']
+            executable = shutil.which(command[0], path=env['PATH'])
+            if executable and not workspace_entry(executable):
+                command = [str(Path(executable).resolve()), *command[1:]]
+            git_dir = Path(self.repo.git('rev-parse', '--absolute-git-dir')).resolve()
+            common = Path(self.repo.git('rev-parse', '--path-format=absolute', '--git-common-dir')).resolve()
+            protected = [str(git_dir), str(common), str(workspace / '.git')]
+            policy = {
+                'network': {'allowedDomains': [], 'deniedDomains': [], 'allowLocalBinding': False,
+                            'allowUnixSockets': [], 'allowAllUnixSockets': False},
+                'filesystem': {'denyRead': ['/', *protected, str(workspace / '.env'), str(workspace / '.env.*')],
+                               'allowRead': list(dict.fromkeys(reads)),
+                               'allowWrite': [str(workspace), str(scratch)], 'denyWrite': protected},
+                'enableWeakerNestedSandbox': False, 'enableWeakerNetworkIsolation': False,
+                'allowPty': False,
+            }
+            settings_path = control / 'policy.json'
+            settings_path.write_text(json.dumps(policy))
+            return subprocess.run([runtime, '--settings', str(settings_path), '--', *command],
+                                  cwd=workspace, env=env, capture_output=True, text=True,
+                                  stdin=subprocess.DEVNULL, start_new_session=True,
+                                  encoding='utf-8', errors='replace', timeout=self.timeout)
 
     def _integrate_base(self, task: dict, branch: str, base: str) -> str | None:
         """Merge teammates' published work into this task, without rewriting history."""
@@ -507,22 +637,24 @@ def validate_url(url: str) -> None:
         raise SystemExit("--url must use HTTPS, or HTTP to localhost")
 
 
-def check_worker(repo: Repo, command: list[str], open_pull_requests: bool, allow_dirty: bool = False) -> None:
+def check_worker(repo: Repo, command: list[str], allow_dirty: bool = False) -> None:
     """Fail setup before claiming tasks; these checks never edit the checkout."""
-    for executable in ['git', command[0], *(['gh'] if open_pull_requests else [])]:
+    for executable in ['git', command[0]]:
         if shutil.which(executable) is None:
             raise WorkBlocked(f"Install and sign in to {executable}, then run setup again.")
     if repo.dirty() and not allow_dirty:
         raise WorkBlocked('Use a clean, dedicated clone for this worker, not your active checkout.')
     if not repo.git('remote', 'get-url', 'origin'):
         raise WorkBlocked('The worker clone needs an origin remote.')
+    repo.git('fetch', 'origin', '--prune')
+    if not repo.exists(f'refs/remotes/origin/{repo.base_branch()}'):
+        raise WorkBlocked(f'Origin does not have the configured agent push branch {repo.base_branch()}.')
     for field in ('user.name', 'user.email'):
         if not repo.git('config', '--get', field, check=False):
             raise WorkBlocked(f'Set git {field} in the worker clone before starting.')
     # Check provider login without launching an agent or spending model tokens.
     login = {'codex': ['codex', 'login', 'status'], 'claude': ['claude', 'auth', 'status']}.get(command[0])
-    checks = ([login] if login else []) + ([['gh', 'auth', 'status']] if open_pull_requests else [])
-    for check in checks:
+    for check in ([login] if login else []):
         try:
             result = subprocess.run(check, cwd=repo.path, capture_output=True, timeout=20, env=_agent_env())
         except (OSError, subprocess.TimeoutExpired):
@@ -618,11 +750,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--resume-task', help='Explicitly resume saved changes for this assigned blocked or active task ID')
     parser.add_argument("--agent", choices=sorted(AGENT_PRESETS), default="claude")
     parser.add_argument("--agent-command", help="Custom command; it receives the prompt on stdin")
-    parser.add_argument("--base", help="Branch to start from (default: the repository's default)")
     parser.add_argument("--url", default=DEFAULT_URL)
     parser.add_argument("--poll", type=float, default=20, help="Seconds between checks")
     parser.add_argument("--timeout", type=float, default=60, help="Minutes allowed per task")
-    parser.add_argument("--no-pr", action="store_true", help="Push branches without opening pull requests")
     parser.add_argument("--once", action="store_true", help="Handle one task if ready, then exit")
     args = parser.parse_args(argv)
 
@@ -667,12 +797,13 @@ def main(argv: list[str] | None = None) -> int:
         # Authenticate and check project scope before accessing any repository.
         if not args.presence_only:
             path = managed_clone(args.repository, args.project, identity['agentId']) if args.repository else args.repo.resolve()
-            runner = Runner(tandem, Repo(path, args.base), parse_command(args),
-                            args.timeout * 60, open_pull_requests=not args.no_pr,
+            runner = Runner(tandem, Repo(path), parse_command(args),
+                            args.timeout * 60,
                             verify_commands=verification_commands,
                             resume_task=args.resume_task)
         if runner is not None:
-            check_worker(runner.repo, runner.command, runner.open_pull_requests, allow_dirty=bool(args.resume_task))
+            runner._apply_project_settings(tandem.project_call("tandem_get_assignments"))
+            check_worker(runner.repo, runner.command, allow_dirty=bool(args.resume_task))
         if args.check:
             log.info('Setup checks passed for %s. No task was claimed or executed. Remove --check to keep working.', identity['name'])
             return 0

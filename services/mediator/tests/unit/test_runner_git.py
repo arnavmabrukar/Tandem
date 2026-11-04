@@ -2,6 +2,8 @@
 import importlib.util
 import json
 import os
+import socket
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -89,7 +91,7 @@ class RunnerGitTests(unittest.TestCase):
         self.assertFalse(self.repo.exists(f'origin/{branch}'))
 
     def test_new_teammate_changes_are_integrated_before_task_push(self):
-        worker = runner.Runner(Mock(), self.repo, ['fake-agent'], 60, open_pull_requests=False)
+        worker = runner.Runner(Mock(), self.repo, ['fake-agent'], 60)
 
         def agent(prompt):
             if 'Integration step:' in prompt:
@@ -105,16 +107,16 @@ class RunnerGitTests(unittest.TestCase):
         with patch.object(worker, '_run_agent_with_keepalive', side_effect=agent) as execute:
             result = worker._execute(self.task)
         self.assertEqual(execute.call_count, 2)
-        branch = runner.branch_name(self.task)
-        self.assertIn(branch, result['progress'])
+        self.assertIn('main', result['progress'])
         self.assertTrue(self.repo.contains('origin/main'))
-        self.assertEqual(self.repo.git('rev-parse', f'origin/{branch}'), self.repo.git('rev-parse', 'HEAD'))
-        self.assertEqual(self.git(self.source, 'show', 'origin/main:shared.txt'), 'teammate change')
+        self.assertEqual(self.repo.git('rev-parse', 'origin/main'), self.repo.git('rev-parse', 'HEAD'))
+        self.git(self.source, 'fetch', 'origin')
+        self.assertEqual(self.git(self.source, 'show', 'origin/main:shared.txt'), 'agent change\nteammate change')
 
     def test_review_refresh_resolves_conflict_without_redoing_the_task(self):
         branch = self.make_conflict()
         self.repo.git('push', '-u', 'origin', branch)
-        worker = runner.Runner(Mock(), self.repo, ['fake-agent'], 60, open_pull_requests=False)
+        worker = runner.Runner(Mock(), self.repo, ['fake-agent'], 60)
 
         def agent(prompt):
             if 'Integration step:' in prompt:
@@ -130,6 +132,7 @@ class RunnerGitTests(unittest.TestCase):
 
     def test_automatic_download_shares_one_clone_between_agents(self):
         actual_run = subprocess.run
+        actual_which = runner.shutil.which
         downloads = []
 
         def run(command, **kwargs):
@@ -144,7 +147,7 @@ class RunnerGitTests(unittest.TestCase):
 
         with patch.object(runner.Path, 'home', return_value=self.root / 'home'), \
              patch.object(runner.Path, 'cwd', return_value=self.root), \
-             patch.object(runner.shutil, 'which', return_value='/bin/tool'), \
+             patch.object(runner.shutil, 'which', side_effect=lambda cmd, **kw: actual_which(cmd, **kw) if cmd == 'git' else '/bin/tool'), \
              patch.object(runner.subprocess, 'run', side_effect=run), \
              patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'secret'}):
             first = runner.managed_clone('team/private', 'project', 'agent-one')
@@ -160,9 +163,10 @@ class RunnerGitTests(unittest.TestCase):
         self.git(self.source, 'remote', 'set-url', 'origin', github)
         self.git(self.source, 'config', f'url.{self.remote}.insteadOf', github)
         (self.source / 'shared.txt').write_text('uncommitted human work\n')
+        actual_which = runner.shutil.which
         with patch.object(runner.Path, 'home', return_value=self.root / 'home'), \
              patch.object(runner.Path, 'cwd', return_value=self.source), \
-             patch.object(runner.shutil, 'which', return_value='/bin/tool'), \
+             patch.object(runner.shutil, 'which', side_effect=lambda cmd, **kw: actual_which(cmd, **kw) if cmd == 'git' else '/bin/tool'), \
              patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'secret'}):
             first = runner.managed_clone('team/private', 'project', 'agent-one')
             second = runner.managed_clone('team/private', 'project', 'agent-two')
@@ -180,38 +184,87 @@ class RunnerGitTests(unittest.TestCase):
             with self.assertRaisesRegex(runner.WorkBlocked, 'does not belong'):
                 runner.managed_clone('team/private', 'project', 'agent-one')
 
-    def test_conflicting_review_pr_is_revisited_but_merged_pr_is_not(self):
-        task = {**self.task, 'status': 'in_review'}
+    def test_server_setting_controls_push_branch_and_blank_defaults_to_main(self):
+        task = {**self.task, 'status': 'open', 'claimable': True}
         tandem = Mock()
-        tandem.project_call.side_effect = lambda tool, **kw: {'presenceRequests': []} if tool == 'tandem_get_presence_requests' else {'tasks': [task]}
+        tandem.project_call.side_effect = lambda tool, **kw: (
+            {'presenceRequests': []}
+            if tool == 'tandem_get_presence_requests'
+            else {'tasks': [task], 'pushBranch': 'agents/integration'}
+        )
         worker = runner.Runner(tandem, self.repo, [], 60)
-        for state, expected in [('OPEN', task), ('MERGED', None), ('CLOSED', None)]:
-            with patch.object(runner.subprocess, 'run', return_value=Mock(
-                    returncode=0, stdout=json.dumps({'state': state, 'mergeable': 'CONFLICTING'}))):
-                self.assertEqual(worker.next_task(), expected)
+        self.assertEqual(worker.next_task(), task)
+        self.assertEqual(worker.push_branch, 'agents/integration')
+        self.assertEqual(self.repo.base, 'agents/integration')
+        self.assertEqual(runner.push_branch(''), 'main')
+        for invalid in ('HEAD', 'refs/heads/main', '../main', 'bad branch', 'x.lock'):
+            with self.subTest(invalid=invalid), self.assertRaises(runner.WorkBlocked):
+                runner.push_branch(invalid)
 
     def test_runner_verifies_commits_and_pushes_uncommitted_agent_edits(self):
         command = [sys.executable, '-c', "from pathlib import Path; assert Path('shared.txt').read_text() == 'finished\\n'"]
-        worker = runner.Runner(Mock(), self.repo, [], 60, open_pull_requests=False, verify_commands=[command])
+        worker = runner.Runner(Mock(), self.repo, [], 60, verify_commands=[command])
         def edit(prompt):
             self.assertIn('Do not commit, push', prompt)
             (self.worker / 'shared.txt').write_text('finished\n')
             return 0, 'Implementation ready for runner verification.'
-        with patch.object(worker, '_run_agent_with_keepalive', side_effect=edit):
+        with patch.object(worker, '_run_agent_with_keepalive', side_effect=edit), \
+             patch.object(worker, '_sandboxed_check', return_value=Mock(returncode=0)):
             result = worker._execute(self.task)
-        self.assertIn('Passed:', result['message'])
+        self.assertIn('Passed in OS sandbox:', result['message'])
         self.assertIn('Commit:', result['message'])
         self.assertFalse(self.repo.dirty())
-        self.assertEqual(self.repo.git('rev-parse', 'HEAD'), self.repo.git('rev-parse', f'origin/{runner.branch_name(self.task)}'))
+        self.assertEqual(self.repo.git('rev-parse', 'HEAD'), self.repo.git('rev-parse', 'origin/main'))
+
+    def test_runner_pushes_only_to_server_configured_branch(self):
+        self.git(self.source, 'checkout', '-b', 'agents/integration')
+        self.git(self.source, 'push', 'origin', 'agents/integration')
+        self.git(self.source, 'checkout', 'main')
+        main_before = self.repo.git('rev-parse', 'origin/main')
+        worker = runner.Runner(Mock(), self.repo, [], 60)
+        worker._apply_project_settings({'pushBranch': 'agents/integration', 'tasks': []})
+
+        def edit(prompt):
+            self.assertIn('branch tandem/', prompt)
+            (self.worker / 'shared.txt').write_text('configured branch only\n')
+            return 0, 'Ready.'
+
+        with patch.object(worker, '_run_agent_with_keepalive', side_effect=edit):
+            result = worker._execute(self.task)
+        self.assertIn('agents/integration', result['progress'])
+        self.assertEqual(self.repo.git('rev-parse', 'HEAD'),
+                         self.repo.git('rev-parse', 'origin/agents/integration'))
+        self.assertEqual(self.repo.git('rev-parse', 'origin/main'), main_before)
+        self.assertFalse(self.repo.exists(f'origin/{runner.branch_name(self.task)}'))
+
+    def test_branch_setting_change_during_task_blocks_publication(self):
+        tandem = Mock()
+        tandem.project_call.return_value = {'tasks': [], 'pushBranch': 'agents/new-target'}
+        main_before = self.repo.git('rev-parse', 'origin/main')
+        worker = runner.Runner(tandem, self.repo, [], 60)
+        worker._apply_project_settings({'tasks': [], 'pushBranch': 'main'})
+        worker.active_task = self.task
+
+        def edit(prompt):
+            (self.worker / 'shared.txt').write_text('do not publish to the old target\n')
+            return 0, 'Ready.'
+
+        with patch.object(worker, '_run_agent_with_keepalive', side_effect=edit), \
+             patch.object(worker, '_phase'):
+            with self.assertRaisesRegex(runner.WorkBlocked, 'changed from main to agents/new-target'):
+                worker._execute(self.task)
+        self.assertEqual(self.repo.git('rev-parse', 'origin/main'), main_before)
+        self.assertFalse(self.repo.exists(f'origin/{runner.branch_name(self.task)}'))
 
     def test_failed_verification_never_commits_or_pushes_and_preserves_edits(self):
         before = self.repo.git('rev-parse', 'HEAD')
-        worker = runner.Runner(Mock(), self.repo, [], 60, open_pull_requests=False,
+        worker = runner.Runner(Mock(), self.repo, [], 60,
                                verify_commands=[[sys.executable, '-c', 'raise SystemExit(1)']])
         def edit(prompt):
             (self.worker / 'shared.txt').write_text('unfinished\n')
             return 0, 'Tests passed.'  # The runner must verify this claim itself.
-        with patch.object(worker, '_run_agent_with_keepalive', side_effect=edit):
+        with patch.object(worker, '_run_agent_with_keepalive', side_effect=edit), \
+             patch.object(worker, '_sandboxed_check', return_value=Mock(returncode=1, stdout='', stderr='failed')):
             with self.assertRaisesRegex(runner.WorkBlocked, 'Verification failed'):
                 worker._execute(self.task)
         self.assertEqual(self.repo.git('rev-parse', 'HEAD'), before)
@@ -222,7 +275,7 @@ class RunnerGitTests(unittest.TestCase):
         branch = runner.branch_name(self.task)
         self.repo.prepare(branch)
         (self.worker / 'shared.txt').write_text('saved work\n')
-        worker = runner.Runner(Mock(), self.repo, [], 60, open_pull_requests=False, resume_task=self.task['id'])
+        worker = runner.Runner(Mock(), self.repo, [], 60, resume_task=self.task['id'])
         def resume(prompt):
             self.assertIn('Resume the saved changes', prompt)
             self.assertEqual((self.worker / 'shared.txt').read_text(), 'saved work\n')
@@ -239,21 +292,158 @@ class RunnerGitTests(unittest.TestCase):
     def test_detected_npm_checks_run_with_ci_and_without_tandem_token(self):
         self.repo.prepare(runner.branch_name(self.task))
         (self.worker / 'package.json').write_text(json.dumps({'scripts': {'test': 'test-tool', 'build': 'build-tool'}}))
-        actual_run, checks = subprocess.run, []
-        def run(command, **kwargs):
-            if command[0] == 'npm':
-                checks.append(command)
-                self.assertEqual(kwargs['env']['CI'], 'true')
-                self.assertNotIn('TANDEM_AGENT_TOKEN', kwargs['env'])
-                return Mock(returncode=0)
-            return actual_run(command, **kwargs)
-        with patch.object(runner.subprocess, 'run', side_effect=run), patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'secret'}):
+        worker = runner.Runner(Mock(), self.repo, [], 60)
+        with patch.object(worker, '_sandboxed_check', return_value=Mock(returncode=0)) as sandbox:
+            worker._finalize(self.task, runner.branch_name(self.task))
+        self.assertEqual([c.args[0] for c in sandbox.call_args_list], [['npm', 'run', 'test'], ['npm', 'run', 'build']])
+
+    def test_missing_sandbox_never_executes_project_command_or_pushes(self):
+        self.repo.prepare(runner.branch_name(self.task))
+        (self.worker / 'shared.txt').write_text('saved edits\n')
+        worker = runner.Runner(Mock(), self.repo, [], 60, verify_commands=[['npm', 'test']])
+        actual_which = runner.shutil.which
+        with patch.object(runner.shutil, 'which', side_effect=lambda cmd, **kw: None if cmd == 'srt' else actual_which(cmd, **kw)), \
+             patch.object(runner.subprocess, 'run') as process:
+            with self.assertRaisesRegex(runner.WorkBlocked, 'Sandbox Runtime'):
+                worker._sandboxed_check(['npm', 'test'])
+            process.assert_not_called()
+        self.assertTrue(self.repo.dirty())
+        self.assertFalse(self.repo.exists(f'origin/{runner.branch_name(self.task)}'))
+
+    def test_verifier_uses_fixed_policy_and_minimal_environment(self):
+        worker = runner.Runner(Mock(), self.repo, [], 60)
+        actual_run, actual_which = subprocess.run, runner.shutil.which
+        def run(command, **kw):
+            if Path(command[0]).name == 'trusted-srt':
+                if command[1] == '--version':
+                    return Mock(returncode=0, stdout='0.0.81')
+                policy_path = Path(command[2])
+                policy = json.loads(policy_path.read_text())
+                self.assertFalse(policy_path.is_relative_to(self.worker))
+                self.assertIn('/', policy['filesystem']['denyRead'])
+                self.assertEqual(policy['network']['allowedDomains'], [])
+                self.assertFalse(policy['network']['allowLocalBinding'])
+                self.assertFalse(policy['enableWeakerNestedSandbox'])
+                self.assertNotIn('TANDEM_AGENT_TOKEN', kw['env'])
+                self.assertNotIn('OPENAI_API_KEY', kw['env'])
+                self.assertNotIn('NPM_TOKEN', kw['env'])
+                self.assertNotIn('NODE_OPTIONS', kw['env'])
+                self.assertNotEqual(kw['env']['HOME'], str(Path.home()))
+                return Mock(returncode=126, stdout='', stderr='sandbox denied')
+            return actual_run(command, **kw)
+        with patch.object(runner.shutil, 'which', side_effect=lambda cmd, **kw: '/tmp/trusted-srt' if cmd == 'srt' else actual_which(cmd, **kw)), \
+             patch.object(runner.subprocess, 'run', side_effect=run), \
+             patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'secret', 'OPENAI_API_KEY': 'secret', 'NPM_TOKEN': 'secret', 'NODE_OPTIONS': '--require malicious'}):
+            result = worker._sandboxed_check(['npm', 'test'])
+        self.assertEqual(result.returncode, 126)  # No unsandboxed retry.
+
+    def test_unsupported_runtime_version_never_starts_a_project_command(self):
+        actual_which = runner.shutil.which
+        for version in ('0.0.80', '0.0.82', 'unknown'):
+            with self.subTest(version=version), \
+                 patch.object(runner.shutil, 'which', side_effect=lambda cmd, **kw: '/tmp/trusted-srt' if cmd == 'srt' else actual_which(cmd, **kw)), \
+                 patch.object(runner.subprocess, 'run', return_value=Mock(returncode=0, stdout=version)) as process:
+                with self.assertRaisesRegex(runner.WorkBlocked, '0.0.81 is required'):
+                    runner.Runner(Mock(), self.repo, [], 60)._sandboxed_check(['npm', 'test'])
+                process.assert_called_once()
+                self.assertEqual(process.call_args.args[0][1:], ['--version'])
+
+    def test_runner_git_disables_project_hooks_and_filters(self):
+        self.repo.prepare(runner.branch_name(self.task))
+        marker = self.root / 'hook-or-filter-ran'
+        hooks = self.worker / '.hooks'
+        hooks.mkdir()
+        hook = hooks / 'pre-commit'
+        hook.write_text(f'#!/bin/sh\necho unsafe > "{marker}"\n')
+        hook.chmod(0o755)
+        self.git(self.worker, 'config', 'core.hooksPath', '.hooks')
+        runner.Runner(Mock(), self.repo, [], 60)._finalize(self.task, runner.branch_name(self.task))
+        self.assertFalse(marker.exists())
+        self.git(self.worker, 'config', 'filter.untrusted.clean', f'echo unsafe > "{marker}"')
+        self.git(self.worker, 'config', 'filter.untrusted.required', 'true')
+        (self.worker / '.gitattributes').write_text('shared.txt filter=untrusted\n')
+        (self.worker / 'shared.txt').write_text('safe contents\n')
+        with self.assertRaisesRegex(runner.WorkBlocked, 'Git content filter'):
             runner.Runner(Mock(), self.repo, [], 60)._finalize(self.task, runner.branch_name(self.task))
-        self.assertEqual(checks, [['npm', 'run', 'test'], ['npm', 'run', 'build']])
+        self.assertFalse(marker.exists())
+        self.assertEqual((self.worker / 'shared.txt').read_text(), 'safe contents\n')
+
+    @unittest.skipUnless(os.environ.get('TANDEM_TEST_SANDBOX_RUNTIME'), 'Requires an explicitly installed OS sandbox runtime')
+    def test_os_sandbox_blocks_outside_reads_writes_network_and_environment(self):
+        outside = self.root / 'outside-secret'
+        outside.write_text('private sentinel')
+        marker = self.root / 'outside-write'
+        listener = socket.socket()
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(1)
+        self.addCleanup(listener.close)
+        port = listener.getsockname()[1]
+        source = """import os, socket
+from pathlib import Path
+assert 'TANDEM_AGENT_TOKEN' not in os.environ
+assert 'OPENAI_API_KEY' not in os.environ
+try:
+    Path(%r).read_text()
+except (PermissionError, FileNotFoundError): pass
+else: raise AssertionError('outside read allowed')
+try:
+    Path(%r).write_text('unsafe')
+except (PermissionError, FileNotFoundError): pass
+else: raise AssertionError('outside write allowed')
+try:
+    socket.create_connection(('127.0.0.1', %d), timeout=1)
+except OSError: pass
+else: raise AssertionError('network allowed')
+Path('sandbox-result').write_text('checks passed')
+""" % (str(outside), str(marker), port)
+        actual_which = runner.shutil.which
+        with patch.object(runner.shutil, 'which', side_effect=lambda cmd, **kw: os.environ['TANDEM_TEST_SANDBOX_RUNTIME'] if cmd == 'srt' else actual_which(cmd, **kw)), \
+             patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'secret', 'OPENAI_API_KEY': 'secret'}):
+            result = runner.Runner(Mock(), self.repo, [], 60)._sandboxed_check([sys.executable, '-c', source])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(marker.exists())
+        self.assertEqual(outside.read_text(), 'private sentinel')
+        self.assertEqual((self.worker / 'sandbox-result').read_text(), 'checks passed')
+
+    @unittest.skipUnless(os.environ.get('TANDEM_TEST_SANDBOX_RUNTIME'), 'Requires an explicitly installed OS sandbox runtime')
+    def test_edited_npm_script_cannot_run_with_host_access(self):
+        self.repo.prepare(runner.branch_name(self.task))
+        marker = self.root / 'escaped-from-npm'
+        package = self.worker / 'package.json'
+        actual_which = runner.shutil.which
+        worker = runner.Runner(Mock(), self.repo, [], 60)
+        def script(body):
+            package.write_text(json.dumps({'scripts': {'test': f'node -e {shlex.quote(body)}'}}))
+        with patch.object(runner.shutil, 'which', side_effect=lambda cmd, **kw: os.environ['TANDEM_TEST_SANDBOX_RUNTIME'] if cmd == 'srt' else actual_which(cmd, **kw)):
+            script("require('fs').writeFileSync('allowed-build-output', 'ok')")
+            control = worker._sandboxed_check(['npm', 'run', 'test'])
+            self.assertEqual(control.returncode, 0, control.stderr)
+            self.assertTrue((self.worker / 'allowed-build-output').exists())
+            before = self.repo.git('rev-parse', 'HEAD')
+            script(f"require('fs').writeFileSync({json.dumps(str(marker))}, 'unsafe')")
+            with self.assertRaisesRegex(runner.WorkBlocked, 'Verification failed'):
+                worker._finalize(self.task, runner.branch_name(self.task))
+        self.assertFalse(marker.exists())
+        self.assertEqual(self.repo.git('rev-parse', 'HEAD'), before)
+        self.assertTrue(self.repo.dirty())
+        self.assertFalse(self.repo.exists(f'origin/{runner.branch_name(self.task)}'))
+
+    @unittest.skipUnless(os.environ.get('TANDEM_TEST_SANDBOX_RUNTIME'), 'Requires an explicitly installed OS sandbox runtime')
+    def test_workspace_symlink_cannot_grant_access_to_an_outside_executable(self):
+        private_tool = self.root / 'private-tool'
+        private_tool.write_text('#!/bin/sh\necho leaked > leaked-from-tool\n')
+        private_tool.chmod(0o755)
+        link = self.worker / 'verify-script'
+        link.symlink_to(private_tool)
+        actual_which = runner.shutil.which
+        with patch.object(runner.shutil, 'which', side_effect=lambda cmd, **kw: os.environ['TANDEM_TEST_SANDBOX_RUNTIME'] if cmd == 'srt' else actual_which(cmd, **kw)):
+            result = runner.Runner(Mock(), self.repo, [], 60)._sandboxed_check([str(link)])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.worker / 'leaked-from-tool').exists())
 
     def test_human_status_change_stops_publication(self):
         worker = runner.Runner(Mock(), self.repo, [], 60)
         worker.active_task = self.task['id']
         worker.tandem.project_call.return_value = {'version': 2, 'status': 'blocked'}
         with self.assertRaisesRegex(runner.ToolRefused, 'no longer in progress'):
-            worker._phase('Pushing verified task branch.')
+            worker._phase('Pushing verified commit to main.')
