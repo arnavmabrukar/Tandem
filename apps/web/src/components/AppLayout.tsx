@@ -9,6 +9,7 @@ import {
   RefreshCw,
   CircleHelp,
   Mail,
+  Plus,
   Settings,
 } from 'lucide-react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
@@ -17,6 +18,7 @@ import { useSession } from '../auth/session';
 import { initials, label, roleFor, type Project } from '../types/domain';
 import { Button } from './ui/button';
 import { BrandMark } from './BrandMark';
+import { ProjectSwitcher } from './ProjectSwitcher';
 import { Badge, Timestamp } from './common';
 
 export function AppLayout({
@@ -39,7 +41,8 @@ export function AppLayout({
   const { user, signOut } = useSession();
   const navigate = useNavigate();
   const location = useLocation();
-  const id = project?.id ?? projects[0]?.id;
+  const creating = location.pathname === '/projects/new';
+  const id = creating ? undefined : (project?.id ?? projects[0]?.id);
   const pendingApprovals = project?.approvals.filter((a) => a.status === 'pending') ?? [];
   const pending = pendingApprovals.length;
   // Contract approvals live in the Scope stage and result reviews in Review, as on the Activity page.
@@ -94,29 +97,20 @@ export function AppLayout({
         <div className="brand">
           <BrandMark />
           <span>
-            Tandem<small className="brand-project" title={project?.name}>{project?.name ?? 'No project selected'}</small>
+            Tandem
+            {project && (
+              <small className="brand-project" title={project.name}>
+                {project.name}
+              </small>
+            )}
           </span>
         </div>
-        <label className="field project-switcher">
-          <span>Project</span>
-          <select
-            aria-label="Select project"
-            value={project?.id ?? ''}
-            onChange={(e) => navigate(`/projects/${e.target.value}/activity`)}
-          >
-            <option value="" disabled>
-              Choose project
-            </option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <Button variant="ghost" className="new-project" onClick={() => navigate('/projects/new')}>
-          + Create project
-        </Button>
+        <ProjectSwitcher
+          projects={projects}
+          project={project}
+          online={online}
+          onSelect={(projectId) => navigate(`/projects/${projectId}/activity`)}
+        />
         <nav aria-label="Main navigation">
           {id &&
             nav.map(({ to, text, icon: Icon }) => (
@@ -143,6 +137,10 @@ export function AppLayout({
               <span>Invitations</span>
             </NavLink>
           </nav>
+          <Button variant="outline" className="create-project" onClick={() => navigate('/projects/new')}>
+            <Plus size={16} aria-hidden="true" />
+            Create project
+          </Button>
           <div className="user-row">
             <DropdownMenu.Root>
               <DropdownMenu.Trigger className="account-trigger" aria-label="Account menu">
@@ -188,8 +186,10 @@ export function AppLayout({
       <div className="workspace">
         <header className="topbar">
           <nav className="crumbs" aria-label="Breadcrumb">
-            {accountPage || !project ? (
+            {accountPage ? (
               <span>Account</span>
+            ) : !project ? (
+              <span>Projects</span>
             ) : (
               <span className="crumb-project" title={project.name}>
                 {project.name}

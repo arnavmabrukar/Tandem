@@ -81,7 +81,11 @@ function Dashboard() {
   useEffect(() => {
     if (project) setLastProjectId(project.id);
   }, [project?.id]);
-  const contextProject = project ?? projects.find((p) => p.id === lastProjectId) ?? projects[0] ?? null;
+  // Creating a project isn't work inside an existing one, so it shows no project context at all.
+  const contextProject =
+    location.pathname === '/projects/new'
+      ? null
+      : (project ?? projects.find((p) => p.id === lastProjectId) ?? projects[0] ?? null);
   useEffect(() => {
     document.title = project ? `${project.name} · Tandem` : 'Tandem — Coordination dashboard';
     return () => {
