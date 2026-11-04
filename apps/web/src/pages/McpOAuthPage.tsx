@@ -180,11 +180,17 @@ export function McpConnectionList() {
     {connections?.length === 0 && !error && <p className="muted">No connected agents.</p>}
     {!!connections?.length && <ul className="connection-list">
       {connections.map((c) => <li key={c.id}>
-        <span className="connection-name">{c.clientName || 'MCP client'} — {c.projectName} / {c.agentName}</span>
+        <span className="connection-name">
+          <span className="connection-title">
+            <span className="connection-project" title="Project">{c.projectName}</span>
+            <span className="connection-agent" title="Agent name">{c.agentName}</span>
+          </span>
+          <span className="connection-client" title="Agent client">{c.clientName || 'MCP client'}</span>
+        </span>
         <span className="connection-expiry muted" title={new Date(c.expiresAt).toLocaleString()}>
           Expires {new Date(c.expiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
         </span>
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => void disconnect(c.id)}>Disconnect</Button>
+        <Button variant="destructive" size="sm" disabled={busy} onClick={() => void disconnect(c.id)}>Disconnect</Button>
       </li>)}
     </ul>}
     {error && <p role="alert" className="notice error">{error}</p>}

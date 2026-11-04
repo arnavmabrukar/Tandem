@@ -217,6 +217,7 @@ export interface DashboardApi {
   connectGitHub(): Promise<{url: string}>;
   completeGitHub(code: string, state: string): Promise<{login: string}>;
   githubConnection(): Promise<GitHubConnection>;
+  disconnectGitHub(): Promise<{ connected: boolean }>;
   githubInstallations(page: number): Promise<{items: {id: number; name: string}[]; hasMore: boolean; installUrl: string}>;
   githubRepositories(installationId: number, page: number): Promise<{items: GitHubRepository[]; hasMore: boolean}>;
   chatPlan(projectId: string, messages: { role: 'user' | 'assistant'; content: string }[]): Promise<{ reply: string; proposal: import('./plans').PlanProposal | null }>;

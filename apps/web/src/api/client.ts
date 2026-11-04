@@ -251,6 +251,7 @@ export function createApiClient({
   return {
     connectGitHub: () => request('/api/github/connect', z.object({url: z.string().url()}), {method: 'POST', body: {}}),
     completeGitHub: (code, state) => request('/api/github/complete', z.object({login: z.string()}), {method: 'POST', body: {code, state}}),
+    disconnectGitHub: () => request('/api/github/connection', z.object({connected: z.boolean()}), {method: 'DELETE'}),
     githubConnection: () => request('/api/github/connection', z.object({connected: z.boolean(), login: z.string().nullable(), installUrl: z.string().url().nullable()})),
     githubInstallations: (page) => request(`/api/github/installations?page=${page}`, z.object({items: z.array(z.object({id: z.number(), name: z.string()})), hasMore: z.boolean(), installUrl: z.string().url()})),
     githubRepositories: (id, page) => request(`/api/github/installations/${id}/repositories?page=${page}`, z.object({items: z.array(z.object({id: z.number(), name: z.string(), fullName: z.string(), defaultBranch: z.string(), description: z.string()})), hasMore: z.boolean()})),
