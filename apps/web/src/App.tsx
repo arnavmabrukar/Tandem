@@ -23,6 +23,9 @@ import { safeReturnTo } from './config';
 const ActivityPage = lazy(() =>
   import('./pages/ActivityPage').then((m) => ({ default: m.ActivityPage })),
 );
+const OverviewPage = lazy(() =>
+  import('./pages/OverviewPage').then((m) => ({ default: m.OverviewPage })),
+);
 const WorkflowPage = lazy(() => import('./pages/WorkflowPage').then((m) => ({ default: m.WorkflowPage })));
 const WorkflowRedirect = lazy(() => import('./pages/WorkflowPage').then((m) => ({ default: m.WorkflowRedirect })));
 const ThreadPage = lazy(() =>
@@ -87,11 +90,15 @@ function Dashboard() {
       ? null
       : (project ?? projects.find((p) => p.id === new URLSearchParams(location.search).get('project')) ?? projects.find((p) => p.id === lastProjectId) ?? projects[0] ?? null);
   useEffect(() => {
-    document.title = project ? `${project.name} · Tandem` : 'Tandem — Coordination dashboard';
+    document.title = project
+      ? `${project.name} · Tandem`
+      : location.pathname === '/dashboard'
+        ? 'Overview · Tandem'
+        : 'Tandem — Coordination dashboard';
     return () => {
       document.title = 'Tandem — Coordination dashboard';
     };
-  }, [project?.name]);
+  }, [project?.name, location.pathname]);
   useEffect(() => {
     document.getElementById('main')?.focus();
     window.scrollTo({ top: 0 });
@@ -145,19 +152,7 @@ function Dashboard() {
             <Route path="/projects/new" element={<ProjectSetupPage key="new" project={null} />} />
             {query.data && !accessDenied ? (
               <>
-                <Route
-                  path="/dashboard"
-                  element={
-                    <Navigate
-                      to={
-                        projects[0]
-                          ? `/projects/${projects[0].id}/activity`
-                          : '/invitations'
-                      }
-                      replace
-                    />
-                  }
-                />
+                <Route path="/dashboard" element={<OverviewPage projects={projects} />} />
                 <Route
                   path="/projects/:projectId"
                   element={
