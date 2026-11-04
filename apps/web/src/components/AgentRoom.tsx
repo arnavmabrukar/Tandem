@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { ArrowUp, Sparkles, LockKeyhole, Trash2 } from 'lucide-react';
+import { AlertCircle, ArrowUp, Sparkles, LockKeyhole, Trash2 } from 'lucide-react';
 import { useSession } from '../auth/session';
 import { ApiError } from '../api/client';
 import { useAction } from '../hooks/useWorkspace';
@@ -32,8 +32,13 @@ function Exchange({ item, project, mediatorModel }: { item: RoomExchange; projec
     {/* Completed messages without a response are standalone agent acknowledgements. */}
     {!(item.state === 'complete' && item.response === null) && <div className="room-message room-mediator">
       <div className="row wrap"><MediatorIdentity model={item.response ? item.response.model || 'Model not recorded' : mediatorModel} />{item.kind === 'human' && <span className="chat-caption">Hidden from agents</span>}</div>
-      <p className="room-body">{item.response?.reply ?? (item.state === 'failed' ? 'The mediator could not reply. You can try again.' : 'Waiting for the mediator…')}</p>
-      {item.state === 'failed' && item.senderUserId === user!.id && <><Button size="sm" variant="outline" disabled={retry.isPending} onClick={() => retry.mutate()}>{retry.isPending ? 'Retrying…' : 'Retry reply'}</Button><ErrorNotice error={retry.error} /></>}
+      {item.state === 'failed' && !item.response
+        ? <div className="room-failure">
+            <p role="status">{retry.error instanceof ApiError && retry.error.status !== 502 ? retry.error.message
+              : retry.isError ? 'The mediator still could not reply.' : 'The mediator could not reply.'}</p>
+            {item.senderUserId === user!.id && <Button size="sm" variant="outline" disabled={retry.isPending} onClick={() => retry.mutate()}>{retry.isPending ? 'Retrying…' : 'Retry reply'}</Button>}
+          </div>
+        : <p className="room-body">{item.response?.reply ?? 'Waiting for the mediator…'}</p>}
       {item.response?.proposal && <DraftCard project={project} proposal={item.response.proposal}
         disabled={!owner || item.senderUserId !== user!.id} message={{ role: 'assistant', content: item.response.reply,
           saved: item.response.saved, approved: item.response.saved?.approvedPlanVersion === item.response.saved?.planVersion && !!item.response.saved }}
@@ -76,7 +81,7 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
     retry: false,
   });
   const pending = useRef<{ operationId: string; body: string; uncertain?: boolean } | null>(null);
-  const end = useRef<HTMLDivElement>(null);
+  const transcript = useRef<HTMLDivElement>(null);
   const canPost = ['owner', 'reviewer'].includes(roleFor(project, user!.id) ?? '');
   function completeSend() {
     const submitted = pending.current;
@@ -92,20 +97,25 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
     onError: error => {
       if (pending.current && error instanceof ApiError && error.outcomeUnknown) pending.current.uncertain = true;
     },
-    onSettled: () => { void client.invalidateQueries({ queryKey: key }); },
+    onSettled: () => client.invalidateQueries({ queryKey: key }),
   });
   const items = room.data?.exchanges ?? [];
+  // Once this send appears in the conversation, the conversation reports its outcome.
+  const sendRecorded = !!pending.current && items.some(item => item.operationId === pending.current!.operationId
+    && item.senderUserId === user!.id && item.kind === 'human' && (item.state === 'complete' || item.state === 'failed'));
   useEffect(() => {
     // Match the authenticated sender AND operation, never just repeated text.
     // Wait for the POST to settle so its late error cannot overwrite recovery.
     if (!send.isError || !pending.current) return;
-    if (items.some(item => item.operationId === pending.current!.operationId
-      && item.senderUserId === user!.id && item.kind === 'human' && item.state === 'complete')) {
+    if (sendRecorded) {
       completeSend();
       send.reset();
     }
   }, [room.data, send.isError, user!.id]);
-  useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }); }, [items.length, items.at(-1)?.state]);
+  useEffect(() => {
+    // Scroll only the conversation. scrollIntoView would also move the page around it.
+    if (transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
+  }, [items.length, items.at(-1)?.state]);
   function submit() {
     if (!body.trim() || send.isPending || pending.current?.uncertain || !canPost) return;
     if (!pending.current || (!pending.current.uncertain && pending.current.body !== body.trim())) pending.current = { operationId: crypto.randomUUID(), body: body.trim() };
@@ -116,16 +126,19 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
       {owner && <Button variant="ghost" size="sm" disabled={!items.length || room.isPending || send.isPending || clear.isPending}
         onClick={() => { clear.reset(); setCleared(false); setClearTarget(items.at(-1)!.id); }}><Trash2 size={15} />Clear chat</Button>}
     </header>
-    <div className="chat-transcript room-transcript" role="log" aria-live="polite" aria-label="Room conversation">
+    <div ref={transcript} className="chat-transcript room-transcript" role="log" aria-live="polite" aria-label="Room conversation">
       <ErrorNotice error={room.error} />
       {cleared && <p role="status">Previous room messages deleted.</p>}
       {room.isPending ? <p>Loading conversation…</p> : items.length === 0 && <div className="chat-welcome"><Sparkles size={30} /><h2>Build together.</h2><p>Ask the mediator for a plan, change direction, or check what’s happening.<br />Your agents can join through their MCP connection.</p></div>}
       {items.map(item => <Exchange key={item.id} item={item} project={project} mediatorModel={room.data?.mediatorModel} />)}
-      {send.isPending && <p role="status">Mediator is thinking…</p>}<div ref={end} />
+      {send.isPending && <p role="status">Mediator is thinking…</p>}
     </div>
-    <div className="chat-bottom"><ErrorNotice error={send.error} />
-      {send.isError && pending.current?.uncertain && <div className="row wrap"><p>Confirm the previous message before sending another. Your edited draft will be kept.</p>
-        <Button variant="outline" onClick={() => send.mutate()}>Retry previous message</Button></div>}
+    <div className="chat-bottom">
+      {send.isError && !sendRecorded && <div className="room-send-error" role="alert">
+        <AlertCircle size={15} aria-hidden="true" />
+        <span>{pending.current?.uncertain ? 'We couldn’t confirm your last message was sent. Try again before sending another; your draft is kept.' : send.error.message}</span>
+        {pending.current?.uncertain && <Button variant="outline" size="sm" onClick={() => send.mutate()}>Try again</Button>}
+      </div>}
       <form className="chat-composer" onSubmit={e => { e.preventDefault(); submit(); }}>
         <textarea aria-label="Message mediator" placeholder={canPost ? 'Message Mediator — plan, ask, or change direction…' : 'Your role can read this room.'} maxLength={8000} value={body} disabled={!canPost || send.isPending} onChange={e => setBody(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } }} />
         <Button type="submit" className="chat-send" aria-label="Send message" disabled={!canPost || !body.trim() || send.isPending || pending.current?.uncertain}><ArrowUp size={20} /></Button>

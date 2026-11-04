@@ -523,14 +523,14 @@ for (const editDraft of [false, true]) test(`agent room reconciles its completed
   const composer = page.getByRole('textbox', { name: 'Message mediator' });
   await composer.fill('ping agents');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await expect(page.getByText('The API could not complete the request (HTTP 503).')).toBeVisible();
+  await expect(page.getByText('We couldn’t confirm your last message was sent.', { exact: false })).toBeVisible();
   // Neither repeated text nor another sender's operation proves this send succeeded.
   await expect(composer).toHaveValue('ping agents');
   if (editDraft) await composer.fill('My next question');
   confirmed = true;
-  await expect(page.getByText('The API could not complete the request (HTTP 503).')).toHaveCount(0, { timeout: 12000 });
+  await expect(page.getByText('We couldn’t confirm your last message was sent.', { exact: false })).toHaveCount(0, { timeout: 12000 });
   await expect(composer).toHaveValue(editDraft ? 'My next question' : '');
-  await expect(page.getByRole('button', { name: 'Retry previous message' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
 });
 
 test('agent room retries an uncertain send with its original operation and body', async ({ page }) => {
@@ -546,13 +546,66 @@ test('agent room retries an uncertain send with its original operation and body'
   const composer = page.getByRole('textbox', { name: 'Message mediator' });
   await composer.fill('ping agents');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Retry previous message' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
   await composer.fill('My next question');
-  await page.getByRole('button', { name: 'Retry previous message' }).click();
-  await expect(page.getByRole('button', { name: 'Retry previous message' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
   expect(requests).toHaveLength(2);
   expect(requests[1]).toEqual(requests[0]);
   await expect(composer).toHaveValue('My next question');
+});
+
+test('a failed mediator reply is reported once, in the conversation', async ({ page }) => {
+  await connect(page);
+  await page.route('**/.well-known/oauth-protected-resource/mcp/', route => route.fulfill({ json: { resource: 'https://api.tandem.test/mcp/' } }));
+  await page.route('**/api/mcp/oauth/connections', route => route.fulfill({ json: [] }));
+  const exchanges: Record<string, unknown>[] = Array.from({ length: 12 }, (_, index) => ({
+    id: `old-${index}`, operationId: `old-${index}`, senderUserId: 'user-1', senderAgentId: null, sender: 'Test owner', kind: 'human',
+    body: `Earlier question ${index}`, state: 'complete', createdAt: new Date().toISOString(),
+    response: { reply: 'Earlier answer', model: 'muse-spark-1.3-contributor', proposal: null, cancelTaskIds: [] },
+  }));
+  let posts = 0;
+  await page.route('**/api/projects/project-1/room', async route => {
+    if (route.request().method() !== 'POST') return route.fulfill({ json: { exchanges, mediatorModel: 'muse-spark-1.3-contributor' } });
+    posts++;
+    const request = route.request().postDataJSON();
+    if (posts <= 2) {
+      if (posts === 1) exchanges.push({ id: 'failed', ...request, senderUserId: 'user-1', senderAgentId: null, sender: 'Test owner', kind: 'human',
+        state: 'failed', response: null, createdAt: new Date().toISOString() });
+      return route.fulfill({ status: 502, json: { detail: 'The mediator could not reply. Retry your message.' } });
+    }
+    const done = exchanges.at(-1)!;
+    done.state = 'complete';
+    done.response = { reply: 'Here is a plan.', model: 'muse-spark-1.3-contributor', proposal: null, cancelTaskIds: [] };
+    await route.fulfill({ json: done });
+  });
+  await page.goto('/#/projects/project-1/agents');
+  const composer = page.getByRole('textbox', { name: 'Message mediator' });
+  await composer.fill('build a to do list');
+  const pageScroll = await page.evaluate(() => window.scrollY);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+
+  const log = page.getByRole('log', { name: 'Room conversation' });
+  await expect(log.getByText('The mediator could not reply.')).toHaveCount(1);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByText('HTTP 502')).toHaveCount(0);
+  await expect(page.getByText('operation ID')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+  // The message now lives in the conversation, and another can be sent.
+  await expect(composer).toHaveValue('');
+  await expect(composer).toBeEnabled();
+  // The newest exchange is in view, and only the conversation moved.
+  await expect(log.getByRole('button', { name: 'Retry reply' })).toBeInViewport();
+  expect(await log.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.scrollY)).toBe(pageScroll);
+
+  await log.getByRole('button', { name: 'Retry reply' }).click();
+  await expect(log.getByText('The mediator still could not reply.')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await log.getByRole('button', { name: 'Retry reply' }).click();
+  await expect(log.getByText('Here is a plan.')).toBeVisible();
+  await expect(log.getByRole('button', { name: 'Retry reply' })).toHaveCount(0);
+  await expect(log.getByText('could not reply')).toHaveCount(0);
 });
 
 test('worker onboarding generates isolated setup and continuous commands for each engine', async ({ page }) => {
