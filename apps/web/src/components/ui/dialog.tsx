@@ -9,12 +9,14 @@ export function Modal({
   title,
   description,
   children,
+  className,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   description: string;
   children: ReactNode;
+  className?: string;
 }) {
   const previousFocus = useRef<HTMLElement | null>(null);
   return (
@@ -22,7 +24,7 @@ export function Modal({
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content
-          className="dialog-content"
+          className={`dialog-content${className ? ` ${className}` : ''}`}
           onOpenAutoFocus={() => {
             previousFocus.current =
               document.activeElement instanceof HTMLElement ? document.activeElement : null;

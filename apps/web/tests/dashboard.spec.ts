@@ -568,6 +568,12 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await page.route('**/api/projects/project-1/room', route => route.fulfill({ json: { exchanges: [] } }));
   await page.goto('/#/projects/project-1/agents');
   await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'First-time setup' })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Reconnecting' })).toBeVisible();
+  const reconnect = dialog.getByRole('region', { name: 'Reconnect your worker' });
+  await expect(reconnect).toContainText('Your current terminal folder is not the cause.');
+  await expect(reconnect).toContainText('Do not delete or reset the workspace.');
   const worker = page.getByRole('region', { name: 'Continuous worker setup' });
   const script = await page.request.get('/downloads/tandem_runner.py');
   expect(script.status()).toBe(200);
@@ -617,6 +623,30 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await worker.getByLabel('Agent command', { exact: true }).fill('my-agent --headless');
   await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeEnabled();
   await expect(install.locator('pre')).toContainText("--agent-command 'my-agent --headless'");
+});
+
+test('reconnecting an agent offers a task-specific resume command for saved edits', async ({ page }) => {
+  const state = await connect(page);
+  const ownerId = '11111111-1111-4111-8111-111111111111';
+  state.project.members[0].id = ownerId;
+  state.project.agents.push({
+    id: 'agent-1', name: 'My Codex', client: 'Codex', owner: 'Test owner', ownerId,
+    machine: 'Laptop', capabilities: [], grant: 'active', presence: 'online', lastSeen: null, session: null,
+  });
+  state.project.tasks[0].status = 'blocked';
+  state.project.tasks[0].agentId = 'agent-1';
+  await page.route('https://api.tandem.test/api/me', route => route.fulfill({ json: { id: ownerId, name: 'Test owner' } }));
+  await page.route('**/.well-known/oauth-protected-resource/mcp/', route => route.fulfill({ json: { resource: 'https://api.tandem.test/mcp/' } }));
+  await page.route('**/api/mcp/oauth/connections', route => route.fulfill({ json: [{ id: 'connection-1', projectId: 'project-1', agentId: 'agent-1' }] }));
+  await page.route('**/api/projects/project-1/room', route => route.fulfill({ json: { exchanges: [] } }));
+  await page.goto('/#/projects/project-1/agents');
+  await page.locator('.roster-agent').getByText('My Codex').click();
+  await page.locator('.roster-agent').getByRole('button', { name: 'Set up worker' }).click();
+  const reconnect = page.getByRole('region', { name: 'Reconnect your worker' });
+  await reconnect.getByLabel('Task to resume').selectOption('task-1');
+  await expect(reconnect.locator('pre')).toContainText("--resume-task 'task-1'");
+  await expect(reconnect.getByRole('button', { name: 'Copy resume command' })).toBeEnabled();
+  await expect(reconnect).toContainText('Do not delete or reset the workspace.');
 });
 
 test('agent room sends private human messages and opens connection onboarding', async ({ page }) => {

@@ -1492,6 +1492,8 @@ td:first-child {
   border: 1px solid #d9e5ee; border-radius: .5rem; background: #f5f8fa; font-size: .85rem; }
 .agent-advanced { margin-block: 1rem; }
 .agent-advanced summary, .oauth-step summary { cursor: pointer; }
+.agent-setup-dialog { width: min(760px, calc(100vw - 32px)); }
+.worker-reconnect { margin-top: 1.5rem; }
 
 /* A bounded conversation keeps the composer within reach as the chat grows. */
 .plan-chat { display: flex; flex-direction: column; height: min(780px, 80dvh); min-height: 540px; background: #fff; border: 1px solid #dae5ee; border-radius: 22px; overflow: hidden; box-shadow: 0 8px 32px #172c3d10; margin-bottom: 32px; }

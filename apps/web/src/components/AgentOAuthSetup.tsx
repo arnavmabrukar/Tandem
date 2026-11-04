@@ -50,10 +50,11 @@ function CopyButton({ text, label, disabled = false }: { text: string; label: st
   </>;
 }
 
-function WorkerSetup({ project, agent, url, initialClient }: { project: Project; agent?: Agent; url: string; initialClient: string }) {
+function WorkerSetup({ project, agent, url, initialClient, roomPrompt }: { project: Project; agent?: Agent; url: string; initialClient: string; roomPrompt: string }) {
   const [engine, setEngine] = useState(initialClient === 'Claude Code' ? 'claude' : initialClient === 'Codex' ? 'codex' : 'custom');
   const [custom, setCustom] = useState('');
   const [verification, setVerification] = useState('');
+  const [resumeTaskId, setResumeTaskId] = useState('');
   const sandboxSetup = 'npm install -g @anthropic-ai/sandbox-runtime@0.0.81';
   const codexSetup = 'npm install -g @openai/codex@latest @anthropic-ai/sandbox-runtime@0.0.81\ncodex login\ncodex login status';
   // The native installer uses ~/.local/bin; make it available in this terminal
@@ -69,7 +70,12 @@ function WorkerSetup({ project, agent, url, initialClient }: { project: Project;
   // The frontend serves the runner; absolute install and managed workspace paths
   // let users run this command from any terminal directory.
   const installCommand = `mkdir -p "$HOME/Downloads" &&\ncurl -fLsS ${quote(new URL('/downloads/tandem_runner.py', window.location.origin).href)} \\\n  -o "$HOME/Downloads/tandem_runner.py" &&\npython3 "$HOME/Downloads/tandem_runner.py" ${argumentsText}`;
-  return <section aria-label="Continuous worker setup" className="agent-advanced">
+  const resumableTasks = agent ? project.tasks.filter(task =>
+    (task.agentId === agent.id || task.assignedAgentId === agent.id)
+    && ['blocked', 'claimed', 'in_progress'].includes(task.status)) : [];
+  const resumeCommand = resumeTaskId ? `${installCommand} --resume-task ${quote(resumeTaskId)}` : '';
+  return <>
+  <section aria-label="Continuous worker setup" className="agent-advanced">
     <h3>2. Choose your worker</h3>
     <p>Automatically work on assigned, approved tasks and answer room pings. No access to Tandem’s private repository is needed.</p>
     <Field label="Worker engine"><select value={engine} onChange={e => setEngine(e.target.value)}>
@@ -110,7 +116,33 @@ function WorkerSetup({ project, agent, url, initialClient }: { project: Project;
       <CopyButton key={installCommand} text={installCommand} label="Copy download and start command" disabled={!ready} />
     </section>
     <p className="small muted">Saves the runner to Downloads. Keep the terminal open; Ctrl+C stops it. The runner verifies, commits, and pushes only to the branch configured in Project setup; you review and accept the work.</p>
-  </section>;
+  </section>
+  <section aria-label="Agent startup prompt" className="agent-advanced">
+    <h3>5. Start your agent chat</h3>
+    <p>Paste into your connected agent’s chat. Keep the terminal worker running for continuous work.</p>
+    <pre className="oauth-code">{roomPrompt}</pre>
+    <CopyButton text={roomPrompt} label="Copy startup prompt" />
+  </section>
+  <section aria-label="Reconnect your worker" className="oauth-step worker-reconnect">
+    <h2>Reconnecting</h2>
+    <p><strong>Normal restart:</strong> Run the download and start command in step 4 again. It reuses this agent’s workspace. Paste the agent token at the hidden prompt and press Enter; you do not need to reconnect MCP.</p>
+    <p><strong>Saved changes:</strong> If setup says “Use a clean, dedicated clone,” this agent’s workspace has uncommitted task work. Your current terminal folder is not the cause. Do not delete or reset the workspace.</p>
+    {agent ? <>
+      <Field label="Task to resume" hint="Choose the blocked or active task that owns those saved changes.">
+        <select value={resumeTaskId} onChange={event => setResumeTaskId(event.target.value)}>
+          <option value="">Select a task</option>
+          {resumableTasks.map(task => <option key={task.id} value={task.id}>{task.title} · {task.status}</option>)}
+        </select>
+      </Field>
+      {resumableTasks.length === 0 && <p className="small muted">No assigned blocked or active tasks are shown. Check Workflow before changing the saved workspace.</p>}
+      {resumeTaskId && <>
+        <p>Run this command to continue that task and preserve its saved edits:</p>
+        <pre className="oauth-code">{resumeCommand}</pre>
+        <CopyButton key={resumeCommand} text={resumeCommand} label="Copy resume command" disabled={!ready} />
+      </>}
+    </> : <p className="small muted">After connecting, open Set up worker for this agent to choose a task and get its resume command.</p>}
+  </section>
+  </>;
 }
 
 export function AgentOAuthSetup({ project, agent, onClose }: {
@@ -167,7 +199,8 @@ Never approve or merge your own work, access human room messages, or duplicate a
     : `# Tandem remote MCP connection. Authentication happens in your browser.\n[mcp_servers.tandem-oauth]\nurl = ${JSON.stringify(url)}`);
   return <Modal open onOpenChange={(open) => { if (!open) onClose(); }}
     title={connections.data ? 'Access authorized' : 'Connect your agent'}
-    description={agent ? `${agent.name} · ${project.name}` : project.name}>
+    description={agent ? `${agent.name} · ${project.name}` : project.name} className="agent-setup-dialog">
+    <h2>First-time setup</h2>
     {discovery.isPending && <p role="status">Checking your server…</p>}
     <ErrorNotice error={discovery.error} retry={() => void discovery.refetch()} />
     {url && (connections.data ? <>
@@ -209,13 +242,7 @@ Never approve or merge your own work, access human room messages, or duplicate a
       <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
     </>)}
     {url && <WorkerSetup key={`${agent?.id ?? String(connections.data)}:${client}`} project={project}
-      agent={agent ?? project.agents.find(a => a.id === connections.data)} url={url} initialClient={client} />}
-    {url && <section aria-label="Agent startup prompt" className="agent-advanced">
-      <h3>5. Start your agent chat</h3>
-      <p>Paste into your connected agent’s chat. Keep the terminal worker running for continuous work.</p>
-      <pre className="oauth-code">{roomPrompt}</pre>
-      <CopyButton text={roomPrompt} label="Copy startup prompt" />
-    </section>}
+      agent={agent ?? project.agents.find(a => a.id === connections.data)} url={url} initialClient={client} roomPrompt={roomPrompt} />}
     <div className="row between wrap oauth-step">
       <Link to="/mcp/connections" onClick={onClose}>Manage connections</Link>
       <Button variant="outline" onClick={() => { void queries.invalidateQueries({ queryKey: ['workspace'] }); onClose(); }}>Done</Button>
