@@ -846,7 +846,7 @@ test('reconnecting an agent offers a task-specific resume command for saved edit
   await reconnect.getByLabel('Task to resume').selectOption('task-1');
   await expect(reconnect.locator('pre').last()).toContainText("--resume-task 'task-1'");
   await expect(reconnect.getByRole('button', { name: 'Copy resume command' })).toBeEnabled();
-  await expect(reconnect).toContainText('Do not delete or reset the workspace.');
+  await expect(reconnect).toContainText('Do not delete or reset unfinished work.');
 });
 
 test('reconnecting from the general guide selects an owned agent for token replacement', async ({ page }) => {
