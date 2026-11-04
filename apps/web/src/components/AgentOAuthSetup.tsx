@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth0 } from '@auth0/auth0-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -50,7 +50,8 @@ function CopyButton({ text, label, disabled = false }: { text: string; label: st
   </>;
 }
 
-function WorkerSetup({ project, agent, url, initialClient, roomPrompt }: { project: Project; agent?: Agent; url: string; initialClient: string; roomPrompt: string }) {
+function WorkerSetup({ project, agent, url, initialClient, roomPrompt, firstTimeIntro }: { project: Project; agent?: Agent; url: string; initialClient: string; roomPrompt: string; firstTimeIntro: ReactNode }) {
+  const [tab, setTab] = useState<'first' | 'reconnect'>('first');
   const [engine, setEngine] = useState(initialClient === 'Claude Code' ? 'claude' : initialClient === 'Codex' ? 'codex' : 'custom');
   const [custom, setCustom] = useState('');
   const [verification, setVerification] = useState('');
@@ -75,6 +76,18 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt }: { proje
     && ['blocked', 'claimed', 'in_progress'].includes(task.status)) : [];
   const resumeCommand = resumeTaskId ? `${installCommand} --resume-task ${quote(resumeTaskId)}` : '';
   return <>
+  <div className="setup-tabs" role="tablist" aria-label="Agent setup guide" onKeyDown={event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 'first' : event.key === 'End' ? 'reconnect' : tab === 'first' ? 'reconnect' : 'first';
+    setTab(next);
+    event.currentTarget.querySelector<HTMLElement>(`#setup-${next}-tab`)?.focus();
+  }}>
+    <button type="button" role="tab" id="setup-first-tab" aria-controls="setup-first-panel" aria-selected={tab === 'first'} tabIndex={tab === 'first' ? 0 : -1} onClick={() => setTab('first')}>First-time setup</button>
+    <button type="button" role="tab" id="setup-reconnect-tab" aria-controls="setup-reconnect-panel" aria-selected={tab === 'reconnect'} tabIndex={tab === 'reconnect' ? 0 : -1} onClick={() => setTab('reconnect')}>Reconnecting</button>
+  </div>
+  <div role="tabpanel" id="setup-first-panel" aria-labelledby="setup-first-tab" hidden={tab !== 'first'}>
+    {firstTimeIntro}
   <section aria-label="Continuous worker setup" className="agent-advanced">
     <h3>2. Choose your worker</h3>
     <p>Automatically work on assigned, approved tasks and answer room pings. No access to Tandem’s private repository is needed.</p>
@@ -123,9 +136,15 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt }: { proje
     <pre className="oauth-code">{roomPrompt}</pre>
     <CopyButton text={roomPrompt} label="Copy startup prompt" />
   </section>
+  </div>
+  <div role="tabpanel" id="setup-reconnect-panel" aria-labelledby="setup-reconnect-tab" hidden={tab !== 'reconnect'}>
   <section aria-label="Reconnect your worker" className="oauth-step worker-reconnect">
-    <h2>Reconnecting</h2>
-    <p><strong>Normal restart:</strong> Run the download and start command in step 4 again. It reuses this agent’s workspace. Paste the agent token at the hidden prompt and press Enter; you do not need to reconnect MCP.</p>
+    <h3>Restart your worker</h3>
+    <p>Run this command again to reuse this agent’s workspace. Paste the agent token at the hidden prompt and press Enter. You do not need to reconnect MCP.</p>
+    <pre className="oauth-code">{installCommand}</pre>
+    <CopyButton key={installCommand} text={installCommand} label="Copy download and start command" disabled={!ready} />
+    {!ready && <p className="small muted">Complete the worker settings in First-time setup to enable copying.</p>}
+    <h3>Resume saved task changes</h3>
     <p><strong>Saved changes:</strong> If setup says “Use a clean, dedicated clone,” this agent’s workspace has uncommitted task work. Your current terminal folder is not the cause. Do not delete or reset the workspace.</p>
     {agent ? <>
       <Field label="Task to resume" hint="Choose the blocked or active task that owns those saved changes.">
@@ -142,6 +161,7 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt }: { proje
       </>}
     </> : <p className="small muted">After connecting, open Set up worker for this agent to choose a task and get its resume command.</p>}
   </section>
+  </div>
   </>;
 }
 
@@ -192,18 +212,13 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
   const roomPrompt = `Use Tandem for project ${project.id}.
 Confirm access with tandem_whoami. Fetch tandem_get_assignments and summarize ready work and blockers.
 Check tandem_get_presence_requests; acknowledge returned IDs with tandem_acknowledge_presence. Repeat between tasks.
+Check tandem_get_worker_room_requests between task steps. Answer messages addressed to you with tandem_reply_worker_room_request, using the same request ID. Other human room messages remain private.
 Before claiming work, read repo instructions, git status, the approved contract and dependencies. Preserve others’ changes and report progress, questions, tests and blockers through Tandem. Retry the same write with its original operation ID.
 Never approve or merge your own work, access human room messages, or duplicate a running worker’s tasks. Continuous work while this chat is idle requires the terminal worker.`;
   const snippet = url && (client === 'Claude Code'
     ? JSON.stringify({ mcpServers: { 'tandem-oauth': { type: 'http', url } } }, null, 2)
     : `# Tandem remote MCP connection. Authentication happens in your browser.\n[mcp_servers.tandem-oauth]\nurl = ${JSON.stringify(url)}`);
-  return <Modal open onOpenChange={(open) => { if (!open) onClose(); }}
-    title={connections.data ? 'Access authorized' : 'Connect your agent'}
-    description={agent ? `${agent.name} · ${project.name}` : project.name} className="agent-setup-dialog">
-    <h2>First-time setup</h2>
-    {discovery.isPending && <p role="status">Checking your server…</p>}
-    <ErrorNotice error={discovery.error} retry={() => void discovery.refetch()} />
-    {url && (connections.data ? <>
+  const firstTimeIntro = connections.data ? <>
       <h3>1. Connect your agent — complete</h3>
       <p>Your agent has permission to access this project.</p>
     </> : step === 1 ? <>
@@ -215,7 +230,7 @@ Never approve or merge your own work, access human room messages, or duplicate a
       </Field>
       <p>Add this remote HTTP MCP server in your agent’s app, CLI, or IDE. Sign in through your browser.</p>
       <Field label="Server URL"><input readOnly value={url} onFocus={(e) => e.currentTarget.select()} /></Field>
-      <CopyButton key={url} text={url} label="Copy server URL" />
+      <CopyButton key={url} text={url!} label="Copy server URL" />
       <details className="agent-advanced">
         <summary>How to add it in {client}</summary>
         <p>{client === 'Claude Code'
@@ -229,7 +244,7 @@ Never approve or merge your own work, access human room messages, or duplicate a
           <p className="small muted">Paste this into the configuration file, not the terminal. Leave authentication headers empty.</p>
         </>}
       </details>
-      {new URL(url).protocol === 'http:' && <p className="small muted">Local setup: keep Tandem running on this computer. Use your hosted server for other machines.</p>}
+      {url && new URL(url).protocol === 'http:' && <p className="small muted">Local setup: keep Tandem running on this computer. Use your hosted server for other machines.</p>}
       <div className="row end"><Button onClick={() => setStep(2)}>Continue</Button></div>
     </> : <>
       <h3>1. Finish connecting your agent</h3>
@@ -240,9 +255,14 @@ Never approve or merge your own work, access human room messages, or duplicate a
       <p role="status">Waiting for authorization…</p>
       <ErrorNotice error={connections.error} retry={() => void connections.refetch()} />
       <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
-    </>)}
+    </>;
+  return <Modal open onOpenChange={(open) => { if (!open) onClose(); }}
+    title={connections.data ? 'Access authorized' : 'Connect your agent'}
+    description={agent ? `${agent.name} · ${project.name}` : project.name} className="agent-setup-dialog">
+    {discovery.isPending && <p role="status">Checking your server…</p>}
+    <ErrorNotice error={discovery.error} retry={() => void discovery.refetch()} />
     {url && <WorkerSetup key={`${agent?.id ?? String(connections.data)}:${client}`} project={project}
-      agent={agent ?? project.agents.find(a => a.id === connections.data)} url={url} initialClient={client} roomPrompt={roomPrompt} />}
+      agent={agent ?? project.agents.find(a => a.id === connections.data)} url={url} initialClient={client} roomPrompt={roomPrompt} firstTimeIntro={firstTimeIntro} />}
     <div className="row between wrap oauth-step">
       <Link to="/mcp/connections" onClick={onClose}>Manage connections</Link>
       <Button variant="outline" onClick={() => { void queries.invalidateQueries({ queryKey: ['workspace'] }); onClose(); }}>Done</Button>

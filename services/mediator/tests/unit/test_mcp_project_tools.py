@@ -124,6 +124,20 @@ class PresenceToolTests(ToolTestCase):
                 self.assertFalse(result.get('isError'), result)
                 self.assertEqual(database.call_args.args[-1], IDENTITY)
 
+    def test_worker_room_requests_are_scoped_to_authenticated_agent_and_project(self):
+        request_id = str(uuid4())
+        for tool, function, arguments in (
+            ('tandem_get_worker_room_requests', 'pending_worker_requests', {}),
+            ('tandem_reply_worker_room_request', 'reply_worker_request',
+             {'requestId': request_id, 'body': 'Working on it.'}),
+        ):
+            with self.subTest(tool=tool), patch(f'mediator.db.room.{function}', return_value={}) as database:
+                self.assert_refused(self.call(tool, projectId=OTHER_PROJECT_ID, **arguments))
+                database.assert_not_called()
+                result = self.call(tool, projectId=PROJECT_ID, **arguments)
+                self.assertFalse(result.get('isError'), result)
+                self.assertEqual(database.call_args.args[1 if function == 'pending_worker_requests' else -1], IDENTITY)
+
 
 class PlanToolTests(ToolTestCase):
     def test_plan_tool_registration_identity_and_project_scope(self):

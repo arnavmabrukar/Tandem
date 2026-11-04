@@ -19,6 +19,9 @@ spec.loader.exec_module(runner)
 
 class RunnerGitTests(unittest.TestCase):
     def setUp(self):
+        self.no_room_requests = patch.object(runner, 'worker_room_requests', return_value=[])
+        self.no_room_requests.start()
+        self.addCleanup(self.no_room_requests.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -214,6 +217,31 @@ class RunnerGitTests(unittest.TestCase):
         self.assertIn('Passed in OS sandbox:', result['message'])
         self.assertIn('Commit:', result['message'])
         self.assertFalse(self.repo.dirty())
+        self.assertEqual(self.repo.git('rev-parse', 'HEAD'), self.repo.git('rev-parse', 'origin/main'))
+
+    def test_queued_room_message_gets_a_real_agent_turn_before_publication(self):
+        self.no_room_requests.stop()
+        tandem = Mock()
+        tandem.project_call.side_effect = lambda tool, **kwargs: self.task if tool == 'tandem_get_task' else {}
+        worker = runner.Runner(tandem, self.repo, [], 60, verify_commands=[[sys.executable, '-c', 'pass']])
+        prompts = []
+
+        def agent(prompt):
+            prompts.append(prompt)
+            if len(prompts) == 1:
+                (self.worker / 'shared.txt').write_text('finished\n')
+                return 0, 'Implementation ready.'
+            self.assertIn('Can you explain the progress?', prompt)
+            return 0, 'I finished the implementation and am verifying it now.'
+
+        with patch.object(runner, 'worker_room_requests', side_effect=[[
+                {'id': 'request-1', 'taskId': self.task['id'], 'message': 'Can you explain the progress?'}], []]), \
+             patch.object(worker, '_run_agent_with_keepalive', side_effect=agent), \
+             patch.object(worker, '_sandboxed_check', return_value=Mock(returncode=0)):
+            worker._execute(self.task)
+        self.assertEqual(len(prompts), 2)
+        tandem.project_call.assert_any_call('tandem_reply_worker_room_request', requestId='request-1',
+                                            body='I finished the implementation and am verifying it now.')
         self.assertEqual(self.repo.git('rev-parse', 'HEAD'), self.repo.git('rev-parse', 'origin/main'))
 
     def test_runner_pushes_only_to_server_configured_branch(self):

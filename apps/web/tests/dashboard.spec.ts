@@ -569,11 +569,17 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await page.goto('/#/projects/project-1/agents');
   await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
   const dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('heading', { name: 'First-time setup' })).toBeVisible();
-  await expect(dialog.getByRole('heading', { name: 'Reconnecting' })).toBeVisible();
+  await expect(dialog.getByRole('tab', { name: 'First-time setup' })).toHaveAttribute('aria-selected', 'true');
+  await expect(dialog.getByRole('tab', { name: 'Reconnecting' })).toHaveAttribute('aria-selected', 'false');
+  await dialog.getByRole('tab', { name: 'First-time setup' }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(dialog.getByRole('tab', { name: 'Reconnecting' })).toHaveAttribute('aria-selected', 'true');
   const reconnect = dialog.getByRole('region', { name: 'Reconnect your worker' });
   await expect(reconnect).toContainText('Your current terminal folder is not the cause.');
   await expect(reconnect).toContainText('Do not delete or reset the workspace.');
+  await expect(reconnect.getByRole('button', { name: 'Copy download and start command' })).toBeEnabled();
+  await expect(dialog.getByRole('region', { name: 'Continuous worker setup' })).toBeHidden();
+  await dialog.getByRole('tab', { name: 'First-time setup' }).click();
   const worker = page.getByRole('region', { name: 'Continuous worker setup' });
   const script = await page.request.get('/downloads/tandem_runner.py');
   expect(script.status()).toBe(200);
@@ -642,9 +648,10 @@ test('reconnecting an agent offers a task-specific resume command for saved edit
   await page.goto('/#/projects/project-1/agents');
   await page.locator('.roster-agent').getByText('My Codex').click();
   await page.locator('.roster-agent').getByRole('button', { name: 'Set up worker' }).click();
+  await page.getByRole('tab', { name: 'Reconnecting' }).click();
   const reconnect = page.getByRole('region', { name: 'Reconnect your worker' });
   await reconnect.getByLabel('Task to resume').selectOption('task-1');
-  await expect(reconnect.locator('pre')).toContainText("--resume-task 'task-1'");
+  await expect(reconnect.locator('pre').last()).toContainText("--resume-task 'task-1'");
   await expect(reconnect.getByRole('button', { name: 'Copy resume command' })).toBeEnabled();
   await expect(reconnect).toContainText('Do not delete or reset the workspace.');
 });
@@ -687,6 +694,40 @@ test('agent room sends private human messages and opens connection onboarding', 
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Continuous worker setup' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Copy listener command', exact: true })).toHaveCount(0);
+});
+
+test('room messages can be explicitly addressed to a working agent without exposing private chat', async ({ page }) => {
+  const state = await connect(page);
+  state.project.agents.push({ id: 'agent-1', name: 'My Codex', client: 'Codex', owner: 'Test owner',
+    machine: 'Laptop', capabilities: [], grant: 'active', presence: 'online', lastSeen: null, session: null });
+  state.project.tasks[0].status = 'in_progress';
+  state.project.tasks[0].agentId = 'agent-1';
+  const exchanges: Record<string, unknown>[] = [];
+  let sent: Record<string, string> | null = null;
+  await page.route('**/api/projects/project-1/room/worker', async route => {
+    sent = route.request().postDataJSON();
+    const exchange = { id: 'exchange-1', operationId: sent!.operationId, senderUserId: 'user-1',
+      senderAgentId: null, sender: 'Test owner', kind: 'human', body: sent!.body, state: 'complete',
+      createdAt: new Date().toISOString(), response: { reply: 'Queued for My Codex.', proposal: null,
+        cancelTaskIds: [], workerRequest: { id: 'request-1', taskId: sent!.taskId, agentId: 'agent-1' } } };
+    exchanges.push(exchange);
+    await route.fulfill({ json: exchange });
+  });
+  await page.route('**/api/projects/project-1/room', route => route.fulfill({ json: { exchanges } }));
+  await page.goto('/#/projects/project-1/agents');
+  await page.getByRole('combobox', { name: 'Chat recipient' }).selectOption('task-1');
+  await expect(page.getByText('Only this message is shared with the selected worker.', { exact: false })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Message working agent' }).fill('How is this task going?');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(page.getByText('Human → My Codex · shared with worker')).toBeVisible();
+  expect(sent).toMatchObject({ taskId: 'task-1', body: 'How is this task going?' });
+  exchanges.push({ id: 'exchange-2', operationId: 'request-1', senderUserId: null, senderAgentId: 'agent-1',
+    sender: 'My Codex', kind: 'agent', body: 'I finished the implementation and am verifying it.',
+    state: 'complete', createdAt: new Date().toISOString(), response: null });
+  await page.reload();
+  await expect(page.getByText('I finished the implementation and am verifying it.')).toBeVisible();
+  await page.getByRole('combobox', { name: 'Chat recipient' }).selectOption('mediator');
+  await expect(page.getByText('Mediator messages stay hidden from agents.', { exact: false })).toBeVisible();
 });
 
 test('the site root is the public landing page and never waits for the session', async ({ page }) => {

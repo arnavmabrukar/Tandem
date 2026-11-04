@@ -255,6 +255,43 @@ class AgentToolIntegrationTests(unittest.TestCase):
         self.assertNotIn('PRIVATE', str(visible))
         self.assertEqual(len(read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges']), 2)
 
+    def test_worker_room_request_is_explicit_private_and_idempotent(self):
+        from unittest.mock import patch
+        from uuid import UUID
+        from mediator.main import app, get_current_user
+        from mediator.db.room import read_room
+        task = self.make_task()
+        self.execute("UPDATE public.tasks SET status='in_progress', claimed_by_agent_id=%s WHERE id=%s",
+                     (self.agent, task))
+        payload = {'operationId': str(uuid4()), 'taskId': task, 'body': 'How is this task going?'}
+        with patch.dict(app.dependency_overrides, {get_current_user: lambda: {'id': self.owner}}):
+            self.execute("UPDATE public.project_memberships SET role='viewer' WHERE project_id=%s", (self.project,))
+            self.assertEqual(self.http.post(f'/api/projects/{self.project}/room/worker', json=payload).status_code, 403)
+            self.execute("UPDATE public.project_memberships SET role='owner' WHERE project_id=%s", (self.project,))
+            first = self.http.post(f'/api/projects/{self.project}/room/worker', json=payload)
+            self.assertEqual(first.status_code, 200, first.text)
+            replay = self.http.post(f'/api/projects/{self.project}/room/worker', json=payload)
+            self.assertEqual(replay.json()['id'], first.json()['id'])
+            changed = self.http.post(f'/api/projects/{self.project}/room/worker', json={**payload,
+                'body': 'Different text with the same operation ID'})
+            self.assertEqual(changed.status_code, 409)
+        request_id = first.json()['response']['workerRequest']['id']
+        visible = self.ok('tandem_read_room')
+        self.assertNotIn('How is this task going?', str(visible['exchanges']))
+        self.assertNotIn(first.json()['id'], str(visible))
+        self.assertEqual(self.ok('tandem_get_worker_room_requests')['workerRequests'], [
+            {'id': request_id, 'taskId': task, 'message': 'How is this task going?'}])
+        other, other_token = self.make_agent(self.owner, self.project, f'Other {uuid4()}')
+        self.assertEqual(self.ok('tandem_get_worker_room_requests', other_token)['workerRequests'], [])
+        self.refused('another agent', 'tandem_reply_worker_room_request', other_token,
+                     requestId=request_id, body='Wrong agent')
+        answer = self.ok('tandem_reply_worker_room_request', requestId=request_id, body='I am verifying the task.')
+        self.assertEqual(self.ok('tandem_reply_worker_room_request', requestId=request_id,
+                                 body='I am verifying the task.')['id'], answer['id'])
+        self.assertEqual(self.ok('tandem_get_worker_room_requests')['workerRequests'], [])
+        self.assertEqual(read_room(UUID(self.project), user_id=UUID(self.owner))['exchanges'][-1]['body'],
+                         'I am verifying the task.')
+
     def test_room_revocation_during_reply(self):
         from unittest.mock import patch
         from mediator.schemas.room import RoomReply

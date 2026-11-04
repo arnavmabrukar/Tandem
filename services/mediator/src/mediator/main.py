@@ -1286,7 +1286,7 @@ def delete_project(project_id: UUID, request: DeleteProjectRequest,
 
 # Human room endpoints use dashboard authentication, never agent credentials.
 from mediator.db import room as project_room
-from mediator.schemas.room import ClearRoomRequest, RoomMessageRequest
+from mediator.schemas.room import ClearRoomRequest, RoomMessageRequest, WorkerRoomMessageRequest
 
 
 @contextmanager
@@ -1316,6 +1316,13 @@ def post_project_room(project_id: UUID, request: RoomMessageRequest,
                       user=Depends(get_current_user)):
     with room_api_errors():
         return project_room.post_message(project_id, request, user_id=UUID(user['id']))
+
+
+@app.post('/api/projects/{project_id}/room/worker')
+def post_project_room_worker(project_id: UUID, request: WorkerRoomMessageRequest,
+                             user=Depends(get_current_user)):
+    with room_api_errors():
+        return project_room.post_worker_request(project_id, request, UUID(user['id']))
 
 
 @app.delete('/api/projects/{project_id}/room')

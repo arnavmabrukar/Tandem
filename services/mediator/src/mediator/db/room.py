@@ -5,7 +5,7 @@ from mediator.config import settings
 from mediator.db.agent_tasks import _transaction, _current_role, AgentAccessDenied, AgentOperationConflict
 from mediator.meta_planner import generate_plan
 from mediator.schemas.plans import PlanChatRequest
-from mediator.schemas.room import RoomMessageRequest, RoomReply
+from mediator.schemas.room import RoomMessageRequest, RoomReply, WorkerRoomMessageRequest
 
 
 def _authorize(conn, project_id, *, user_id=None, identity=None, write=False, lock_project=True):
@@ -87,6 +87,89 @@ def acknowledge_presence(project_id: UUID, check_id: UUID, identity):
             (project_id,sender_agent_id,sender_name,operation_id,body,state,lease,lease_until,completed_at)
             VALUES (%s,%s,%s,%s,%s,'complete',%s,now(),now()) RETURNING *""",
             (project_id, identity['agentId'], name, check_id, "I'm online.", uuid4())).fetchone()
+        return _public(row)
+
+
+def post_worker_request(project_id: UUID, request: WorkerRoomMessageRequest, user_id: UUID):
+    """Queue only this explicitly addressed message; the private room stays private."""
+    with _transaction() as conn:
+        _, _, name = _authorize(conn, project_id, user_id=user_id, write=True)
+        conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                     (f'room:{project_id}:{user_id}',))
+        existing = conn.execute("""SELECT * FROM public.agent_room_exchanges
+            WHERE project_id=%s AND sender_user_id=%s AND operation_id=%s FOR UPDATE""",
+            (project_id, user_id, request.operationId)).fetchone()
+        if existing:
+            target = (existing['response'] or {}).get('workerRequest') or {}
+            if existing['body'] != request.body or target.get('taskId') != str(request.taskId):
+                raise AgentOperationConflict('Use a new operation ID for a different message')
+            return _public(existing)
+        task = conn.execute("""SELECT t.claimed_by_agent_id AS agent_id, a.name AS agent_name,
+                t.status
+            FROM public.tasks t JOIN public.agents a ON a.id=t.claimed_by_agent_id
+            JOIN public.agent_project_grants g ON g.agent_id=a.id AND g.project_id=t.project_id
+            WHERE t.project_id=%s AND t.id=%s AND t.status IN ('claimed','in_progress','blocked')
+              AND a.grant_status='active' AND g.status='active'""",
+            (project_id, request.taskId)).fetchone()
+        if not task:
+            raise AgentOperationConflict('Choose a claimed, active, or blocked task with a connected agent')
+        request_id = uuid4()
+        timing = ('when the worker resumes this blocked task' if task['status'] == 'blocked'
+                  else 'after its current coding step')
+        response = {'reply': f"Queued for {task['agent_name']}. The worker will read it {timing}.",
+                    'proposal': None, 'cancelTaskIds': [],
+                    'workerRequest': {'id': str(request_id), 'taskId': str(request.taskId),
+                                      'agentId': str(task['agent_id'])}}
+        row = conn.execute("""INSERT INTO public.agent_room_exchanges
+            (project_id,sender_user_id,sender_name,operation_id,body,response,state,lease,lease_until,completed_at)
+            VALUES (%s,%s,%s,%s,%s,%s,'complete',%s,now(),now()) RETURNING *""",
+            (project_id, user_id, name, request.operationId, request.body, Jsonb(response), uuid4())).fetchone()
+        return _public(row)
+
+
+def pending_worker_requests(project_id: UUID, identity, task_id: UUID | None = None):
+    with _transaction() as conn:
+        _authorize(conn, project_id, identity=identity)
+        rows = conn.execute("""SELECT r.body, r.response->'workerRequest' AS request
+            FROM public.agent_room_exchanges r
+            WHERE r.project_id=%s AND r.state='complete'
+              AND r.response->'workerRequest'->>'agentId'=%s
+              AND (%s::text IS NULL OR r.response->'workerRequest'->>'taskId'=%s::text)
+              AND NOT EXISTS (SELECT 1 FROM public.agent_room_exchanges a
+                  WHERE a.project_id=r.project_id AND a.sender_agent_id=%s
+                    AND a.operation_id=(r.response->'workerRequest'->>'id')::uuid)
+            ORDER BY r.created_at, r.id LIMIT 10""",
+            (project_id, identity['agentId'], task_id, task_id, identity['agentId'])).fetchall()
+        # No private exchange ID, surrounding history, or other human message is returned.
+        return {'workerRequests': [{'id': row['request']['id'], 'taskId': row['request']['taskId'],
+                                    'message': row['body']} for row in rows]}
+
+
+def reply_worker_request(project_id: UUID, request_id: UUID, body: str, identity):
+    if len(body.strip()) > 8000:
+        raise AgentOperationConflict('Worker room replies must be at most 8000 characters')
+    with _transaction() as conn:
+        _, _, name = _authorize(conn, project_id, identity=identity)
+        conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                     (f'room:{project_id}:{identity["agentId"]}',))
+        existing = conn.execute("""SELECT * FROM public.agent_room_exchanges
+            WHERE project_id=%s AND sender_agent_id=%s AND operation_id=%s""",
+            (project_id, identity['agentId'], request_id)).fetchone()
+        if existing:
+            if existing['body'] != body:
+                raise AgentOperationConflict('This worker request already has a different reply')
+            return _public(existing)
+        request = conn.execute("""SELECT 1 FROM public.agent_room_exchanges
+            WHERE project_id=%s AND state='complete' AND sender_user_id IS NOT NULL
+              AND response->'workerRequest'->>'id'=%s
+              AND response->'workerRequest'->>'agentId'=%s""",
+            (project_id, str(request_id), identity['agentId'])).fetchone()
+        if not request:
+            raise AgentOperationConflict('Worker request is unavailable or addressed to another agent')
+        row = conn.execute("""INSERT INTO public.agent_room_exchanges
+            (project_id,sender_agent_id,sender_name,operation_id,body,state,lease,lease_until,completed_at)
+            VALUES (%s,%s,%s,%s,%s,'complete',%s,now(),now()) RETURNING *""",
+            (project_id, identity['agentId'], name, request_id, body, uuid4())).fetchone()
         return _public(row)
 
 

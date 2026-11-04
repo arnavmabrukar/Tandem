@@ -1493,7 +1493,13 @@ td:first-child {
 .agent-advanced { margin-block: 1rem; }
 .agent-advanced summary, .oauth-step summary { cursor: pointer; }
 .agent-setup-dialog { width: min(760px, calc(100vw - 32px)); }
-.worker-reconnect { margin-top: 1.5rem; }
+.setup-tabs { display: flex; gap: .25rem; border-bottom: 1px solid #d9e5ee; margin: .5rem 0 1.25rem; }
+.setup-tabs button { border: 0; border-bottom: 3px solid transparent; background: transparent; color: #536f84; cursor: pointer; font: inherit; font-weight: 600; padding: .75rem 1rem; }
+.setup-tabs button[aria-selected="true"] { border-bottom-color: #0d5d61; color: #0d5d61; }
+.setup-tabs button:focus-visible { outline: 2px solid #0d5d61; outline-offset: -2px; }
+.worker-reconnect { border-top: 0; }
+.room-recipient { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; font-size: .85rem; color: #536f84; }
+.room-recipient select { width: auto; max-width: 100%; min-width: 0; padding: .35rem .6rem; }
 
 /* A bounded conversation keeps the composer within reach as the chat grows. */
 .plan-chat { display: flex; flex-direction: column; height: min(780px, 80dvh); min-height: 540px; background: #fff; border: 1px solid #dae5ee; border-radius: 22px; overflow: hidden; box-shadow: 0 8px 32px #172c3d10; margin-bottom: 32px; }

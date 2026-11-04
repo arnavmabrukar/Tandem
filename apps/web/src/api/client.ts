@@ -259,6 +259,8 @@ export function createApiClient({
       z.object({ cleared: z.boolean() }), { method: 'DELETE', body: { throughId } }),
     postRoom: (projectId, body) => request(`/api/projects/${segment(projectId)}/room`,
       roomExchangeSchema, {method: 'POST', body, operationId: body.operationId, timeoutMs: 135000}),
+    postRoomWorker: (projectId, body) => request(`/api/projects/${segment(projectId)}/room/worker`,
+      roomExchangeSchema, {method: 'POST', body, operationId: body.operationId}),
     chatPlan: (projectId, messages) => request(
       `${endpoints.projects}/${segment(projectId)}/plans/chat`,
       z.object({ reply: z.string(), proposal: planProposalSchema.nullable() }),

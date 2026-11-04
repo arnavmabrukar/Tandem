@@ -147,3 +147,13 @@ class RunnerPresenceTests(unittest.TestCase):
         tandem.project_call.return_value = {'presenceRequests': []}
         runner_module.Runner(tandem, Mock(), [], 60).acknowledge_presence()
         tandem.project_call.assert_called_once_with('tandem_get_presence_requests')
+
+    def test_worker_room_poll_only_delivers_requests_for_current_task(self):
+        tandem = Mock()
+        tandem.project_call.return_value = {'workerRequests': [
+            {'id': 'one', 'taskId': 'task-1', 'message': 'How is it going?'},
+            {'id': 'two', 'taskId': 'task-2', 'message': 'Different task'},
+        ]}
+        self.assertEqual(runner_module.worker_room_requests(tandem, 'task-1'), [
+            {'id': 'one', 'taskId': 'task-1', 'message': 'How is it going?'}])
+        tandem.project_call.assert_called_once_with('tandem_get_worker_room_requests', taskId='task-1')

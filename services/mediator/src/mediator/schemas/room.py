@@ -17,6 +17,10 @@ class RoomMessageRequest(BaseModel):
         return value.strip()
 
 
+class WorkerRoomMessageRequest(RoomMessageRequest):
+    taskId: UUID
+
+
 class ClearRoomRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     throughId: UUID
