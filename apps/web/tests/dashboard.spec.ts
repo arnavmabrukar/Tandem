@@ -651,3 +651,83 @@ test('Open dashboard goes to sign-in when there is no session', async ({ page })
   await expect(page).toHaveURL(/#\/signin$/);
   await expect(page.getByRole('button', { name: 'Sign in with Auth0' })).toBeVisible();
 });
+
+async function mockGitHub(page: Page, connection: { connected: boolean; login: string | null }) {
+  const installUrl = 'https://github.com/apps/tandem/installations/new';
+  const repo = (id: number, name: string) => ({
+    id, name, fullName: `octo/${name}`, defaultBranch: 'main', description: `About ${name}`,
+  });
+  const completed: unknown[] = [];
+  await page.route('https://api.tandem.test/api/github/**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/github/connection') {
+      await route.fulfill({ json: { ...connection, installUrl } });
+    } else if (url.pathname === '/api/github/complete') {
+      completed.push(route.request().postDataJSON());
+      connection.connected = true;
+      connection.login = 'octo';
+      await route.fulfill({ json: { login: 'octo' } });
+    } else if (url.pathname === '/api/github/installations') {
+      await route.fulfill({ json: { items: [{ id: 7, name: 'octo' }], hasMore: false, installUrl } });
+    } else if (url.searchParams.get('page') === '1') {
+      await route.fulfill({ json: { items: [repo(1, 'alpha'), repo(2, 'beta')], hasMore: true } });
+    } else {
+      await route.fulfill({ json: { items: [repo(3, 'on-page-two')], hasMore: false } });
+    }
+  });
+  return completed;
+}
+
+test('create project sends an unlinked person to Settings, and an expired link says so', async ({ page }) => {
+  await connect(page);
+  const connection = { connected: false, login: null as string | null };
+  await mockGitHub(page, connection);
+  await page.goto('/#/projects/new');
+  await expect(page.getByText('No GitHub account linked')).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Repository' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Import repository' })).toHaveCount(0);
+  await page.getByRole('link', { name: 'Link in Settings' }).click();
+  await expect(page).toHaveURL(/#\/settings$/);
+  await expect(page.getByRole('button', { name: 'Connect GitHub' })).toBeVisible();
+
+  connection.login = 'octo';
+  await page.reload();
+  await expect(page.getByText('Expired', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reconnect GitHub' })).toBeVisible();
+});
+
+test('one repository control searches every page and accepts a pasted URL', async ({ page }) => {
+  await connect(page);
+  await mockGitHub(page, { connected: true, login: 'octo' });
+  await page.goto('/#/projects/new');
+  await expect(page.getByText('Linked', { exact: true })).toBeVisible();
+  await expect(page.getByText('Missing a repository?')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toHaveCount(1); // Only the top bar's.
+  const importButton = page.getByRole('button', { name: 'Import repository' });
+  await expect(importButton).toBeDisabled();
+  await expect(page.getByText('Optional settings')).toHaveCount(0);
+
+  const combobox = page.getByRole('combobox', { name: 'Repository' });
+  await combobox.fill('https://github.com/octo/on-page-two.git');
+  await expect(page.getByRole('option')).toHaveCount(1);
+  await combobox.press('Enter');
+  await expect(combobox).toHaveValue('octo/on-page-two');
+  await expect(page.getByRole('listbox')).toHaveCount(0);
+  await expect(importButton).toBeEnabled();
+  await expect(page.getByText('Optional settings')).toBeVisible();
+
+  await combobox.fill('nothing-like-this');
+  await expect(importButton).toBeDisabled();
+  await expect(page.getByText('No repositories match.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Adjust GitHub access' })).toBeVisible();
+});
+
+test('settings finishes GitHub authorization and removes the code from the address', async ({ page }) => {
+  await connect(page);
+  const completed = await mockGitHub(page, { connected: false, login: null });
+  await page.goto('/#/settings?github_code=abc&github_state=xyz');
+  await expect(page).toHaveURL(/#\/settings$/);
+  await expect(page.getByText('Linked', { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Create a project' })).toBeVisible();
+  expect(completed).toEqual([{ code: 'abc', state: 'xyz' }]);
+});

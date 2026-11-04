@@ -208,6 +208,7 @@ export const mutationResultSchema = z.object({
   entityId: z.string().optional(),
 });
 export interface GitHubRepository { id: number; name: string; fullName: string; defaultBranch: string; description: string }
+export interface GitHubConnection { connected: boolean; login: string | null; installUrl: string | null }
 export interface DashboardApi {
   saveRoomDraft(projectId: string, exchangeId: string): Promise<import('./plans').PlanRevision>;
   readRoom(projectId: string, signal?: AbortSignal): Promise<import('./room').Room>;
@@ -215,6 +216,7 @@ export interface DashboardApi {
   postRoom(projectId: string, body: {operationId: string; body: string}): Promise<import('./room').RoomExchange>;
   connectGitHub(): Promise<{url: string}>;
   completeGitHub(code: string, state: string): Promise<{login: string}>;
+  githubConnection(): Promise<GitHubConnection>;
   githubInstallations(page: number): Promise<{items: {id: number; name: string}[]; hasMore: boolean; installUrl: string}>;
   githubRepositories(installationId: number, page: number): Promise<{items: GitHubRepository[]; hasMore: boolean}>;
   chatPlan(projectId: string, messages: { role: 'user' | 'assistant'; content: string }[]): Promise<{ reply: string; proposal: import('./plans').PlanProposal | null }>;

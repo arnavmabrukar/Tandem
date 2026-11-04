@@ -1,3 +1,4 @@
+import { GitHubLinkStatus, useGitHubConnection } from '../components/GitHubConnection';
 import { GitHubRepositoryPicker } from '../components/GitHubRepositoryPicker';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -24,6 +25,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const removal = useAction(project);
+  const github = useGitHubConnection(!project);
   const [name, setName] = useState(project?.name ?? '');
   const [repo, setRepo] = useState(project?.repository ?? '');
   const [description, setDescription] = useState(project?.description ?? '');
@@ -56,12 +58,11 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
       <>
         <PageHeader
           title="Import GitHub repository"
-          description="Project details, human membership and invitations."
+          description="Choose a repository to create your Tandem project."
         />
         <section className="panel narrow-panel">
-          <h2>Choose your repository</h2>
-          <p className="muted">Select a repository to create your Tandem project.</p>
-          <form
+          <GitHubLinkStatus query={github} />
+          {github.data?.connected && <form
             onSubmit={async (e) => {
               e.preventDefault();
               try {
@@ -83,7 +84,7 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
                 setRepo(repository?.fullName ?? ''); setName(repository?.name.slice(0, 80) ?? '');
                 setBranch(repository?.defaultBranch ?? ''); setDescription(repository?.description.slice(0, 1000) ?? '');
               }} />
-              <details>
+              {selection && <details>
                 <summary>Optional settings</summary>
                 <Field label="Branch to track" hint="Defaults to the repository’s default branch. The backend checks that this branch exists.">
                   <input required maxLength={255} value={branch} onChange={e => setBranch(e.target.value)} />
@@ -98,13 +99,13 @@ export function ProjectSetupPage({ project }: { project: Project | null }) {
                     }}
                   />
                 </Field>
-              </details>
+              </details>}
               <Button type="submit" disabled={!selection || !branch}>
-                {save.isPending ? 'Saving…' : 'Import repository'}
+                {save.isPending ? 'Importing…' : 'Import repository'}
               </Button>
             </fieldset>
             <ErrorNotice error={save.error} />
-          </form>
+          </form>}
         </section>
       </>
     );

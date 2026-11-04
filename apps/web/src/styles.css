@@ -317,6 +317,54 @@ fieldset {
   padding: 10px;
   color: #536f84;
 }
+/* Linked GitHub account: Create project and Settings. */
+.github-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid #d5e2ec;
+  border-radius: 8px;
+}
+.github-status:last-child {
+  margin-bottom: 0;
+}
+.github-mark {
+  flex: none;
+  color: #0b3954;
+}
+.github-status-text {
+  display: flex;
+  flex: 1 1 200px;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.github-status-text small {
+  color: #536f84;
+  font-size: 12px;
+}
+.repo-combobox {
+  position: relative;
+}
+.repo-combobox .switcher-search {
+  margin-bottom: 0;
+}
+.repo-combobox .switcher-list:empty {
+  display: none;
+}
+.repo-combobox-note {
+  margin: 0;
+  padding: 10px;
+  color: #536f84;
+}
+.repo-combobox-note .icon-link,
+.repo-empty .icon-link {
+  display: inline-flex;
+  vertical-align: bottom;
+}
 .create-project {
   width: 100%;
   margin: 2px 0 10px;

@@ -114,11 +114,24 @@ def user_token(user_id: UUID) -> str:
         raise HTTPException(403, "Reconnect GitHub to restore repository access") from None
 
 
+def install_url() -> str:
+    return f"https://github.com/apps/{settings.github_app_slug}/installations/new"
+
+
+def connection(user_id: UUID) -> dict:
+    # Reports the saved link only. A token revoked on GitHub surfaces on the next GitHub call.
+    with _transaction() as db:
+        row = db.execute("SELECT login,expires_at FROM public.github_connections WHERE user_id=%s", (user_id,)).fetchone()
+    expired = row is not None and row["expires_at"] is not None and row["expires_at"] <= datetime.now(timezone.utc)
+    return {"connected": row is not None and not expired, "login": row["login"] if row else None,
+            "installUrl": install_url() if configured() else None}
+
+
 def installations(user_id: UUID, page: int) -> dict:
     data = api(user_token(user_id), f"/user/installations?per_page=30&page={page}")
     return {"items": [{"id": i["id"], "name": i["account"]["login"]} for i in data["installations"]],
             "hasMore": page * 30 < data["total_count"],
-            "installUrl": f"https://github.com/apps/{settings.github_app_slug}/installations/new"}
+            "installUrl": install_url()}
 
 
 def repositories(user_id: UUID, installation_id: int, page: int) -> dict:
