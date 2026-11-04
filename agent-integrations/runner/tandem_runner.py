@@ -435,7 +435,9 @@ def check_worker(repo: Repo, command: list[str], open_pull_requests: bool) -> No
     checks = ([login] if login else []) + ([['gh', 'auth', 'status']] if open_pull_requests else [])
     for check in checks:
         try:
-            result = subprocess.run(check, cwd=repo.path, capture_output=True, timeout=20, env=_agent_env())
+            # Windows can't launch a bare name that is really a .cmd file, such as npm's claude.cmd.
+            result = subprocess.run([shutil.which(check[0]) or check[0], *check[1:]], cwd=repo.path,
+                                    capture_output=True, timeout=20, env=_agent_env())
         except (OSError, subprocess.TimeoutExpired):
             raise WorkBlocked(f"Could not check {check[0]} login. Sign in and retry.") from None
         if result.returncode:
