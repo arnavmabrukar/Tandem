@@ -13,6 +13,7 @@ from mediator.db.projects import OperationConflict, ProjectAccessDenied, Project
 
 # Children come first, because several foreign keys here refuse to cascade.
 _PROJECT_TABLES = (
+    "agent_room_exchanges",  # Its project and agent references do not cascade.
     "messages",  # Also removes their deliveries.
     "contract_approvals",
     "project_activity",
