@@ -146,6 +146,30 @@ class RunnerGitTests(unittest.TestCase):
         execute.assert_called_once()
         self.assertEqual((self.worker / 'shared.txt').read_text(), 'saved scaffold\n')
 
+    def test_main_allows_saved_edits_after_automatic_recovery(self):
+        self.repo.prepare(runner.branch_name(self.task))
+        self.git(self.worker, 'config', 'user.name', 'Test worker')
+        self.git(self.worker, 'config', 'user.email', 'worker@example.test')
+        (self.worker / 'shared.txt').write_text('interrupted edits\n')
+        for status in ('open', 'blocked', 'in_progress'):
+            with self.subTest(status=status), \
+                    patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'test-token'}), \
+                    patch.object(runner, 'Tandem') as tandem_class, \
+                    patch.object(runner.shutil, 'which', return_value='/usr/bin/git'), \
+                    patch.object(runner.Runner, 'run_once', return_value=True) as work:
+                tandem_class.return_value.call.return_value = {
+                    'agentId': 'agent', 'name': 'Agent', 'projects': [{'projectId': 'project'}]}
+                tandem_class.return_value.project_call.return_value = {
+                    'tasks': [{**self.task, 'status': status, 'claimable': True}], 'pushBranch': 'main'}
+                # Use real Git and real preflight; only the model execution and
+                # login lookup are substituted. No explicit --resume-task flag.
+                self.assertEqual(runner.main([
+                    '--project', 'project', '--repo', str(self.worker),
+                    '--agent-command', 'fake-agent', '--once',
+                ]), 0)
+                work.assert_called_once()
+        self.assertEqual((self.worker / 'shared.txt').read_text(), 'interrupted edits\n')
+
     def test_restart_preserves_explicit_recovery_selection(self):
         worker = runner.Runner(Mock(), self.repo, ['fake-agent'], 60, resume_task='selected-task')
         worker.recover_interrupted_task([{**self.task, 'status': 'blocked'}])
@@ -379,13 +403,36 @@ class RunnerGitTests(unittest.TestCase):
         def edit(prompt):
             (self.worker / 'shared.txt').write_text('unfinished\n')
             return 0, 'Tests passed.'  # The runner must verify this claim itself.
-        with patch.object(worker, '_run_agent_with_keepalive', side_effect=edit), \
-             patch.object(worker, '_sandboxed_check', return_value=Mock(returncode=1, stdout='', stderr='failed')):
+        with patch.object(worker, '_run_agent_with_keepalive', side_effect=edit) as agent, \
+             patch.object(worker, '_sandboxed_check', return_value=Mock(returncode=1, stdout='', stderr='failed')) as checks:
             with self.assertRaisesRegex(runner.WorkBlocked, 'Verification failed'):
                 worker._execute(self.task)
+        self.assertEqual(agent.call_count, 2)  # Initial implementation plus one repair.
+        self.assertEqual(checks.call_count, 2)  # A second failure blocks without another retry.
         self.assertEqual(self.repo.git('rev-parse', 'HEAD'), before)
         self.assertTrue(self.repo.dirty())
         self.assertFalse(self.repo.exists(f'origin/{runner.branch_name(self.task)}'))
+
+    def test_failed_socket_check_gets_one_repair_then_sandboxed_reverification(self):
+        worker = runner.Runner(Mock(), self.repo, [], 60, verify_commands=[['npm', 'test']])
+        def edit(prompt):
+            if 'Runner verification failed' in prompt:
+                self.assertIn('in-process', prompt)
+                self.assertIn('Do not disable tests', prompt)
+                (self.worker / 'shared.txt').write_text('repaired handler tests\n')
+            else:
+                (self.worker / 'shared.txt').write_text('initial implementation\n')
+            return 0, 'Implementation checked.'
+        with patch.object(worker, '_run_agent_with_keepalive', side_effect=edit) as agent, \
+                patch.object(worker, '_sandboxed_check', side_effect=[
+                    Mock(returncode=1, stdout='', stderr='listen EPERM 127.0.0.1'),
+                    Mock(returncode=0),
+                ]) as checks:
+            worker._execute(self.task)
+        self.assertEqual(agent.call_count, 2)
+        self.assertEqual(checks.call_count, 2)
+        self.assertFalse(self.repo.dirty())
+        self.assertEqual((self.worker / 'shared.txt').read_text(), 'repaired handler tests\n')
 
     def test_resume_uses_saved_changes_only_on_the_matching_task_branch(self):
         branch = runner.branch_name(self.task)

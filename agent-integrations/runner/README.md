@@ -43,7 +43,12 @@ directory. Git metadata and environment files are protected. User sandbox settin
 and repository files cannot broaden the policy. Missing or unsupported runtimes,
 denied access, and failed checks stop publication; there is no host-side fallback.
 Checks needing browser networking or other denied access stay blocked for review.
-The runner keeps checking in while sandboxed checks run.
+The runner keeps checking in while sandboxed checks run. If a project check fails,
+the coding agent gets one repair turn with the failure output, followed by another
+verification under the same policy. Missing infrastructure never triggers host-side
+execution. On macOS, tests cannot bind localhost ports; use in-process HTTP handler
+tests with equivalent route, body, header, status and method assertions. The agent
+must not skip or weaken coverage. A repeated failure stays blocked with edits saved.
 For browser checks, Python projects or other commands, use **Verification (optional)**
 in worker setup, or repeat `--verify-command 'command arguments'` on the command line.
 Explicit commands replace automatic npm checks and use the same sandbox. Commands
