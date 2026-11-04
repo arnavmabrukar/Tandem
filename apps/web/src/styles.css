@@ -2702,3 +2702,296 @@ main#main:has(.agent-room-page) { padding: 0; margin: 0; max-width: none; flex: 
   background: var(--c-e3edf5);
   color: var(--c-0b3954);
 }
+
+/* Connect your agent: a stepped guide with a fixed header and footer. */
+.dialog-content.dialog-structured {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+/* A steady frame, so moving between steps doesn't resize the dialog under the pointer. */
+.dialog-content.agent-setup-dialog {
+  height: min(740px, calc(100dvh - 48px));
+}
+.dialog-header {
+  flex: none;
+  padding: 22px 25px 14px;
+  border-bottom: 1px solid var(--c-d9e5ee);
+}
+.dialog-header .row h2 {
+  font-size: 20px;
+}
+.dialog-header > p {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+.dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 25px 20px;
+}
+.dialog-footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding: 12px 25px;
+  border-top: 1px solid var(--c-d9e5ee);
+  background: var(--c-ffffff);
+}
+.agent-setup-dialog h3:focus {
+  outline: none;
+}
+.setup-rail {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 18px;
+  padding: 0;
+  list-style: none;
+}
+.setup-rail li {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.setup-rail button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--c-d2e1ed);
+  border-radius: 8px;
+  background: var(--c-ffffff);
+  color: var(--c-536f84);
+  font-weight: 600;
+  text-align: left;
+}
+.setup-rail button:hover {
+  background: var(--c-f3f8fc);
+}
+.setup-rail button.current {
+  border-color: var(--c-7fa9c8);
+  background: var(--c-dcebf6);
+  color: var(--c-0b3954);
+}
+.rail-dot {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--c-e3edf5);
+  color: var(--c-2b4c63);
+  font-size: 12px;
+  font-weight: 650;
+}
+.setup-rail button.current .rail-dot {
+  background: var(--accent-solid);
+  color: var(--on-solid);
+}
+.setup-rail button.done .rail-dot {
+  background: var(--c-116149);
+  color: var(--on-solid);
+}
+.rail-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.rail-label small {
+  font-weight: 450;
+  color: var(--c-536f84);
+}
+.setup-stage h3 {
+  margin: 4px 0 10px;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+}
+.setup-stage h4 {
+  margin: 16px 0 6px;
+  font-size: 14px;
+}
+.setup-stage p {
+  margin-block: 10px;
+}
+.setup-stage .setup-success {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--c-e6f5ed);
+  color: var(--c-116149);
+  font-weight: 600;
+}
+.setup-waiting {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.setup-optional {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--c-d9e5ee);
+}
+.worker-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--c-d9e5ee);
+}
+.os-picker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 10px 0 6px;
+}
+.os-label {
+  color: var(--c-2b4c63);
+  font-size: 12px;
+  font-weight: 600;
+}
+.os-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.os-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--c-d2e1ed);
+  border-radius: 8px;
+  background: var(--c-ffffff);
+  cursor: pointer;
+}
+.os-options label.selected {
+  border-color: var(--c-7fa9c8);
+  background: var(--c-dcebf6);
+  color: var(--c-0b3954);
+  font-weight: 600;
+}
+.os-options input[type='radio'] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+}
+.url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.url-row input {
+  flex: 1;
+  min-width: 0;
+}
+.trust-note {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--c-d2e1ed);
+  border-radius: 8px;
+  background: var(--c-f3f8fc);
+  color: var(--c-2b4c63);
+  font-size: 13px;
+}
+.worker-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px 0 6px;
+}
+.worker-status .dot {
+  margin-top: 6px;
+}
+.worker-status p {
+  margin: 2px 0 0;
+}
+.worker-done {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-116149);
+  font-weight: 600;
+}
+/* Commands scroll sideways instead of breaking in the middle of a word you are about to paste. */
+.setup-command-box .oauth-code {
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+}
+.setup-command-box .oauth-code.wrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.setup-command-toolbar {
+  flex-wrap: nowrap;
+}
+.setup-command-toolbar span {
+  color: var(--c-536f84);
+}
+.setup-command-toolbar .copy-button {
+  min-width: 44px;
+  min-height: 44px;
+  margin: -8px -4px -8px auto;
+}
+.copy-button {
+  min-width: 44px;
+  min-height: 44px;
+}
+.setup-tabs button {
+  min-height: 44px;
+}
+.agent-setup-dialog summary {
+  padding-block: 12px;
+  font-weight: 600;
+}
+@media (max-width: 640px) {
+  .dialog-header {
+    padding: 16px 16px 12px;
+  }
+  .dialog-body {
+    padding: 4px 16px 16px;
+  }
+  .dialog-footer {
+    padding: 10px 16px;
+  }
+  .setup-rail {
+    gap: 4px;
+  }
+  .setup-rail button {
+    gap: 6px;
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+  .rail-dot {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+.text-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-0b5a8a);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

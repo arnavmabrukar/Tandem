@@ -685,7 +685,7 @@ test('a failed mediator reply is reported once, in the conversation', async ({ p
   await expect(log.getByText('could not reply')).toHaveCount(0);
 });
 
-test('worker onboarding generates isolated setup and continuous commands for each engine', async ({ page }) => {
+test('connect guide moves one step at a time and keeps worker setup optional', async ({ page }) => {
   await connect(page);
   await page.route('**/.well-known/oauth-protected-resource/mcp/', route => route.fulfill({ json: { resource: 'https://api.tandem.test/mcp/' } }));
   await page.route('**/api/mcp/oauth/connections', route => route.fulfill({ json: [] }));
@@ -702,34 +702,64 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await expect(reconnect).toContainText('separate agent worktree');
   await expect(reconnect).toContainText('Do not delete or reset unfinished work.');
   await expect(reconnect.getByRole('button', { name: 'Copy download and start command' })).toBeDisabled();
-  await expect(dialog.getByRole('region', { name: 'Continuous worker setup' })).toBeHidden();
   await dialog.getByRole('tab', { name: 'First-time setup' }).click();
-  const worker = page.getByRole('region', { name: 'Continuous worker setup' });
+
+  // Only the first step shows; the worker and the agent prompt wait their turn.
+  const rail = dialog.getByRole('list', { name: 'Setup progress' });
+  await expect(rail.getByRole('button', { name: /Connect agent/ })).toHaveAttribute('aria-current', 'step');
+  await expect(rail.getByRole('button', { name: /Worker/ })).toContainText('optional');
+  await expect(dialog.getByRole('heading', { name: 'Add Tandem to your agent' })).toBeVisible();
+  await expect(dialog.getByRole('region', { name: 'Continuous worker setup' })).toHaveCount(0);
+  await expect(dialog.getByRole('region', { name: 'Agent startup prompt' })).toHaveCount(0);
+  await expect(dialog.getByLabel('Server URL', { exact: true })).toHaveValue('https://api.tandem.test/mcp/');
+  // The OS is asked once, and only where commands depend on it.
+  await expect(dialog.getByRole('radio')).toHaveCount(0);
+  await expect(dialog.locator('.setup-command-toolbar select')).toHaveCount(0);
+
+  await rail.getByRole('button', { name: /Agent chat/ }).click();
+  const startup = dialog.getByRole('region', { name: 'Agent startup prompt' });
+  const mcp = dialog.getByRole('region', { name: 'Normal MCP connection' });
+  await expect(mcp.getByRole('region', { name: 'Agent startup prompt' })).toBeVisible();
+  await expect(mcp.getByRole('region', { name: 'Continuous worker setup' })).toHaveCount(0);
+  await expect(startup).toContainText('do not start an autonomous task loop');
+  await expect(startup).toContainText('Use Tandem for project project-1.');
+  await expect(startup.getByRole('button', { name: 'Copy startup prompt' })).toBeEnabled();
+  await dialog.getByRole('button', { name: 'Set up a worker' }).click();
+
+  const worker = dialog.getByRole('region', { name: 'Continuous worker setup' });
+  const next = dialog.getByRole('button', { name: /^Next/ });
+  await dialog.getByRole('radio', { name: 'macOS', exact: true }).check();
+  await expect(dialog.getByRole('radio')).toHaveCount(3);
+  await expect(worker).toContainText('No access to Tandem’s private repository is needed.');
+  await expect(worker).not.toContainText('agent-integrations/runner/');
   const platformGuide = dialog.getByRole('region', { name: 'Platform instructions' });
+  // The tools list starts collapsed on macOS, where little is needed, and open elsewhere.
+  await dialog.getByText('Before you start: tools to install').click();
   await expect(platformGuide).toContainText('Use Terminal on your Mac');
   await dialog.getByRole('radio', { name: 'Linux', exact: true }).check();
   await expect(platformGuide).toContainText('bubblewrap and socat');
   await expect(platformGuide.getByRole('button', { name: 'Copy Linux prerequisites command' })).toBeVisible();
-  await dialog.getByRole('radio', { name: 'Windows', exact: true }).check();
+  await dialog.getByRole('radio', { name: 'Windows (WSL 2)', exact: true }).check();
   await expect(platformGuide).toContainText('Native PowerShell cannot run');
   await expect(platformGuide).toContainText('wsl --install -d Ubuntu');
   await dialog.getByRole('tab', { name: 'Reconnecting' }).click();
-  await expect(dialog.getByRole('radio', { name: 'Windows', exact: true })).toBeChecked();
-  await expect(platformGuide).toContainText('Ubuntu terminal');
-  await expect(platformGuide.getByRole('button', { name: 'Copy WSL install command' })).toHaveCount(0);
+  await expect(dialog.getByRole('radio', { name: 'Windows (WSL 2)', exact: true })).toBeChecked();
+  await expect(dialog.getByText('Run these commands in your Ubuntu terminal (WSL 2).')).toBeVisible();
+  await expect(reconnect.getByRole('button', { name: 'Copy WSL install command' })).toHaveCount(0);
   await dialog.getByRole('tab', { name: 'First-time setup' }).click();
   await dialog.getByRole('radio', { name: 'macOS', exact: true }).check();
   const script = await page.request.get('/downloads/tandem_runner.py');
   expect(script.status()).toBe(200);
   expect(await script.text()).toBe(readFileSync(new URL('../../../agent-integrations/runner/tandem_runner.py', import.meta.url), 'utf8'));
-  await expect(worker).not.toContainText('agent-integrations/runner/');
-  await expect(worker).toContainText('No access to Tandem’s private repository is needed.');
+
+  await next.click();
+  await expect(worker.getByRole('heading', { name: 'Install your agent and test sandbox' })).toBeVisible();
   const cliSetup = worker.getByRole('region', { name: 'Codex CLI setup' });
   const commandBox = cliSetup.locator('.setup-command-box');
-  await commandBox.getByRole('combobox').selectOption('windows');
-  await expect(dialog.getByRole('radio', { name: 'Windows', exact: true })).toBeChecked();
+  await expect(commandBox).toContainText('Terminal');
+  await dialog.getByRole('radio', { name: 'Windows (WSL 2)', exact: true }).check();
   await expect(commandBox).toContainText('Ubuntu / WSL terminal');
-  await expect(worker.getByRole('region', { name: 'Download and start worker' }).getByRole('combobox')).toHaveValue('windows');
+  await dialog.getByRole('radio', { name: 'macOS', exact: true }).check();
   await page.evaluate(() => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
       writeText: async (text: string) => { document.documentElement.dataset.copiedCommand = text; },
@@ -738,60 +768,61 @@ test('worker onboarding generates isolated setup and continuous commands for eac
   await commandBox.getByRole('button', { name: 'Copy Codex setup commands' }).click();
   await expect(commandBox.getByRole('status')).toHaveText('Copied to clipboard');
   expect(await page.evaluate(() => document.documentElement.dataset.copiedCommand)).toBe(await commandBox.locator('pre').textContent());
-  await commandBox.getByRole('combobox').selectOption('macos');
-  await page.screenshot({ path: `/tmp/tandem-command-box-${page.viewportSize()!.width}.png`, animations: 'disabled' });
   await expect(cliSetup).toContainText('confirms you are signed in');
   await expect(cliSetup.locator('pre')).toHaveText('npm install -g @openai/codex@latest\ncodex login\ncodex login status');
   const verificationSetup = worker.getByRole('region', { name: 'Verification sandbox setup' });
   await expect(verificationSetup).toContainText('does not run Claude or require an Anthropic account');
   await expect(verificationSetup).toContainText('Your selected agent stays Codex');
   await expect(verificationSetup.locator('pre')).toHaveText('npm install -g @anthropic-ai/sandbox-runtime@0.0.81');
+  await worker.getByText('Custom verification commands (optional)', { exact: true }).click();
+  await worker.getByLabel('Verification commands', { exact: true }).fill('npm run test:e2e\nnpm run build');
+
+  await next.click();
   const download = worker.getByRole('region', { name: 'Download and start worker' });
   await expect(download.locator('pre')).toContainText('$HOME/Downloads/tandem_runner.py');
   await expect(download.locator('pre')).toContainText("--repository 'team/tandem'");
-  await expect(download).toContainText('Leave it open and continue to step 3.');
-  await expect(worker.getByRole('region', { name: 'Authorize your worker' })).toContainText('no letters or dots will appear');
-  await expect(worker.getByLabel('Project folder', { exact: true })).toHaveCount(0);
-  const headings = page.getByRole('dialog').getByRole('heading', { level: 3 });
-  await expect(headings).toHaveText(['1. Connect your agent', '2. Start your agent chat', '1. Choose your worker', '2. Download and start', '3. Generate and paste your token']);
-  const startup = page.getByRole('region', { name: 'Agent startup prompt' });
-  await expect(startup).toBeVisible();
-  const mcp = dialog.getByRole('region', { name: 'Normal MCP connection' });
-  await expect(mcp.getByRole('region', { name: 'Agent startup prompt' })).toBeVisible();
-  await expect(mcp.getByRole('region', { name: 'Continuous worker setup' })).toHaveCount(0);
-  await expect(startup).toContainText('do not start an autonomous task loop');
-  await expect(startup).toContainText('Use Tandem for project project-1.');
-  await expect(startup.getByRole('button', { name: 'Copy startup prompt' })).toBeEnabled();
-  await expect(worker.locator('pre')).toHaveCount(3);
+  await expect(download.locator('pre')).toContainText("curl -fLsS 'http://127.0.0.1:4173/downloads/tandem_runner.py'");
+  await expect(download.locator('pre')).toContainText("--project 'project-1'");
+  await expect(download.locator('pre')).toContainText('--agent codex');
+  await expect(download.locator('pre')).toContainText('--prompt-token');
+  await expect(download.locator('pre')).not.toContainText('git clone');
+  await expect(download.locator('pre')).toContainText("--verify-command 'npm run test:e2e' --verify-command 'npm run build'");
+  await expect(download).toContainText('Leave it open and continue to the next step.');
+  await expect(download.locator('.trust-note')).toContainText('Use it only on projects whose members you trust');
+  await expect(download.getByRole('link', { name: 'Open the script' })).toHaveAttribute('href', '/downloads/tandem_runner.py');
+  await expect(download).toContainText('Startup blocked by uncommitted changes');
+  await expect(dialog.getByRole('region', { name: 'Autonomous worker guide' }).getByRole('region', { name: 'Continuous worker setup' })).toHaveCount(1);
   await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeEnabled();
   for (const name of ['Copy clone command', 'Copy setup check', 'Copy worker command', 'Copy listener command']) {
     await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
   }
-  const install = worker.getByRole('region', { name: 'Download and start worker' });
-  await expect(install.locator('pre')).toContainText("curl -fLsS 'http://127.0.0.1:4173/downloads/tandem_runner.py'");
-  await expect(install.locator('pre')).toContainText('--project \'project-1\'');
-  await expect(install.locator('pre')).toContainText('--agent codex');
-  await expect(install.locator('pre')).toContainText('--prompt-token');
-  await expect(install.locator('pre')).not.toContainText('git clone');
-  await worker.getByText('Custom verification commands (optional)', { exact: true }).click();
-  await worker.getByLabel('Verification commands', { exact: true }).fill('npm run test:e2e\nnpm run build');
-  await expect(install.locator('pre')).toContainText("--verify-command 'npm run test:e2e' --verify-command 'npm run build'");
-  await page.getByLabel('Your agent', { exact: true }).selectOption('Claude Code');
-  await expect(worker.getByLabel('Worker engine')).toHaveValue('claude');
+
+  await next.click();
+  await expect(worker.getByRole('region', { name: 'Authorize your worker' })).toContainText('no letters or dots will appear');
+  await expect(worker.getByLabel('Project folder', { exact: true })).toHaveCount(0);
+
+  // Changing the agent in the first step carries through to the worker's engine.
+  await rail.getByRole('button', { name: /Connect agent/ }).click();
+  await dialog.getByLabel('Your agent', { exact: true }).selectOption('Claude Code');
+  await rail.getByRole('button', { name: /Worker/ }).click();
+  await next.click();
+  await expect(worker.getByLabel('Agent CLI the worker runs')).toHaveValue('claude');
   await expect(cliSetup).toHaveCount(0);
   const claudeSetup = worker.getByRole('region', { name: 'Claude CLI setup' });
   await expect(claudeSetup.locator('pre')).toHaveText('curl -fsSL https://claude.ai/install.sh | bash\nexport PATH="$HOME/.local/bin:$PATH"\nclaude auth login\nclaude auth status');
+  await expect(claudeSetup.locator('.trust-note')).toContainText('Anthropic’s official installer');
   await expect(claudeSetup.getByRole('button', { name: 'Copy Claude setup commands' })).toBeEnabled();
-  await expect(install.locator('pre')).toContainText('--agent claude');
-  await worker.getByLabel('Worker engine').selectOption('custom');
+  await worker.getByLabel('Agent CLI the worker runs').selectOption('custom');
   await expect(claudeSetup).toHaveCount(0);
   await expect(worker.getByRole('region', { name: 'Verification sandbox setup' })).toContainText('@anthropic-ai/sandbox-runtime@0.0.81');
-  await expect(worker.getByRole('button', { name: 'Copy worker command' })).toHaveCount(0);
-  await expect(install.locator('pre')).toContainText('YOUR_AGENT_COMMAND');
+  await next.click();
+  await expect(download.locator('pre')).toContainText('YOUR_AGENT_COMMAND');
   await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Back' }).click();
   await worker.getByLabel('Agent command', { exact: true }).fill('my-agent --headless');
+  await next.click();
   await expect(worker.getByRole('button', { name: 'Copy download and start command' })).toBeEnabled();
-  await expect(install.locator('pre')).toContainText("--agent-command 'my-agent --headless'");
+  await expect(download.locator('pre')).toContainText("--agent-command 'my-agent --headless'");
 });
 
 test('newly connected agent can generate a worker token without leaving setup', async ({ page }) => {
@@ -813,11 +844,20 @@ test('newly connected agent can generate a worker token without leaving setup', 
   });
   await page.goto(`/#/projects/${projectId}/agents`);
   await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
-  const guide = page.getByRole('region', { name: 'Continuous worker setup' });
+  const dialog = page.getByRole('dialog');
+  const guide = dialog.getByRole('region', { name: 'Continuous worker setup' });
+  const next = dialog.getByRole('button', { name: /^Next/ });
+  await dialog.getByRole('list', { name: 'Setup progress' }).getByRole('button', { name: /Worker/ }).click();
+  await next.click(); await next.click(); await next.click();
   await expect(guide).toContainText('Generate its token here when access is authorized.');
   connected = true;
   state.project.agents.push({ id: agentId, name: 'My Codex', client: 'Codex', owner: 'Test owner',
     ownerId, machine: '', capabilities: [], grant: 'active', presence: 'offline', lastSeen: null, session: null });
+  // Authorization moves the guide on to the agent chat, with the worker still one click away.
+  await expect(dialog.getByText('Access authorized.')).toBeVisible({ timeout: 10_000 });
+  await dialog.getByRole('button', { name: 'Set up a worker' }).click();
+  await next.click(); await next.click(); await next.click();
+  await expect(guide.getByRole('region', { name: 'Worker status' })).toContainText('Offline');
   await expect(guide.getByRole('button', { name: 'Generate worker token' })).toBeVisible({ timeout: 10_000 });
   await guide.getByRole('button', { name: 'Generate worker token' }).click();
   const tokenDialog = page.getByRole('dialog', { name: 'Connection token for My Codex' });
@@ -913,7 +953,8 @@ test('agent room sends private human messages and opens connection onboarding', 
   await page.screenshot({ path: '/tmp/tandem-agent-room-' + page.viewportSize()!.width + '.png', fullPage: true });
   await page.getByRole('button', { name: 'Connect agent', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Continuous worker setup' })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Setup progress' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Add Tandem to your agent' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Copy listener command', exact: true })).toHaveCount(0);
 });
 
