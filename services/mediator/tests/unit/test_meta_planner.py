@@ -115,11 +115,12 @@ class PlannerTests(unittest.TestCase):
 
     def test_rejected_output_logs_fields_but_never_contents(self):
         bad_key = json.loads(json.dumps(PROPOSAL))
-        bad_key["tasks"][0]["key"] = "Secret Key"
+        bad_key["tasks"][0]["key"] = "Secret Key!" * 20
+        bad_key["tasks"][0]["dependencies"] = ["Secret Key"]
         log = self.failure_log(self.response(json.dumps(bad_key)))
-        self.assertIn("tasks.0.key", log)
+        self.assertIn("Meta plan failed validation", log)
         self.assertNotIn("Secret", log)
-        fenced = self.failure_log(self.response("```json\n" + json.dumps(PROPOSAL) + "\n```"))
+        fenced = self.failure_log(self.response("```json\n" + json.dumps(PROPOSAL | {"approved": "Small plan"}) + "\n```"))
         self.assertIn("code_fenced=True", fenced)
         self.assertNotIn("Small plan", fenced)
         incomplete = self.failure_log(self.response(json.dumps(PROPOSAL), "incomplete"))
@@ -174,6 +175,75 @@ class ChatTests(unittest.TestCase):
                 json.dumps({"reply": "Here is a plan", "proposal": bad}))
             with self.assertRaises(planner.PlannerFailed):
                 planner.chat(request, {})
+
+    def reply_to(self, text, **kwargs):
+        with patch.object(planner.httpx, "Client") as client:
+            client.return_value.__enter__.return_value.post.return_value = self.response(text)
+            return planner.generate_plan("Goal", {}, **kwargs)
+
+    def test_code_fenced_json_is_accepted(self):
+        result = self.reply_to("```json\n" + json.dumps(PROPOSAL) + "\n```")
+        self.assertEqual(result.tasks[0].key, "one")
+
+    def test_plan_formatting_is_tidied_before_validation(self):
+        messy = json.loads(json.dumps(PROPOSAL))
+        messy["tasks"][0].update(key="Set Up", paths=["./index.html", "src/", " app.js ", "/api/todos", "http://x.test/a"])
+        messy["tasks"].append({"key": "T2", "title": "Next", "contractSummary": "More", "criteria": ["Works"],
+                               "dependencies": ["Set Up"]})
+        tasks = self.reply_to(json.dumps(messy)).tasks
+        self.assertEqual(tasks[0].key, "set-up")
+        self.assertEqual(tasks[0].paths, ["index.html", "src", "app.js"])
+        self.assertEqual((tasks[1].key, tasks[1].dependencies), ("t2", ["set-up"]))
+
+    def test_keys_that_collide_after_tidying_are_still_rejected(self):
+        messy = json.loads(json.dumps(PROPOSAL))
+        messy["tasks"].append({**messy["tasks"][0]})
+        messy["tasks"][0]["key"], messy["tasks"][1]["key"] = "Same", "same"
+        with self.assertRaises(planner.PlannerFailed):
+            self.reply_to(json.dumps(messy))
+
+    def test_instructions_state_the_key_and_path_rules_in_every_mode(self):
+        from mediator.schemas.plans import PlanChatRequest
+        conversation = PlanChatRequest(messages=[{"role": "user", "content": "Plan it"}])
+        for kwargs, text in [({}, json.dumps(PROPOSAL)),
+                             ({"conversation": conversation}, json.dumps({"reply": "Hi"})),
+                             ({"room": True}, json.dumps({"reply": "Hi"}))]:
+            with self.subTest(kwargs=list(kwargs)), patch.object(planner.httpx, "Client") as client:
+                post = client.return_value.__enter__.return_value.post
+                post.return_value = self.response(text)
+                planner.generate_plan("Goal", {}, **kwargs)
+                self.assertIn(planner._PROPOSAL_RULES, post.call_args.kwargs["json"]["instructions"])
+
+    def test_room_plan_is_returned_after_tidying(self):
+        messy = json.loads(json.dumps(PROPOSAL))
+        messy["tasks"][0]["paths"] = ["src/"]
+        result = self.reply_to(json.dumps({"reply": "Here is a plan", "proposal": messy}), room=True)
+        self.assertEqual(result.reply, "Here is a plan")
+        self.assertEqual(result.proposal.tasks[0].paths, ["src"])
+
+    def test_room_keeps_the_reply_when_its_plan_is_invalid(self):
+        from uuid import uuid4 as new_id
+        bad = json.loads(json.dumps(PROPOSAL))
+        bad["tasks"][0]["dependencies"] = ["one"]
+        cases = [{"proposal": bad}, {"proposal": PROPOSAL | {"approved": True}},
+                 {"proposal": PROPOSAL | {"tasks": []}}, {"unknown": "field", "proposal": PROPOSAL},
+                 {"relayTaskId": "not-a-uuid", "relayMessage": "hello"}, {"cancelTaskIds": ["nope"]}]
+        for extra in cases:
+            with self.subTest(extra=list(extra)):
+                result = self.reply_to(json.dumps({"reply": "Here is my answer", "requestPresence": True,
+                                                   "cancelTaskIds": [str(new_id())], **extra}), room=True)
+                self.assertTrue(result.reply.startswith("Here is my answer"))
+                self.assertIn(planner._PLAN_DROPPED, result.reply)
+                # Nothing unvalidated survives alongside the reply.
+                self.assertIsNone(result.proposal)
+                self.assertIsNone(result.relayTaskId)
+                self.assertEqual(result.cancelTaskIds, [])
+                self.assertFalse(result.requestPresence)
+
+    def test_room_still_fails_without_a_usable_reply(self):
+        for text in ["not json", json.dumps({"reply": "  "}), json.dumps({"proposal": PROPOSAL}), "[]"]:
+            with self.subTest(text=text), self.assertRaises(planner.PlannerFailed):
+                self.reply_to(text, room=True)
 
     def test_chat_refuses_system_roles_and_oversized_history(self):
         from mediator.schemas.plans import PlanChatRequest
