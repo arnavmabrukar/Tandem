@@ -45,18 +45,27 @@ export function PageHeader({
   title,
   description,
   action,
+  titleAction,
   level = 1,
 }: {
   title: string;
   description: string;
   action?: ReactNode;
+  titleAction?: ReactNode;
   level?: 1 | 2;
 }) {
   const Heading = level === 1 ? 'h1' : 'h2';
   return (
     <header className="page-header">
       <div>
-        <Heading>{title}</Heading>
+        {titleAction ? (
+          <div className="title-row">
+            <Heading>{title}</Heading>
+            {titleAction}
+          </div>
+        ) : (
+          <Heading>{title}</Heading>
+        )}
         <p className="muted">{description}</p>
       </div>
       {action}

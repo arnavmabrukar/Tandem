@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { RefreshCw } from 'lucide-react';
 
 import { ApiError } from '../api/client';
 import { useSession } from '../auth/session';
@@ -90,14 +91,17 @@ export function InvitationsPage() {
       <PageHeader
         title="Invitations"
         description="Join projects that invited your verified email address."
-        action={
-          <Button
-            variant="outline"
+        titleAction={
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Refresh invitations"
+            title="Refresh invitations"
             disabled={invitations.isFetching || acceptance.isPending || uncertain}
             onClick={() => void invitations.refetch()}
           >
-            Refresh invitations
-          </Button>
+            <RefreshCw size={16} aria-hidden="true" className={invitations.isFetching ? 'spin' : undefined} />
+          </button>
         }
       />
 
@@ -129,10 +133,7 @@ export function InvitationsPage() {
       {!invitations.isError && invitations.data && (
         <>
           {invitations.data.invitations.length === 0 && (
-            <Empty title="No pending invitations">
-              Invitations must use the same address as your verified Auth0 email.
-              Ask the project owner to invite that exact address, then refresh.
-            </Empty>
+            <Empty title="No pending invitations" />
           )}
 
           {invitations.data.invitations.map((invitation) => (

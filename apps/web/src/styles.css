@@ -268,6 +268,10 @@ fieldset {
   width: 100%;
   padding-left: 34px;
 }
+.switcher-search input[type='text']:focus-visible {
+  outline: none;
+  border-color: #0b5a8a;
+}
 .switcher-list {
   max-height: 260px;
   margin: 0;
@@ -1901,5 +1905,71 @@ td:first-child {
   .danger-head,
   .danger-body {
     padding-inline: 18px;
+  }
+}
+
+/* Small refresh control beside a page title */
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #b3c9db;
+  border-radius: 6px;
+  background: #fff;
+  color: #40627a;
+}
+.icon-button:hover:not(:disabled) {
+  background: #e3edf5;
+}
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Settings */
+.profile-email {
+  margin: 22px 0 0;
+  padding-top: 22px;
+  border-top: 1px solid #d2e1ed;
+}
+.connection-list {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid #d2e1ed;
+}
+.connection-list li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid #d2e1ed;
+}
+.connection-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connection-expiry {
+  flex: none;
+  font-size: 13px;
+  white-space: nowrap;
+}
+@media (max-width: 650px) {
+  .connection-list li {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+  }
+  .connection-name {
+    flex-basis: 100%;
+    white-space: normal;
   }
 }
