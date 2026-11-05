@@ -68,10 +68,21 @@ In both modes, a person reviews the work, merges on GitHub, and then clicks **Ac
 
 ## Meta in Tandem
 
-The mediator uses a Meta model in two places:
+Tandem's mediator is powered by **Meta's Muse Spark 1.3**, called through the Meta Model API. It is the coordinating intelligence of the system, not a chatbot bolted on the side. It plans the work, distributes it across whatever agents are connected, and carries messages between them, while the agents themselves keep running in their own local environments.
 
-- **Plan generation.** Describe a goal and Meta drafts a plan. Nothing is saved, assigned, or approved until a human reviews and approves it.
-- **The project room.** A shared conversation where people and agents can ask the mediator questions, such as who is online or how to split work. Human exchanges stay private from agents.
+### How Muse Spark contributes
+
+| Purpose | Bounded input → model output | Deterministic boundary → downstream action |
+| --- | --- | --- |
+| **Planning, from scratch or in an existing codebase** | A goal, plus the project's name, repository, description and any tasks already on the board → a structured plan of tasks, dependencies and acceptance criteria | Output must pass schema validation with unique task keys and acyclic dependencies. Existing tasks that still fit aren't duplicated. A plan is never saved, assigned or approved until a human does it. |
+| **Conversational planning** | A running conversation about a goal → a reply, and a revised plan only when asked | Same validation as above. The model can't approve plans, run tools or claim work is done. |
+| **Matching work to agents** | Open tasks with approved contracts, and each connected agent's declared capabilities, availability and current workload → proposed assignments | Chosen on capabilities, not on which vendor made the model, and spread to avoid bottlenecks. The server applies each choice through its normal authorization, contract and dependency checks, and reports what actually happened. Existing assignments are never overwritten. |
+| **Agent-to-agent communication** | A question or instruction from a person or an agent → a concise message written for one agent or for all of them | The server turns it into individual authenticated requests. Each agent answers from its own machine, and the reply shows up in the shared room. Private human messages are never copied to agents. |
+| **Status and presence** | Recorded task state and progress → a short status summary, or a request that agents check in | Progress comes from what the server has recorded. No invented ETAs, and only an agent that actually acknowledges counts as online. |
+
+Muse Spark reasons over *coordination state*: tasks, contracts, claims, and what agents report. Git stays the source of truth for code. Agents push to the project's configured branch through the runner or by hand, humans review and merge on GitHub, and only then does **Accept work** unlock dependent tasks.
+
+Safeguards around every call: all project and conversation content is treated as untrusted data, output is validated before it is used, the API key never leaves the backend, and a failure is shown as a failure, never as a fabricated answer.
 
 ## Architecture at a glance
 
@@ -92,10 +103,6 @@ Design principles the system holds to:
 - **Real data only.** No demo mode or simulated activity. If the backend is unavailable, you see an error, never made-up records.
 - **Server-confirmed writes.** Approvals, merges, and messages wait for the server; nothing is optimistic.
 - **Secrets stay server-side.** Model and GitHub credentials never reach the browser.
-
-## Dashboard
-
-Activity, Tasks and task threads, Plans, Agents (with the project room), Approvals, Project setup, and a step-by-step Connection guide. Connecting an agent is walked through inside the product.
 
 ## Repository layout
 
