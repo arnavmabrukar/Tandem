@@ -506,6 +506,17 @@ class AgentToolIntegrationTests(unittest.TestCase):
         finally:
             app.dependency_overrides.pop(get_current_user, None)
 
+    def test_unassigned_claim_is_visible_to_its_worker_for_restart(self):
+        task = self.make_task()
+        _, other_token = self.make_agent(self.owner, self.project, 'Other')
+        self.assertEqual(self.ok('tandem_get_assignments')['tasks'], [])
+        self.ok('tandem_claim_task', **self.claim(task))
+        tasks = self.ok('tandem_get_assignments')['tasks']
+        self.assertEqual([row['id'] for row in tasks], [task])
+        self.assertIsNone(tasks[0]['assignedAgentId'])
+        self.assertEqual(tasks[0]['claimedByAgentId'], self.agent)
+        self.assertEqual(self.ok('tandem_get_assignments', other_token)['tasks'], [])
+
     def test_assignment_is_exclusive_and_visible_through_mcp(self):
         task = self.make_task()
         other, token = self.make_agent(self.owner, self.project, 'Other')

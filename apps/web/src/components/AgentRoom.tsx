@@ -250,7 +250,7 @@ export function AgentRoom({ project, room }: { project: Project; room: UseQueryR
         <dt><strong><code>/stop @Agent Name</code></strong></dt>
         <dd>Finish current work, then stop claiming tasks. The agent posts “I’m idle” when it has finished.</dd>
         <dt><strong><code>/start @Agent Name</code></strong></dt>
-        <dd>Allow the agent to accept tasks again. Its terminal worker must be running.</dd>
+        <dd>Resume assigned work or claim ready, unassigned tasks. Its terminal worker must be running. Scope approvals and dependencies still apply; accept prerequisite work before dependent tasks can start.</dd>
         <dt><strong><code>@Agent Name your question</code></strong></dt>
         <dd>Ask one agent through the mediator. Its reply appears in this chat after check-in.</dd>
         <dt><strong><code>@everyone your question</code></strong></dt>

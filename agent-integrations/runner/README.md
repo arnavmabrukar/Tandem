@@ -21,7 +21,9 @@ also keeps the agent showing Online, including during long runs.
 
 Send `/stop @Agent Name` to finish the current task and then stop claiming work.
 The authenticated worker posts “I'm idle” once it has finished. Send
-`/start @Agent Name` to allow new claims again. Both commands require an exact
+`/start @Agent Name` to resume assigned work or claim ready, unassigned tasks.
+Approved scope and dependencies still apply: accept prerequisite work before
+dependent tasks can start. Both commands require an exact
 project agent name or `@everyone`. Controls persist across clearing chat and
 restarting a worker; they do not launch a stopped terminal process. Updated
 workers keep checking in while idle and answer mediator-relayed questions.

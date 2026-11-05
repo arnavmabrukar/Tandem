@@ -173,6 +173,61 @@ class RunnerPresenceTests(unittest.TestCase):
             worker._answer_idle_requests()
         tandem.project_call.assert_called_with('tandem_reply_worker_room_request', requestId='broadcast-1', body='I am idle.')
 
+    def test_started_worker_picks_only_ready_unassigned_work(self):
+        tandem = Mock()
+        ready = {'id': 'ready', 'status': 'open', 'claimable': True}
+        board = [dict(ready, id='blocked', claimable=False),
+                 dict(ready, id='assigned', assignedAgentId='other'),
+                 dict(ready, id='claimed', claimedByAgentId='other'),
+                 dict(ready, id='review', status='in_review'), ready]
+        def project_call(tool, **arguments):
+            if tool == 'tandem_get_assignments':
+                return {'tasks': [], 'workerControl': {'id': 'start', 'action': 'start'}}
+            if tool == 'tandem_list_tasks':
+                self.assertEqual(arguments, {'status': 'open'})
+                return {'tasks': board}
+            return {'acknowledged': True}
+        tandem.project_call.side_effect = project_call
+        worker = runner_module.Runner(tandem, Mock(), [], 60)
+        with patch.object(worker, 'acknowledge_presence'), patch.object(worker, 'work') as work:
+            self.assertTrue(worker.run_once())
+            work.assert_called_once_with(ready)
+
+    def test_started_worker_explains_board_blockers_in_reply_turn(self):
+        tandem = Mock()
+        blocked = {'id': 'qa', 'title': 'QA', 'status': 'open', 'claimable': False,
+                   'claimBlockers': ['Waiting for dependency Features (status: in_review)'],
+                   'humanMessage': 'PRIVATE'}
+        def project_call(tool, **arguments):
+            if tool == 'tandem_get_assignments':
+                return {'tasks': [], 'workerControl': {'id': 'start', 'action': 'start'}}
+            if tool == 'tandem_list_tasks': return {'tasks': [blocked]}
+            if tool == 'tandem_get_worker_room_requests':
+                return {'workerRequests': [{'id': 'question', 'message': 'Claim work'}]}
+            return {'acknowledged': True}
+        tandem.project_call.side_effect = project_call
+        worker = runner_module.Runner(tandem, Mock(), [], 60)
+        with patch.object(worker, 'acknowledge_presence'), patch.object(
+                worker, '_run_agent_with_keepalive', return_value=(0, 'Awaiting review.')) as answer:
+            self.assertIsNone(worker.next_task())
+        prompt = answer.call_args.args[0]
+        self.assertIn(blocked['claimBlockers'][0], prompt)
+        self.assertIn('Worker control: "start"', prompt)
+        self.assertIn('this restriction applies only to this reply turn', prompt)
+        self.assertNotIn('PRIVATE', prompt)
+
+    def test_no_start_or_stopped_worker_does_not_take_unassigned_work(self):
+        for control in (None, {'id': 'stop', 'action': 'stop'}):
+            with self.subTest(control=control):
+                tandem = Mock()
+                tandem.project_call.side_effect = lambda tool, **kwargs: (
+                    {'tasks': [], 'workerControl': control} if tool == 'tandem_get_assignments'
+                    else {'workerRequests': [], 'acknowledged': True})
+                worker = runner_module.Runner(tandem, Mock(), [], 60)
+                with patch.object(worker, 'acknowledge_presence'):
+                    self.assertIsNone(worker.next_task())
+                self.assertNotIn('tandem_list_tasks', [c.args[0] for c in tandem.project_call.call_args_list])
+
     def test_no_pending_challenge_produces_no_acknowledgement(self):
         tandem = Mock()
         tandem.project_call.return_value = {'presenceRequests': []}

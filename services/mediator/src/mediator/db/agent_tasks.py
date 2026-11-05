@@ -448,7 +448,7 @@ def post_message(identity: dict, project_id: UUID, task_id: UUID, message_type: 
 
 
 def get_assignments(identity: dict, project_id: UUID) -> dict:
-    """Read this agent's unfinished assignments without claiming or starting work."""
+    """Read unfinished assignments and self-claimed work for restart recovery."""
     with _transaction() as connection:
         role = _current_role(connection, identity, project_id)
         if role not in WRITE_ROLES:
@@ -461,10 +461,11 @@ def get_assignments(identity: dict, project_id: UUID) -> dict:
         if project is None:
             raise AgentAccessDenied("Project access is unavailable")
         tasks = connection.execute(
-            _TASK_SELECT + """ WHERE t.project_id=%s AND t.assigned_agent_id=%s
+            _TASK_SELECT + """ WHERE t.project_id=%s
+                               AND (t.assigned_agent_id=%s OR t.claimed_by_agent_id=%s)
                                AND t.status NOT IN ('approved', 'merged', 'cancelled')
                                ORDER BY t.created_at, t.id LIMIT %s""",
-            (project_id, identity["agentId"], TASK_LIMIT + 1),
+            (project_id, identity["agentId"], identity["agentId"], TASK_LIMIT + 1),
         ).fetchall()
         from mediator.db.worker_controls import latest_control
         control = latest_control(connection, project_id, identity['agentId'])
