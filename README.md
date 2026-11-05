@@ -1,66 +1,114 @@
 # Tandem
 
-A hosted mediator that helps their independent coding agents coordinate work. Person 1 prompts Codex on his machine; Person 2 prompts Claude Code on his. The mediator records assignments, messages, file claims, and human approvals. It never launches or controls either agent. Git is the ground truth for code; PostgreSQL is the ground truth for coordination.
+**A hosted mediator that lets independent coding agents work on one GitHub repository without colliding.**
 
-## Frontend
+Tandem coordinates the agents you already use (Codex, Claude Code and others), across tools and machines, and gives you one dashboard to see and steer all of it. Built for the Meta AI hackathon, and intended to continue as a product afterward.
 
-Hosted frontend: **[agentictandem.vercel.app](https://agentictandem.vercel.app)**. It currently shows connection setup until Auth0 and the backend are configured. See the [deployment instructions](apps/web/README.md#vercel-deployment).
+**Live app:** [agentictandem.vercel.app](https://agentictandem.vercel.app)
 
-The human dashboard is implemented in [`apps/web`](apps/web). It connects only to Auth0 and the real mediator HTTP API. There is no demo mode, sample workspace, browser-local database, or simulated agent activity. Until you configure authentication and implement the backend endpoints, it shows setup or connection errors.
+## The problem
 
-```sh
-cd apps/web
-npm ci
-# Copy .env.example to .env.local and supply the four connection settings.
-npm run dev
+One developer running several agents in parallel, or a small team where everyone runs their own, hits the same wall: agents edit overlapping files, don't know what the others are doing, and the humans lose track of what is actually happening. Each agent is smart on its own, but nothing coordinates them.
+
+## What Tandem does
+
+- **Bring your own agent.** Tandem doesn't replace your agents or lock you to a vendor. Agents connect over [MCP](https://modelcontextprotocol.io) and work through tools to claim tasks, post updates, and propose plans.
+- **One shared picture.** It records assignments, messages, file claims, and approvals, so every agent and every person sees the same state.
+- **Humans stay in control.** Plans and task contracts need human approval, and approving is separate from merging. Model output can propose work but never authorizes it.
+- **You choose the autonomy.** Let agents run on their own, or keep the controls and use Tandem as a consultant (see below).
+
+Git is the ground truth for code. PostgreSQL is the ground truth for coordination.
+
+## How it works
+
+Every project starts the same way:
+
+1. **Import** a GitHub repository as a project.
+2. **Connect** your agents.
+3. **Plan** with the Meta-powered planner, or write the plan by hand.
+4. **Approve** the plan and its task contracts.
+
+From there, you pick how agents do the work.
+
+```mermaid
+flowchart TD
+  P[Approved plan and task contracts] --> Q{How much autonomy?}
+  Q -->|Autonomous| R[Runner on your machine claims tasks,<br/>works on a branch, pushes, opens a PR]
+  Q -->|Manual| S[You run each agent and manage<br/>GitHub and tasks yourself]
+  R --> V[Human reviews the PR and merges on GitHub]
+  S --> V
+  S -.->|consult any time| M[Meta mediator]
+  R -.-> M
+  V --> A[Accept work: dependent tasks can start]
 ```
 
-Use Node.js 22.12+. See the [frontend README](apps/web/README.md) for setup and tests, and the [API contract](apps/web/API.md) for the exact endpoints and response shapes to implement in `services/mediator`. The Auth0 browser flow and authenticated HTTP client are implemented; the backend, agent integrations, database, worker, and provider services remain for the team to build.
+### Autonomous
 
-## Planned architecture
+Agents pick up assigned tasks on their own. The optional local runner claims a task, works on a dedicated `tandem/...` branch, verifies the result, pushes to git, and opens a pull request, all on your own machine. You approve the plan and contracts up front, then review and merge. Agents run without hand-holding, but you keep full control of what gets accepted.
+
+### Manual
+
+You run each agent yourself and manage GitHub and task control for each one. Tandem's Meta mediator is still there to consult: it helps with planning, routing, file claims, and messages between agents, without running anything on your behalf.
+
+In both modes, a person reviews the work, merges on GitHub, and then clicks **Accept work** so dependent tasks can begin.
+
+## Key concepts
+
+| Term | Meaning |
+| --- | --- |
+| **Project** | A GitHub repository imported into Tandem |
+| **Agent** | A coding agent (Codex, Claude Code, etc.) connected to a project |
+| **Task** | A unit of work assigned to an agent, with its own discussion thread |
+| **Contract** | What a task must deliver, approved by a human before work starts |
+| **Plan** | A set of tasks and contracts, written by hand or generated with Meta |
+| **File claim** | An agent's declared ownership of files, so others stay clear |
+| **Approval** | A human decision on a plan or contract; separate from merging |
+| **Mediator** | The hosted service that coordinates agents and records the shared state |
+| **Runner** | The optional local script that lets agents work autonomously |
+
+## Meta in Tandem
+
+The mediator uses a Meta model in two places:
+
+- **Plan generation.** Describe a goal and Meta drafts a plan. Nothing is saved, assigned, or approved until a human reviews and approves it.
+- **The project room.** A shared conversation where people and agents can ask the mediator questions, such as who is online or how to split work. Human exchanges stay private from agents.
+
+## Architecture at a glance
 
 ```mermaid
 flowchart LR
-  A[Arnav] --> C[Independent Codex session]
-  E[Eashan] --> L[Independent Claude Code session]
-  C <-->|HTTPS MCP tools and results| M[Hosted mediator]
-  L <-->|HTTPS MCP tools and results| M
-  H[Human dashboard] <-->|HTTPS views and decisions| M
-  M <-->|Coordination records| D[(PostgreSQL)]
-  W[Python worker] <-->|Durable jobs and outcomes| D
-  M <-->|Context and routing proposal| AI[Meta Model API]
-  C <-->|Branches and commits| G[GitHub]
-  L <-->|Branches and commits| G
-  A -->|Review and merge| G
-  E -->|Review and merge| G
+  H[Human dashboard] <-->|views and decisions| M[Hosted mediator]
+  A1[Codex] <-->|MCP| M
+  A2[Claude Code] <-->|MCP| M
+  M <-->|coordination records| D[(PostgreSQL)]
+  M <-->|planning and room replies| AI[Meta Model API]
+  R[Optional runner] <-->|claims and results| M
+  A1 & A2 <-->|branches and commits| G[GitHub]
+  H -->|review and merge| G
 ```
 
-The planned full architecture will include Auth0, trust boundaries, worker policies, and the optional GitHub enforcement extension. The arrows above describe future service interactions, not existing connections.
+Design principles the system holds to:
 
-## Planned documentation
+- **Real data only.** No demo mode or simulated activity. If the backend is unavailable, you see an error, never made-up records.
+- **Server-confirmed writes.** Approvals, merges, and messages wait for the server; nothing is optimistic.
+- **Secrets stay server-side.** Model and GitHub credentials never reach the browser.
 
-The paths below identify documents still to be written. Frontend setup and integration guidance is already included in `apps/web/README.md`.
+## Dashboard
 
-1. Both developers: project overview (`docs/project-overview.md`), architecture (`docs/architecture.md`), and open decisions (`docs/open-decisions.md`).
-2. Agree on the protocol (`docs/protocol.md`), state machine (`docs/state-machine.md`), and data model (`docs/data-model.md`) before implementing independently.
-3. Document collaboration (`docs/collaboration.md`) to divide work, then the repository map (`docs/repository-map.md`) to identify each owning file.
-4. Define testing (`docs/testing.md`) and the future demo (`docs/demo-scenario.md`) to establish the evidence needed for completion.
+Activity, Tasks and task threads, Plans, Agents (with the project room), Approvals, Project setup, and a step-by-step Connection guide. Connecting an agent is walked through inside the product.
 
-## Layout
+## Repository layout
 
-| Area | Intended responsibility |
+| Path | What lives there |
 | --- | --- |
-| `apps/web/` | React/TypeScript/Vite dashboard with Tailwind, shadcn-style primitives, TanStack Query, Auth0 and one real HTTP data client |
-| `services/mediator/` | One FastAPI/Python MCP backend and a normal Python worker sharing domain policies |
-| `agent-integrations/` | Future connection plans, instruction templates, optional durable local receipt helper |
-| `infrastructure/` | Future Render, Docker, and local PostgreSQL configuration |
-| `docs/` | Protocol, consistency, identity, recovery, implementation guidance, and unresolved decisions |
-| `.github/` | Future PR review checklist and CI configuration |
+| `apps/web/` | The React and TypeScript dashboard |
+| `services/mediator/` | The Python mediator: API, MCP server, and background work |
+| `agent-integrations/` | Agent setup material and the optional autonomous runner |
 
-## Planned implementation references
+## Getting started
 
-- Coordination: routing and contracts (`docs/routing-and-contracts.md`), delivery and recovery (`docs/delivery-and-recovery.md`), file ownership (`docs/file-ownership.md`).
-- Access: authentication (`docs/authentication.md`), agent integration (`docs/agent-integration.md`), GitHub integration (`docs/github-integration.md`).
-- Operations: configuration (`docs/configuration.md`), deployment (`docs/deployment.md`), testing (`docs/testing.md`).
+Setup is explained inside the product. Sign in to the [live app](https://agentictandem.vercel.app) and follow the **Connection guide**. For developer details, see [`apps/web/README.md`](apps/web/README.md), [`services/mediator/README.md`](services/mediator/README.md), and the runner's [README](agent-integrations/runner/README.md).
 
-The envelope and lifecycle remain design proposals; there is no claim of protocol conformance. Detailed design documents and repository-level agent instructions will be added by the team as implementation begins.
+## Team
+
+Built by Arnav and Eashan.
