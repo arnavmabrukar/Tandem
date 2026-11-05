@@ -119,7 +119,7 @@ export function InvitationsPage() {
       {acceptedProjectId && (
         <p role="status" className="notice">
           Invitation accepted.{' '}
-          <Link to={`/projects/${acceptedProjectId}/activity`}>
+          <Link to={`/projects/${acceptedProjectId}/overview`}>
             Open project
           </Link>
         </p>

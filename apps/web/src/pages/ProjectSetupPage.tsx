@@ -74,7 +74,7 @@ export function ProjectSetupPage({ project, embedded = false }: { project: Proje
                   githubRepositoryId: selection.repositoryId,
                   githubInstallationId: selection.installationId, trackedBranch: branch,
                 });
-                navigate(`/projects/${result.projectId}/activity`);
+                navigate(`/projects/${result.projectId}/overview`);
               } catch {
                 /* Keep drafts and show errors. */
               }

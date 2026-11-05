@@ -12,6 +12,7 @@ test('navigation switches between all projects and a project overview', async ({
   await expect(page).toHaveURL(/\/projects\/project-1\/overview$/);
   await expect(nav.getByRole('link', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Activity', exact: true })).toHaveCount(0);
   await page.reload();
   await expect(nav.getByRole('link', { name: 'Meta Mediator', exact: true })).toBeVisible();
   await nav.getByRole('link', { name: 'Projects', exact: true }).click();
@@ -19,6 +20,13 @@ test('navigation switches between all projects and a project overview', async ({
   await expect(nav.getByRole('link', { name: 'Meta Mediator', exact: true })).toHaveCount(0);
   await page.goBack();
   await expect(nav.getByRole('link', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page');
+});
+
+test('old activity URLs open the project overview', async ({ page }) => {
+  await connect(page);
+  await page.goto('/#/projects/project-1/activity');
+  await expect(page).toHaveURL(/\/projects\/project-1\/overview$/);
+  await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
 });
 
 test('profile menu opens user settings without account deletion or sign-in methods', async ({ page }) => {
@@ -1118,6 +1126,9 @@ async function mockGitHub(page: Page, connection: { connected: boolean; login: s
     const url = new URL(route.request().url());
     if (url.pathname === '/api/github/connection') {
       await route.fulfill({ json: { ...connection, installUrl } });
+    } else if (url.pathname === '/api/github/connect') {
+      expect(route.request().method()).toBe('POST');
+      await route.fulfill({ json: { url: 'https://github.com/login/oauth/authorize?state=xyz' } });
     } else if (url.pathname === '/api/github/complete') {
       completed.push(route.request().postDataJSON());
       connection.connected = true;
@@ -1134,22 +1145,38 @@ async function mockGitHub(page: Page, connection: { connected: boolean; login: s
   return completed;
 }
 
-test('create project sends an unlinked person to Settings, and an expired link says so', async ({ page }) => {
+for (const login of [null, 'octo']) {
+test(`create project authorizes GitHub directly and returns to import (${login ? 'expired' : 'unlinked'})`, async ({ page }) => {
   await connect(page);
-  const connection = { connected: false, login: null as string | null };
-  await mockGitHub(page, connection);
+  const completed = await mockGitHub(page, { connected: false, login });
+  // Simulate GitHub's redirect back through the existing backend callback URL.
+  await page.route('https://github.com/login/oauth/authorize?state=xyz', (route) =>
+    route.fulfill({ status: 302, headers: { location: 'http://127.0.0.1:4173/#/settings?github_code=abc&github_state=xyz' } }));
   await page.goto('/#/projects/new');
-  await expect(page.getByText('No GitHub account linked')).toBeVisible();
+  await expect(page.getByText(login ? 'Link to octo expired' : 'No GitHub account linked')).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Repository' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Import repository' })).toHaveCount(0);
-  await page.getByRole('link', { name: 'Link in Settings' }).click();
-  await expect(page).toHaveURL(/#\/settings$/);
-  await expect(page.getByRole('button', { name: 'Connect GitHub' })).toBeVisible();
+  await page.getByRole('button', { name: login ? 'Reconnect GitHub' : 'Connect GitHub', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: 'Repository' })).toBeVisible();
+  await expect(page).toHaveURL(/#\/projects\/new$/);
+  await expect(page.getByText('Linked', { exact: true })).toBeVisible();
+  expect(completed).toEqual([{ code: 'abc', state: 'xyz' }]);
+  await page.getByRole('link', { name: 'Manage', exact: true }).click();
+  await expect(page).toHaveURL(/#\/settings\/user\?section=github$/);
+  await expect(page.getByRole('heading', { name: 'GitHub', exact: true })).toBeVisible();
+});
+}
 
-  connection.login = 'octo';
-  await page.reload();
-  await expect(page.getByText('Expired', { exact: true })).toBeVisible();
+test('failed GitHub reconnect stays on create project and can be retried', async ({ page }) => {
+  await connect(page);
+  await mockGitHub(page, { connected: false, login: 'octo' });
+  await page.route('https://api.tandem.test/api/github/connect', (route) =>
+    route.fulfill({ status: 503, json: { detail: 'GitHub authorization is unavailable.' } }));
+  await page.goto('/#/projects/new');
+  await page.getByRole('button', { name: 'Reconnect GitHub' }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page).toHaveURL(/#\/projects\/new$/);
   await expect(page.getByRole('button', { name: 'Reconnect GitHub' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reconnect GitHub' })).toBeEnabled();
 });
 
 test('one repository control searches every page and accepts a pasted URL', async ({ page }) => {
@@ -1197,8 +1224,7 @@ test('settings finishes GitHub authorization and removes the code from the addre
   await connect(page);
   const completed = await mockGitHub(page, { connected: false, login: null });
   await page.goto('/#/settings?github_code=abc&github_state=xyz');
-  await expect(page).toHaveURL(/#\/settings$/);
+  await expect(page).toHaveURL(/#\/settings\/user\?section=github$/);
   await expect(page.getByText('Linked', { exact: true })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Create a project' })).toBeVisible();
   expect(completed).toEqual([{ code: 'abc', state: 'xyz' }]);
 });
