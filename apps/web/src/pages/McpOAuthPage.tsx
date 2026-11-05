@@ -196,13 +196,3 @@ export function McpConnectionList() {
     {error && <p role="alert" className="notice error">{error}</p>}
   </>;
 }
-
-export function McpConnectionsPage() {
-  const { user, signIn, error: sessionError } = useSession();
-  return <main className="p-8 max-w-2xl mx-auto space-y-6">
-    <h1 className="text-3xl font-bold">Connected MCP clients</h1>
-    {!user ? <Button onClick={() => void signIn('/mcp/connections')}>Sign in</Button> : <McpConnectionList />}
-    {sessionError && <p role="alert">{sessionError.message}</p>}
-    <Link to="/dashboard">Return to dashboard</Link>
-  </main>;
-}

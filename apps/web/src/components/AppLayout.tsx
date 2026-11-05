@@ -81,7 +81,6 @@ export function AppLayout({
       approvals: 'Workflow',
       agents: 'Meta Mediator',
       setup: 'Project setup',
-      connections: 'Connection guide',
     };
     return names[section] ?? '';
   })();
@@ -92,11 +91,8 @@ export function AppLayout({
     { to: 'agents', text: 'Meta Mediator', icon: Bot },
   ];
   const settingsLink = (section: string) => `/settings?${new URLSearchParams({ ...(id ? { project: id } : {}), section })}`;
-  const defaultSettingsSection = id ? 'setup-details' : 'connection-guide';
-  const settingsSections = [
-    ...(id ? [{ title: project?.name ?? 'Project', items: [['setup-details', 'Project details'], ['setup-people', 'People & invitations'], ['setup-automation', 'Agents & automation'], ...(project && roleFor(project, user!.id) === 'owner' ? [['setup-danger', 'Danger zone']] : [])] }] : []),
-    { title: 'Help', items: [['connection-guide', 'Connection guide']] },
-  ];
+  const defaultSettingsSection = 'setup-details';
+  const settingsSections = id ? [{ title: project?.name ?? 'Project', items: [['setup-details', 'Project details'], ['setup-people', 'People & invitations'], ['setup-automation', 'Agents & automation'], ...(project && roleFor(project, user!.id) === 'owner' ? [['setup-danger', 'Danger zone']] : [])] }] : [];
   return (
     <div className="app-shell">
       <a
@@ -142,14 +138,14 @@ export function AppLayout({
                 )}
               </NavLink>
             ))}
-          <button className={`settings-nav-toggle${inSettings ? ' active' : ''}`} aria-expanded={settingsOpen} aria-controls="settings-navigation"
+          {id && <button className={`settings-nav-toggle${inSettings ? ' active' : ''}`} aria-expanded={settingsOpen} aria-controls="settings-navigation"
             onClick={() => {
               setSettingsOpen(inSettings ? !settingsOpen : true);
               if (!inSettings) navigate(settingsLink(defaultSettingsSection));
             }}>
             <Settings size={18} /><span>Project Settings</span><ChevronDown size={16} className={settingsOpen ? 'expanded' : ''} />
-          </button>
-          {settingsOpen && <div id="settings-navigation" className="settings-subnav">
+          </button>}
+          {id && settingsOpen && <div id="settings-navigation" className="settings-subnav">
             {settingsSections.map(group => <div key={group.title} className="settings-subnav-group">
               {group.items.map(([section, text]) => {
                 const active = inSettings && (new URLSearchParams(location.search).get('section') ?? defaultSettingsSection) === section;

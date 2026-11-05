@@ -114,7 +114,7 @@ Design principles the system holds to:
 
 ## Getting started
 
-Setup is explained inside the product. Sign in to the [live app](https://agentictandem.vercel.app) and follow the **Connection guide**. For developer details, see [`apps/web/README.md`](apps/web/README.md), [`services/mediator/README.md`](services/mediator/README.md), and the runner's [README](agent-integrations/runner/README.md).
+Setup is explained inside the product. Sign in to the [live app](https://agentictandem.vercel.app) and follow the **Connect an IDE agent** guide under User settings → Connected agents. For developer details, see [`apps/web/README.md`](apps/web/README.md), [`services/mediator/README.md`](services/mediator/README.md), and the runner's [README](agent-integrations/runner/README.md).
 
 ## Team
 

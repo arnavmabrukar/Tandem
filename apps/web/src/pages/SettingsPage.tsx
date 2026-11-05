@@ -3,17 +3,32 @@ import { useLayoutEffect, useState, type FormEvent } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import type { Project } from '../types/domain';
 import { ProjectSetupPage } from './ProjectSetupPage';
-import { ConnectionsPage } from './ConnectionsPage';
 import { useSession } from '../auth/session';
+import { useMcpDiscovery } from '../components/AgentOAuthSetup';
 import { ErrorNotice, Field, PageHeader } from '../components/common';
 import { GitHubConnectionPanel } from '../components/GitHubConnection';
 import { Button } from '../components/ui/button';
 import { McpConnectionList } from './McpOAuthPage';
 
+function ConnectIdeAgentGuide() {
+  const discovery = useMcpDiscovery();
+  return (
+    <div className="connect-ide-guide">
+      <h3>Connect an IDE agent with OAuth</h3>
+      <p>Add this remote MCP URL in your IDE, then choose its sign-in or authenticate action:</p>
+      {discovery.data && <p><code>{discovery.data}</code></p>}
+      {discovery.isPending && <p role="status">Checking MCP server…</p>}
+      <ErrorNotice error={discovery.error} retry={() => void discovery.refetch()} />
+      <p>Sign in to Tandem in the browser, choose your agent and project, and allow the connection.
+        Choose an existing agent or create one during sign-in. Use Connect your IDE on the Agents page for guided setup.</p>
+    </div>
+  );
+}
+
 export function SettingsPage({ project, userOnly = false }: { project: Project | null; userOnly?: boolean }) {
   const [params] = useSearchParams();
   const location = useLocation();
-  const section = params.get('section') ?? (userOnly ? 'profile' : project ? 'setup-details' : 'connection-guide');
+  const section = params.get('section') ?? (userOnly ? 'profile' : 'setup-details');
   useLayoutEffect(() => {
     // Query parameters work with the app's hash router and repeated section clicks.
     const target = document.getElementById(section);
@@ -103,10 +118,9 @@ export function SettingsPage({ project, userOnly = false }: { project: Project |
           See which agent clients can reach your projects, and disconnect them.
         </p>
         <McpConnectionList />
+        <ConnectIdeAgentGuide />
       </section>
       </>}
-      {!userOnly && project && <ProjectSetupPage key={project.id} project={project} embedded />}
-      {!userOnly && <div id="connection-guide" tabIndex={-1} className="settings-section"><ConnectionsPage /></div>}
-    </>
+      {!userOnly && project && <ProjectSetupPage key={project.id} project={project} embedded />}    </>
   );
 }

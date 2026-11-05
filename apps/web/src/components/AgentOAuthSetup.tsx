@@ -459,7 +459,7 @@ Never approve or merge your own work, access human room messages, or duplicate a
     title={agent ? 'Set up worker' : 'Connect your agent'}
     description={agent ? `${agent.name} · ${project.name}` : project.name} className="agent-setup-dialog"
     footer={<>
-      <Link to="/mcp/connections" onClick={onClose}>Manage connections</Link>
+      <Link to="/settings/user?section=connected-agents" onClick={onClose}>Manage connections</Link>
       <Button variant="outline" onClick={() => { void queries.invalidateQueries({ queryKey: ['workspace'] }); onClose(); }}>Done</Button>
     </>}>
     {discovery.isPending && <p role="status">Checking your server…</p>}

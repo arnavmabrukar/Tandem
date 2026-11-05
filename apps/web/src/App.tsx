@@ -1,4 +1,4 @@
-import { McpOAuthPage, McpConnectionsPage } from './pages/McpOAuthPage';
+import { McpOAuthPage } from './pages/McpOAuthPage';
 import {
   Component,
   lazy,
@@ -35,9 +35,6 @@ const ConnectAgentPage = lazy(() =>
 );
 const ProjectSetupPage = lazy(() =>
   import('./pages/ProjectSetupPage').then((m) => ({ default: m.ProjectSetupPage })),
-);
-const ConnectionsPage = lazy(() =>
-  import('./pages/ConnectionsPage').then((m) => ({ default: m.ConnectionsPage })),
 );
 const SettingsPage = lazy(() =>
   import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
@@ -194,10 +191,6 @@ function Dashboard() {
                   }
                 />
                 <Route
-                  path="/projects/:projectId/connections"
-                  element={project ? <ConnectionsPage /> : notFound}
-                />
-                <Route
                   path="*"
                   element={
                     <Empty title="Page not found">
@@ -253,7 +246,6 @@ export default function App() {
           element={user ? <Navigate to={returnTo} replace /> : <SignInPage />}
         />
         <Route path="/mcp/authorize/:ticket" element={<McpOAuthPage key={location.pathname} />} />
-        <Route path="/mcp/connections" element={<McpConnectionsPage />} />
         <Route path="*" element={<Dashboard />} />
       </Routes>
     </ErrorBoundary>
