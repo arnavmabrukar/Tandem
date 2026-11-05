@@ -54,6 +54,56 @@ class RunnerLoginCheckTests(unittest.TestCase):
         self.assertEqual(run.call_args_list[0].args[0], [r'C:\npm\claude.CMD', 'auth', 'status'])
 
 
+class LinuxHelperTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.package = self.root / 'home/.local/lib/node_modules/@anthropic-ai/sandbox-runtime'
+        self.runtime = self.package / 'dist/cli.js'
+        self.runtime.parent.mkdir(parents=True)
+        self.runtime.write_text('trusted runtime fixture')
+        (self.package / 'package.json').write_text(json.dumps({'name': '@anthropic-ai/sandbox-runtime', 'version': '0.0.81'}))
+        self.helper = self.package / 'vendor/seccomp/x64/apply-seccomp'
+        self.helper.parent.mkdir(parents=True)
+        self.helper.write_text('trusted helper fixture')
+        self.helper.chmod(0o755)
+
+    def test_user_local_helper_is_located_without_allowing_home(self):
+        with patch.object(runner.platform, 'machine', return_value='x86_64'):
+            found = runner.linux_seccomp_helper(str(self.runtime), self.root / 'project')
+        self.assertEqual(found, self.helper.resolve())
+
+    def test_missing_or_nonexecutable_helper_fails_closed(self):
+        with patch.object(runner.platform, 'machine', return_value='x86_64'):
+            self.helper.chmod(0o644)
+            with self.assertRaisesRegex(runner.WorkBlocked, 'Reinstall'):
+                runner.linux_seccomp_helper(str(self.runtime), self.root / 'project')
+            self.helper.unlink()
+            with self.assertRaises(runner.WorkBlocked):
+                runner.linux_seccomp_helper(str(self.runtime), self.root / 'project')
+
+    def test_project_helpers_and_symlink_escapes_are_rejected(self):
+        with patch.object(runner.platform, 'machine', return_value='x86_64'):
+            with self.assertRaises(runner.WorkBlocked):
+                runner.linux_seccomp_helper(str(self.runtime), self.package)
+            outside = self.root / 'untrusted-helper'
+            outside.write_text('outside')
+            outside.chmod(0o755)
+            self.helper.unlink()
+            self.helper.symlink_to(outside)
+            with self.assertRaises(runner.WorkBlocked):
+                runner.linux_seccomp_helper(str(self.runtime), self.root / 'project')
+
+    def test_arm64_uses_its_own_helper(self):
+        arm = self.package / 'vendor/seccomp/arm64/apply-seccomp'
+        arm.parent.mkdir(parents=True)
+        arm.write_text('arm fixture')
+        arm.chmod(0o755)
+        with patch.object(runner.platform, 'machine', return_value='aarch64'):
+            self.assertEqual(runner.linux_seccomp_helper(str(self.runtime), self.root / 'project'), arm.resolve())
+
+
 class RunnerGitTests(unittest.TestCase):
     def setUp(self):
         self.no_room_requests = patch.object(runner, 'worker_room_requests', return_value=[])
@@ -99,6 +149,81 @@ class RunnerGitTests(unittest.TestCase):
         self.commit(self.source, 'Teammate work')
         self.git(self.source, 'push', 'origin', 'main')
         return branch
+
+    def test_restart_recovers_assigned_task_without_discarding_edits(self):
+        self.repo.prepare(runner.branch_name(self.task))
+        (self.worker / 'shared.txt').write_text('unfinished changes\n')
+        worker = runner.Runner(Mock(), self.repo, ['fake-agent'], 60)
+        worker.recover_interrupted_task([{**self.task, 'status': 'blocked'}])
+        self.assertEqual(worker.resume_task, self.task['id'])
+        self.repo.prepare(runner.branch_name(self.task), resume=True)
+        self.assertEqual((self.worker / 'shared.txt').read_text(), 'unfinished changes\n')
+
+    def test_restart_does_not_recover_reassigned_or_reviewed_work(self):
+        self.repo.prepare(runner.branch_name(self.task))
+        (self.worker / 'shared.txt').write_text('preserve this\n')
+        for tasks in ([], [{**self.task, 'status': 'in_review'}],
+                      [{**self.task, 'status': 'open', 'claimable': False}],
+                      [{**self.task, 'id': 'another-task', 'status': 'in_progress'}]):
+            worker = runner.Runner(Mock(), self.repo, ['fake-agent'], 60)
+            worker.recover_interrupted_task(tasks)
+            self.assertIsNone(worker.resume_task)
+        self.assertEqual((self.worker / 'shared.txt').read_text(), 'preserve this\n')
+
+    def test_released_and_reassigned_task_resumes_after_claiming(self):
+        self.repo.prepare(runner.branch_name(self.task))
+        (self.worker / 'shared.txt').write_text('saved scaffold\n')
+        task = {**self.task, 'status': 'open', 'claimable': True, 'version': 19}
+        tandem = Mock()
+        def call(tool, **arguments):
+            if tool == 'tandem_get_assignments':
+                return {'tasks': [task], 'pushBranch': 'main'}
+            if tool == 'tandem_claim_task':
+                return {'taskVersion': 20}
+            if tool == 'tandem_get_task':
+                return {**task, 'status': 'in_progress', 'version': 21}
+            return {'taskVersion': 21}
+        tandem.project_call.side_effect = call
+        worker = runner.Runner(tandem, self.repo, ['fake-agent'], 60)
+        worker.recover_interrupted_task([task])
+        self.assertEqual(worker.resume_task, task['id'])
+        with patch.object(worker, 'acknowledge_presence'), \
+                patch.object(worker, '_execute', return_value={'message': 'Done', 'progress': 'Verified'}) as execute:
+            self.assertEqual(worker.next_task(), task)
+            worker.work(task)
+        calls = [entry.args[0] for entry in tandem.project_call.call_args_list]
+        self.assertLess(calls.index('tandem_claim_task'), calls.index('tandem_update_task'))
+        execute.assert_called_once()
+        self.assertEqual((self.worker / 'shared.txt').read_text(), 'saved scaffold\n')
+
+    def test_main_allows_saved_edits_after_automatic_recovery(self):
+        self.repo.prepare(runner.branch_name(self.task))
+        self.git(self.worker, 'config', 'user.name', 'Test worker')
+        self.git(self.worker, 'config', 'user.email', 'worker@example.test')
+        (self.worker / 'shared.txt').write_text('interrupted edits\n')
+        for status in ('open', 'blocked', 'in_progress'):
+            with self.subTest(status=status), \
+                    patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'test-token'}), \
+                    patch.object(runner, 'Tandem') as tandem_class, \
+                    patch.object(runner.shutil, 'which', return_value='/usr/bin/git'), \
+                    patch.object(runner.Runner, 'run_once', return_value=True) as work:
+                tandem_class.return_value.call.return_value = {
+                    'agentId': 'agent', 'name': 'Agent', 'projects': [{'projectId': 'project'}]}
+                tandem_class.return_value.project_call.return_value = {
+                    'tasks': [{**self.task, 'status': status, 'claimable': True}], 'pushBranch': 'main'}
+                # Use real Git and real preflight; only the model execution and
+                # login lookup are substituted. No explicit --resume-task flag.
+                self.assertEqual(runner.main([
+                    '--project', 'project', '--repo', str(self.worker),
+                    '--agent-command', 'fake-agent', '--once',
+                ]), 0)
+                work.assert_called_once()
+        self.assertEqual((self.worker / 'shared.txt').read_text(), 'interrupted edits\n')
+
+    def test_restart_preserves_explicit_recovery_selection(self):
+        worker = runner.Runner(Mock(), self.repo, ['fake-agent'], 60, resume_task='selected-task')
+        worker.recover_interrupted_task([{**self.task, 'status': 'blocked'}])
+        self.assertEqual(worker.resume_task, 'selected-task')
 
     def test_conflict_is_resolved_by_agent_and_both_histories_preserved(self):
         branch = self.make_conflict()
@@ -328,13 +453,36 @@ class RunnerGitTests(unittest.TestCase):
         def edit(prompt):
             (self.worker / 'shared.txt').write_text('unfinished\n')
             return 0, 'Tests passed.'  # The runner must verify this claim itself.
-        with patch.object(worker, '_run_agent_with_keepalive', side_effect=edit), \
-             patch.object(worker, '_sandboxed_check', return_value=Mock(returncode=1, stdout='', stderr='failed')):
+        with patch.object(worker, '_run_agent_with_keepalive', side_effect=edit) as agent, \
+             patch.object(worker, '_sandboxed_check', return_value=Mock(returncode=1, stdout='', stderr='failed')) as checks:
             with self.assertRaisesRegex(runner.WorkBlocked, 'Verification failed'):
                 worker._execute(self.task)
+        self.assertEqual(agent.call_count, 2)  # Initial implementation plus one repair.
+        self.assertEqual(checks.call_count, 2)  # A second failure blocks without another retry.
         self.assertEqual(self.repo.git('rev-parse', 'HEAD'), before)
         self.assertTrue(self.repo.dirty())
         self.assertFalse(self.repo.exists(f'origin/{runner.branch_name(self.task)}'))
+
+    def test_failed_socket_check_gets_one_repair_then_sandboxed_reverification(self):
+        worker = runner.Runner(Mock(), self.repo, [], 60, verify_commands=[['npm', 'test']])
+        def edit(prompt):
+            if 'Runner verification failed' in prompt:
+                self.assertIn('in-process', prompt)
+                self.assertIn('Do not disable tests', prompt)
+                (self.worker / 'shared.txt').write_text('repaired handler tests\n')
+            else:
+                (self.worker / 'shared.txt').write_text('initial implementation\n')
+            return 0, 'Implementation checked.'
+        with patch.object(worker, '_run_agent_with_keepalive', side_effect=edit) as agent, \
+                patch.object(worker, '_sandboxed_check', side_effect=[
+                    Mock(returncode=1, stdout='', stderr='listen EPERM 127.0.0.1'),
+                    Mock(returncode=0),
+                ]) as checks:
+            worker._execute(self.task)
+        self.assertEqual(agent.call_count, 2)
+        self.assertEqual(checks.call_count, 2)
+        self.assertFalse(self.repo.dirty())
+        self.assertEqual((self.worker / 'shared.txt').read_text(), 'repaired handler tests\n')
 
     def test_resume_uses_saved_changes_only_on_the_matching_task_branch(self):
         branch = runner.branch_name(self.task)
@@ -389,6 +537,10 @@ class RunnerGitTests(unittest.TestCase):
                 self.assertEqual(policy['network']['allowedDomains'], [])
                 self.assertFalse(policy['network']['allowLocalBinding'])
                 self.assertFalse(policy['enableWeakerNestedSandbox'])
+                self.assertEqual(policy['seccomp'], {'applyPath': str(self.root / 'trusted-helper')})
+                self.assertIn(str(self.root / 'trusted-helper'), policy['filesystem']['allowRead'])
+                self.assertNotIn(str(Path.home()), policy['filesystem']['allowRead'])
+                self.assertFalse(policy['network']['allowAllUnixSockets'])
                 self.assertNotIn('TANDEM_AGENT_TOKEN', kw['env'])
                 self.assertNotIn('OPENAI_API_KEY', kw['env'])
                 self.assertNotIn('NPM_TOKEN', kw['env'])
@@ -396,7 +548,9 @@ class RunnerGitTests(unittest.TestCase):
                 self.assertNotEqual(kw['env']['HOME'], str(Path.home()))
                 return Mock(returncode=126, stdout='', stderr='sandbox denied')
             return actual_run(command, **kw)
-        with patch.object(runner.shutil, 'which', side_effect=lambda cmd, **kw: '/tmp/trusted-srt' if cmd == 'srt' else actual_which(cmd, **kw)), \
+        with patch.object(runner.sys, 'platform', 'linux'), \
+             patch.object(runner, 'linux_seccomp_helper', return_value=self.root / 'trusted-helper'), \
+             patch.object(runner.shutil, 'which', side_effect=lambda cmd, **kw: '/tmp/trusted-srt' if cmd == 'srt' else actual_which(cmd, **kw)), \
              patch.object(runner.subprocess, 'run', side_effect=run), \
              patch.dict(os.environ, {'TANDEM_AGENT_TOKEN': 'secret', 'OPENAI_API_KEY': 'secret', 'NPM_TOKEN': 'secret', 'NODE_OPTIONS': '--require malicious'}):
             result = worker._sandboxed_check(['npm', 'test'])

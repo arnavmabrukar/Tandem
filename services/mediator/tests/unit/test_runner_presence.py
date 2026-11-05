@@ -133,14 +133,100 @@ class RunnerPresenceTests(unittest.TestCase):
     def test_idle_poll_acknowledges_received_challenges_before_fetching_work(self):
         tandem = Mock()
         tandem.project_call.side_effect = [
-            {'presenceRequests': [{'id': 'check-1'}, {'id': 'check-2'}]}, {}, {}, {'tasks': []}]
+            {'presenceRequests': [{'id': 'check-1'}, {'id': 'check-2'}]}, {}, {}, {'tasks': []}, {'workerRequests': []}]
         runner = runner_module.Runner(tandem, Mock(), [], 60)
         self.assertIsNone(runner.next_task())
         self.assertEqual(tandem.project_call.call_args_list, [
             call('tandem_get_presence_requests'),
             call('tandem_acknowledge_presence', checkId='check-1'),
             call('tandem_acknowledge_presence', checkId='check-2'),
-            call('tandem_get_assignments')])
+            call('tandem_get_assignments'), call('tandem_get_worker_room_requests')])
+
+    def test_stopped_worker_finishes_current_task_then_acknowledges_idle_once(self):
+        tandem = Mock()
+        worker = runner_module.Runner(tandem, Mock(), [], 60)
+        current = {'id': 'current', 'status': 'in_progress'}
+        queued = {'id': 'next', 'status': 'open', 'claimable': True}
+        response = {'tasks': [current, queued], 'workerControl': {'id': 'stop-1', 'action': 'stop'}}
+        def project_call(tool, **arguments):
+            if tool == 'tandem_get_assignments': return response
+            if tool == 'tandem_acknowledge_worker_control': return {'acknowledged': True}
+            return {'workerRequests': []}
+        tandem.project_call.side_effect = project_call
+        with patch.object(worker, 'acknowledge_presence'):
+            self.assertEqual(worker.next_task(), current)
+            self.assertFalse(any(c.args[0] == 'tandem_acknowledge_worker_control' for c in tandem.project_call.call_args_list))
+            response['tasks'] = [queued]
+            self.assertIsNone(worker.next_task())
+            self.assertIsNone(worker.next_task())
+            acknowledgements = [c for c in tandem.project_call.call_args_list if c.args[0] == 'tandem_acknowledge_worker_control']
+            self.assertEqual(len(acknowledgements), 1)
+            response['workerControl'] = {'id': 'start-2', 'action': 'start'}
+            self.assertEqual(worker.next_task(), queued)
+        self.assertFalse(any(c.args[0] == 'tandem_claim_task' for c in tandem.project_call.call_args_list))
+
+    def test_idle_worker_answers_broadcast_with_authenticated_reply(self):
+        tandem = Mock()
+        tandem.project_call.return_value = {'workerRequests': [{'id': 'broadcast-1', 'taskId': None, 'message': 'What is your status?'}]}
+        worker = runner_module.Runner(tandem, Mock(), [], 60)
+        with patch.object(worker, '_run_agent_with_keepalive', return_value=(0, 'I am idle.')):
+            worker._answer_idle_requests()
+        tandem.project_call.assert_called_with('tandem_reply_worker_room_request', requestId='broadcast-1', body='I am idle.')
+
+    def test_started_worker_picks_only_ready_unassigned_work(self):
+        tandem = Mock()
+        ready = {'id': 'ready', 'status': 'open', 'claimable': True}
+        board = [dict(ready, id='blocked', claimable=False),
+                 dict(ready, id='assigned', assignedAgentId='other'),
+                 dict(ready, id='claimed', claimedByAgentId='other'),
+                 dict(ready, id='review', status='in_review'), ready]
+        def project_call(tool, **arguments):
+            if tool == 'tandem_get_assignments':
+                return {'tasks': [], 'workerControl': {'id': 'start', 'action': 'start'}}
+            if tool == 'tandem_list_tasks':
+                self.assertEqual(arguments, {'status': 'open'})
+                return {'tasks': board}
+            return {'acknowledged': True}
+        tandem.project_call.side_effect = project_call
+        worker = runner_module.Runner(tandem, Mock(), [], 60)
+        with patch.object(worker, 'acknowledge_presence'), patch.object(worker, 'work') as work:
+            self.assertTrue(worker.run_once())
+            work.assert_called_once_with(ready)
+
+    def test_started_worker_explains_board_blockers_in_reply_turn(self):
+        tandem = Mock()
+        blocked = {'id': 'qa', 'title': 'QA', 'status': 'open', 'claimable': False,
+                   'claimBlockers': ['Waiting for dependency Features (status: in_review)'],
+                   'humanMessage': 'PRIVATE'}
+        def project_call(tool, **arguments):
+            if tool == 'tandem_get_assignments':
+                return {'tasks': [], 'workerControl': {'id': 'start', 'action': 'start'}}
+            if tool == 'tandem_list_tasks': return {'tasks': [blocked]}
+            if tool == 'tandem_get_worker_room_requests':
+                return {'workerRequests': [{'id': 'question', 'message': 'Claim work'}]}
+            return {'acknowledged': True}
+        tandem.project_call.side_effect = project_call
+        worker = runner_module.Runner(tandem, Mock(), [], 60)
+        with patch.object(worker, 'acknowledge_presence'), patch.object(
+                worker, '_run_agent_with_keepalive', return_value=(0, 'Awaiting review.')) as answer:
+            self.assertIsNone(worker.next_task())
+        prompt = answer.call_args.args[0]
+        self.assertIn(blocked['claimBlockers'][0], prompt)
+        self.assertIn('Worker control: "start"', prompt)
+        self.assertIn('this restriction applies only to this reply turn', prompt)
+        self.assertNotIn('PRIVATE', prompt)
+
+    def test_no_start_or_stopped_worker_does_not_take_unassigned_work(self):
+        for control in (None, {'id': 'stop', 'action': 'stop'}):
+            with self.subTest(control=control):
+                tandem = Mock()
+                tandem.project_call.side_effect = lambda tool, **kwargs: (
+                    {'tasks': [], 'workerControl': control} if tool == 'tandem_get_assignments'
+                    else {'workerRequests': [], 'acknowledged': True})
+                worker = runner_module.Runner(tandem, Mock(), [], 60)
+                with patch.object(worker, 'acknowledge_presence'):
+                    self.assertIsNone(worker.next_task())
+                self.assertNotIn('tandem_list_tasks', [c.args[0] for c in tandem.project_call.call_args_list])
 
     def test_no_pending_challenge_produces_no_acknowledgement(self):
         tandem = Mock()

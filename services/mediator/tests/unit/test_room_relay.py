@@ -9,10 +9,12 @@ from mediator.schemas.room import RoomMessageRequest
 
 
 class RoomRelayTests(unittest.TestCase):
-    def _post(self, target_available=True, mentioned=False, target_agent_id='agent-1', multiple_active=False):
+    def _post(self, target_available=True, mentioned=False, target_agent_id='agent-1', multiple_active=False, broadcast=False):
         project_id, user_id, task_id, exchange_id = (uuid4() for _ in range(4))
         human_text = ('Ask @My Codex for an update. My private note is SECRET.' if mentioned else
                       'Ask My Codex for an update. My private note is SECRET.')
+        if broadcast:
+            human_text = '@everyone please report status. My private note is SECRET.'
         row = {'id': exchange_id, 'body': human_text, 'state': 'pending'}
         target = {'agent_id': target_agent_id, 'agent_name': 'My Codex', 'status': 'in_progress'}
         tasks = [{'id': str(task_id), 'title': 'Current task', 'agent_id': 'agent-1',
@@ -42,12 +44,23 @@ class RoomRelayTests(unittest.TestCase):
                        'requestPresence': False, 'cancelTaskIds': []}
         with patch.object(room, '_transaction', return_value=nullcontext(conn)), \
              patch.object(room, '_authorize', return_value=({'name': 'Project'}, 'owner', 'Human')), \
-             patch.object(room, '_context', return_value={'tasks': tasks}), \
+             patch.object(room, '_context', return_value={'tasks': tasks, 'agents': [
+                 {'id': 'agent-1', 'name': 'My Codex'}, {'id': 'agent-2', 'name': 'Idle Claude'}]}), \
              patch.object(room, '_history', return_value=[row]), \
              patch.object(room, '_public', side_effect=lambda value: value), \
              patch.object(room, 'generate_plan', return_value=model_reply):
             result = room.post_message(project_id, RoomMessageRequest(operationId=uuid4(), body=human_text), user_id=user_id)
         return result, saved, human_text, str(task_id)
+
+    def test_everyone_creates_separate_private_requests_for_active_and_idle_agents(self):
+        _, saved, human_text, task_id = self._post(broadcast=True)
+        requests = saved['workerRequests']
+        self.assertEqual([item['agentId'] for item in requests], ['agent-1', 'agent-2'])
+        self.assertEqual(requests[0]['taskId'], task_id)
+        self.assertIsNone(requests[1]['taskId'])
+        self.assertNotEqual(requests[0]['id'], requests[1]['id'])
+        self.assertNotIn('SECRET', str(requests))
+        self.assertNotIn(human_text, str(requests))
 
     def test_valid_target_receives_only_mediator_written_request(self):
         result, saved, human_text, task_id = self._post()

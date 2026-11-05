@@ -22,7 +22,14 @@ class ClearRoomRequest(BaseModel):
     throughId: UUID
 
 
+class RoomAssignment(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    taskId: UUID
+    agentId: UUID
+
+
 class RoomReply(PlanChatResponse):
+    assignments: list[RoomAssignment] = Field(default_factory=list, max_length=20)
     requestPresence: bool = False
     # The mediator writes a separate, scoped request for the worker. The human
     # room message itself is never exposed through MCP.

@@ -255,7 +255,7 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, connectNo
         <CommandBox text={installCommand} label="Copy download and start command" disabled={!ready} {...commandPlatform} />
         <p className="trust-note">This downloads Tandem’s worker script to your Downloads folder and runs it as you. It keeps its own copy of your repository under <code>~/.local/share/tandem</code>, runs your agent CLI on approved tasks, and pushes only to <code>{branch}</code>. Use it only on projects whose members you trust. <a href="/downloads/tandem_runner.py" target="_blank" rel="noreferrer">Open the script</a> to read it first.</p>
         <p>Wait until the terminal shows <code>Tandem agent token (hidden, not saved):</code>. Leave it open and continue to the next step.</p>
-        <p className="small muted">Startup blocked by uncommitted changes or “Use a clean, dedicated clone”? Open the <button type="button" className="text-button" onClick={() => { setTab('reconnect'); document.getElementById('setup-reconnect-tab')?.focus(); }}>Reconnecting tab</button> and choose the unfinished task under Resume saved task changes.</p>
+        <p className="small muted">Interrupted work resumes automatically when still assigned to this agent. If saved changes cannot be matched, open the <button type="button" className="text-button" onClick={() => { setTab('reconnect'); document.getElementById('setup-reconnect-tab')?.focus(); }}>Reconnecting tab</button> for manual recovery.</p>
       </section>
     </>}
     {workerStep === 3 && <>
@@ -324,7 +324,7 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, connectNo
       if (selected) setEngine(selected.client === 'Claude Code' ? 'claude' : selected.client === 'Codex' ? 'codex' : 'custom');
     }}><option value="">Select an agent</option>{ownedAgents.map(candidate =>
       <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></Field>}
-    <p>Reuse this agent’s saved token at the hidden terminal prompt, then press Enter. Tandem cannot show the token again. You do not need to reconnect MCP.</p>
+    <p>Reuse this agent’s saved token at the hidden prompt after running the restart command below, then press Enter. The worker automatically resumes its interrupted task and preserves saved edits when that task is still assigned to this agent. You do not need to reconnect MCP.</p>
     {workerAgent ? <><p>Lost the token? Generate a replacement below. The previous token will stop working.</p>
       <AgentTokenButton project={project} agent={workerAgent} buttonLabel="Generate replacement token" />
       <WorkerStatus agent={workerAgent} /></>
@@ -332,7 +332,7 @@ function WorkerSetup({ project, agent, url, initialClient, roomPrompt, connectNo
     <CommandBox text={installCommand} label="Copy download and start command" disabled={!ready || !workerAgent} {...commandPlatform} />
     <p className="small muted">Downloads the latest worker script, then restarts it with your token and saved workspace.</p>
     {!ready && <p className="small muted">Complete the worker settings in First-time setup to enable copying.</p>}
-    <h3>Resume saved task changes</h3>
+    <h3>Manual recovery (if automatic resume cannot match the task)</h3>
     <p><strong>Saved changes:</strong> “Worker workspace has uncommitted changes” (or the older “Use a clean, dedicated clone” message) means the worker found saved edits. With the command above, these are in its separate agent worktree, even when your terminal is open in another folder. The latest runner shows the exact path; run <code>git status</code> in that folder to inspect it. Do not delete or reset unfinished work.</p>
     <p>Select the task that owns those edits below, then copy and run its resume command. Paste your token when prompted and press Enter; the token stays hidden. On Windows, run the command in Ubuntu / WSL 2.</p>
     {workerAgent ? <>
@@ -407,6 +407,7 @@ export function AgentOAuthSetup({ project, agent, onClose }: {
   const url = discovery.data;
   const roomPrompt = `Use Tandem for project ${project.id}.
 Confirm access with tandem_whoami. Fetch tandem_get_assignments and summarize ready work and blockers.
+Respect workerControl from tandem_get_assignments: stop means finish current work and claim no new tasks until start. Acknowledge the control with tandem_acknowledge_worker_control only when ready or idle.
 Check tandem_get_presence_requests; acknowledge returned IDs with tandem_acknowledge_presence. Repeat between tasks.
 Check tandem_get_worker_room_requests between task steps. Answer mediator-relayed questions addressed to you with tandem_reply_worker_room_request, using the same request ID. Human room messages remain private.
 Before claiming work, read repo instructions, git status, the approved contract and dependencies. Preserve others’ changes and report progress, questions, tests and blockers through Tandem. Retry the same write with its original operation ID.

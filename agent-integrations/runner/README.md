@@ -17,6 +17,19 @@ If anything fails, the task moves to `blocked` with the reason. A person reviews
 published commit and clicks **Accept work**, which lets the tasks that depend on it start. Polling
 also keeps the agent showing Online, including during long runs.
 
+### Room commands
+
+Send `/stop @Agent Name` to finish the current task and then stop claiming work.
+The authenticated worker posts “I'm idle” once it has finished. Send
+`/start @Agent Name` to resume assigned work or claim ready, unassigned tasks.
+Approved scope and dependencies still apply: accept prerequisite work before
+dependent tasks can start. Both commands require an exact
+project agent name or `@everyone`. Controls persist across clearing chat and
+restarting a worker; they do not launch a stopped terminal process. Updated
+workers keep checking in while idle and answer mediator-relayed questions.
+Use `@everyone your question` to queue a separate mediator message for each
+eligible project agent. The original human conversation remains private.
+
 The runner records Implementing, Verifying, Committing and Pushing progress in the
 task. The project room displays that recorded progress separately from Online status.
 Status replies do not invent completion estimates.
@@ -35,6 +48,10 @@ with `CI=true`. These commands run only through Anthropic Sandbox Runtime (`srt`
 The same verification boundary applies to Codex, Claude and custom agents. Install
 the pinned runtime with `npm install -g @anthropic-ai/sandbox-runtime@0.0.81`;
 Linux also needs bubblewrap and socat. The runner never installs these automatically.
+For Linux/WSL user-local npm installations, verification grants read/execute access
+to the pinned runtime's exact bundled `apply-seccomp` helper. It does not grant
+access to the home directory or npm prefix. Missing or non-executable helpers stop
+verification with a reinstall instruction.
 
 Verification has an ephemeral HOME/cache, an allowlisted environment without host
 credentials, no network or local sockets, read access to the project and required
@@ -43,7 +60,12 @@ directory. Git metadata and environment files are protected. User sandbox settin
 and repository files cannot broaden the policy. Missing or unsupported runtimes,
 denied access, and failed checks stop publication; there is no host-side fallback.
 Checks needing browser networking or other denied access stay blocked for review.
-The runner keeps checking in while sandboxed checks run.
+The runner keeps checking in while sandboxed checks run. If a project check fails,
+the coding agent gets one repair turn with the failure output, followed by another
+verification under the same policy. Missing infrastructure never triggers host-side
+execution. On macOS, tests cannot bind localhost ports; use in-process HTTP handler
+tests with equivalent route, body, header, status and method assertions. The agent
+must not skip or weaken coverage. A repeated failure stays blocked with edits saved.
 For browser checks, Python projects or other commands, use **Verification (optional)**
 in worker setup, or repeat `--verify-command 'command arguments'` on the command line.
 Explicit commands replace automatic npm checks and use the same sandbox. Commands
@@ -55,7 +77,14 @@ filters, and custom merge drivers are disabled for runner-owned Git operations.
 Changes needing content filters (such as Git LFS) block for manual review rather
 than silently publishing data in a different format.
 
-To recover saved edits from an older runner that blocked on committing, stop that
+Restarting the runner automatically resumes its saved task branch when it matches
+one blocked, active, or claimable open task assigned to the authenticated agent.
+Released and reassigned open tasks are claimed again before work resumes. Saved edits
+are preserved. Work awaiting review, reassigned tasks, and unrelated changes are
+never automatically resumed. Recovery makes one attempt per startup, so a failing
+task does not enter an endless retry loop.
+
+To explicitly recover saved edits from an older runner that blocked on committing, stop that
 runner, download the updated script, and append `--resume-task <task-id>` to its
 startup command. The task must still be assigned to the authenticated agent and
 blocked or active. Only dirty files on that task's own branch may be resumed. The
