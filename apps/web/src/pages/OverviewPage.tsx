@@ -289,7 +289,7 @@ export function OverviewPage({ projects }: { projects: Project[] }) {
                         to={
                           event.taskId
                             ? `/projects/${project.id}/tasks/${event.taskId}`
-                            : `/projects/${project.id}/activity`
+                            : `/projects/${project.id}/overview`
                         }
                       >
                         <span className="side-row-text">

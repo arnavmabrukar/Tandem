@@ -43,8 +43,27 @@ function StatusRow({ title, detail, badge, children }: {
 const linkState = (data: GitHubConnection) =>
   data.connected ? 'linked' : data.login ? 'expired' : 'unlinked';
 
-// The check at the top of Create project. Linking itself lives in Settings.
+const githubSettings = '/settings/user?section=github';
+const returnKey = (userId: string, state: string) => `tandem:github-return:${userId}:${state}`;
+
+function useConnectGitHub(returnTo: '/projects/new' | typeof githubSettings) {
+  const { api, user } = useSession();
+  return useMutation({
+    mutationFn: () => api.connectGitHub(),
+    onSuccess: ({ url }) => {
+      // Keep navigation separate from OAuth validation, which stays on the server.
+      // Bind the destination to this account and authorization attempt in this tab.
+      const state = new URL(url).searchParams.get('state');
+      if (state && user) {
+        try { sessionStorage.setItem(returnKey(user.id, state), returnTo); } catch { /* Storage may be disabled. */ }
+      }
+      window.location.assign(url);
+    },
+  });
+}
+
 export function GitHubLinkStatus({ query }: { query: UseQueryResult<GitHubConnection> }) {
+  const connect = useConnectGitHub('/projects/new');
   if (query.isPending) return <StatusRow title={<span role="status">Checking GitHub account…</span>} />;
   if (!query.data) return <ErrorNotice error={query.error} retry={() => void query.refetch()} />;
   const { login } = query.data;
@@ -56,44 +75,52 @@ export function GitHubLinkStatus({ query }: { query: UseQueryResult<GitHubConnec
         detail="GitHub account linked to Tandem"
         badge={{ text: 'Linked', tone: 'approved' }}
       >
-        <Button asChild variant="ghost" size="sm"><Link to="/settings">Manage</Link></Button>
+        <Button asChild variant="ghost" size="sm"><Link to={githubSettings}>Manage</Link></Button>
       </StatusRow>
     );
   }
   return (
-    <StatusRow
+    <><StatusRow
       title={state === 'expired' ? <>Link to <code>{login}</code> expired</> : 'No GitHub account linked'}
       detail={state === 'expired'
         ? 'Reconnect GitHub to see your repositories.'
         : 'Link your GitHub account to see your repositories.'}
     >
-      <Button asChild size="sm">
-        <Link to="/settings">{state === 'expired' ? 'Reconnect in Settings' : 'Link in Settings'}</Link>
+      <Button type="button" size="sm" disabled={connect.isPending} onClick={() => connect.mutate()}>
+        {connect.isPending ? 'Opening GitHub…' : state === 'expired' ? 'Reconnect GitHub' : 'Connect GitHub'}
       </Button>
     </StatusRow>
+    <ErrorNotice error={connect.error} /></>
   );
 }
 
 // The Settings panel, and the page GitHub returns to after authorization.
 export function GitHubConnectionPanel() {
-  const { api } = useSession();
+  const { api, user } = useSession();
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const completed = useRef(false);
   const query = useGitHubConnection();
-  const connect = useMutation({
-    mutationFn: () => api.connectGitHub(),
-    onSuccess: ({ url }) => { window.location.assign(url); },
-  });
+  const connect = useConnectGitHub(githubSettings);
   const finish = useMutation({
     mutationFn: ({ code, state }: { code: string; state: string }) => api.completeGitHub(code, state),
-    onSuccess: async () => {
+    onSuccess: async (_, { state }) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['github-connection'] }),
         queryClient.invalidateQueries({ queryKey: ['github-accounts'] }),
         queryClient.invalidateQueries({ queryKey: ['github-repos'] }),
       ]);
+      let returnTo = githubSettings;
+      if (user) {
+        try {
+          const key = returnKey(user.id, state);
+          // Only the fixed Create project destination is accepted from browser storage.
+          if (sessionStorage.getItem(key) === '/projects/new') returnTo = '/projects/new';
+          sessionStorage.removeItem(key);
+        } catch { /* Fall back to GitHub account settings. */ }
+      }
+      navigate(returnTo, { replace: true });
     },
   });
   useEffect(() => {
@@ -101,7 +128,7 @@ export function GitHubConnectionPanel() {
     if (!params.has('github_state') || completed.current) return;
     completed.current = true;
     // Remove the single-use authorization code from browser history immediately.
-    navigate('/settings', { replace: true });
+    navigate(githubSettings, { replace: true });
     finish.mutate({ code: params.get('github_code') ?? '', state: params.get('github_state') ?? '' });
   }, [location.search]);
 

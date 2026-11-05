@@ -1,6 +1,5 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
-  Activity,
   Bot,
   ChevronsUpDown,
   ListChecks,
@@ -53,7 +52,7 @@ export function AppLayout({
   const id = creating ? undefined : project?.id;
   const pendingApprovals = project?.approvals.filter((a) => a.status === 'pending') ?? [];
   const pending = pendingApprovals.length;
-  // Contract approvals live in the Scope stage and result reviews in Review, as on the Activity page.
+  // Contract approvals live in the Scope stage and result reviews in Review, as on Overview.
   const approvalStage = pendingApprovals.some((a) => a.action === 'Approve contract')
     ? 'scope'
     : 'review';
@@ -74,7 +73,6 @@ export function AppLayout({
     const section = path.split('/')[3];
     const names: Record<string, string> = {
       overview: 'Overview',
-      activity: 'Activity',
       workflow: 'Workflow',
       tasks: 'Workflow',
       plans: 'Workflow',
@@ -86,7 +84,6 @@ export function AppLayout({
   })();
   const accountPage = ['/invitations', '/settings', '/settings/user'].includes(location.pathname);
   const nav = [
-    { to: 'activity', text: 'Activity', icon: Activity },
     { to: 'workflow', text: 'Workflow', icon: ListChecks },
     { to: 'agents', text: 'Meta Mediator', icon: Bot },
   ];

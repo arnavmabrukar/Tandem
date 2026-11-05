@@ -138,7 +138,10 @@ function Dashboard() {
               path="/invitations"
               element={<InvitationsPage key={user.id} />}
             />
-            <Route path="/settings" element={<SettingsPage key={user.id} project={contextProject} />} />
+            {/* Older backend callbacks still return here; GitHub now lives in User settings. */}
+            <Route path="/settings" element={new URLSearchParams(location.search).has('github_state')
+              ? <Navigate to={`/settings/user${location.search}`} replace />
+              : <SettingsPage key={user.id} project={contextProject} />} />
             <Route path="/settings/user" element={<SettingsPage key={`user:${user.id}`} project={null} userOnly />} />
             <Route path="/projects/new" element={<ProjectSetupPage key="new" project={null} />} />
             {query.data && !accessDenied ? (
@@ -155,11 +158,11 @@ function Dashboard() {
                   }
                 />
                 <Route path="/projects/:projectId/overview"
-                  element={project ? <ActivityPage key={project.id} project={project} overview /> : notFound} />
+                  element={project ? <ActivityPage key={project.id} project={project} /> : notFound} />
                 <Route
                   path="/projects/:projectId/activity"
                   element={
-                    project ? <ActivityPage key={project.id} project={project} /> : notFound
+                    project ? <Navigate to={`/projects/${project.id}/overview`} replace /> : notFound
                   }
                 />
                 <Route path="/projects/:projectId/workflow"
